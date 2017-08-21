@@ -7,20 +7,22 @@ type constT = bits(24)
 type wordT  = bits(32)
 type memT   = wordT -> byteT
 
-construct funcT {fAdd,
-                 fAddWithCarry, -- Same as fAdd, but +1 if carry flag set
-                 fSub,
-                 fCarry, fOverflow, -- Get flags, overflow set by both add and sub
+construct funcT {
+  fAdd,
+  fAddWithCarry, -- Same as fAdd, but +1 if carry flag set
+  fSub,
+  fCarry, fOverflow, -- Get flags, overflow set by both add and sub
 
-                 -- Multiplication, same as RISC-V (copy them from there?)
-                 fLongMul, fLongMulH, fLongHulHSigned,
+  -- Multiplication, same as RISC-V (copy them from there?)
+  fLongMul, fLongMulH, fLongHulHSigned,
 
-                 -- Bit operations
-                 fAnd, fOr, fXor,
+  -- Bit operations
+  fAnd, fOr, fXor,
 
-                 -- Cmp
-                 fEqual, fLess, fLower,
-                 fReserved}
+  -- Cmp
+  fEqual, fLess, fLower,
+  fReserved
+}
 
 construct shiftT {shiftLL, shiftLR, shiftAR, shiftRor, shiftReserved}
 
@@ -114,8 +116,7 @@ wordT shift (shiftOp::shiftT, a::wordT, b::wordT) =
      case shiftReserved => 0
    }
 
-unit incPC () =
-   PC <- PC + 4
+unit incPC () = PC <- PC + 4
 
 -- Common functionality
 unit norm (func::funcT, wback::bool, strobe::bool, w::regT, a::wordT, b::wordT) = {
@@ -128,7 +129,7 @@ unit norm (func::funcT, wback::bool, strobe::bool, w::regT, a::wordT, b::wordT) 
 wordT ri2word (ri::reg_immT) =
   match ri {
     case Reg (i) => R (i)
-    case Imm (v) => SignExtend (v)
+    case Imm (v) => ZeroExtend (v)
   }
 
 ---------------------------------------------
@@ -136,7 +137,7 @@ wordT ri2word (ri::reg_immT) =
 ---------------------------------------------
 
 define LoadConstant (reg::regT, imm::constT) = {
-   R(reg) <- SignExtend (imm);
+   R(reg) <- ZeroExtend (imm);
    incPC ()
 }
 
@@ -182,10 +183,10 @@ define LoadDM (w::regT, a::reg_immT) = {
 
   if aV <=+ lastDMAddr then {
     alignedAddr = aV<31:2> : (0::bits(2));
-    R(w) <- DM(alignedAddr + 3) : DM(alignedAddr + 2) : DM(alignedAddr + 1) : DM(alignedAddr)
-  } else {
-    R(w) <- 0
-  };
+    R(w) <- DM(alignedAddr + 3) : DM(alignedAddr + 2) :
+            DM(alignedAddr + 1) : DM(alignedAddr)
+  } else
+    R(w) <- 0;
 
   incPC ()
 }
@@ -193,7 +194,7 @@ define LoadDM (w::regT, a::reg_immT) = {
 define LoadDMByte (w::regT, a::reg_immT) = {
   aV = ri2word (a);
   if aV <=+ lastDMAddr then
-    R(w) <- SignExtend (DM(aV))
+    R(w) <- ZeroExtend (DM(aV))
   else
     R(w) <- 0;
   incPC ()
@@ -216,20 +217,18 @@ define Jump (func::funcT, w::regT, a::reg_immT) = {
    R(w) <- PC1
 }
 
-define JumpIfZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) = {
+define JumpIfZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) =
    if ALU (func, ri2word (a), ri2word (b)) == 0 then
      PC <- PC + (ri2word (w))
    else
      incPC ()
-}
 
 -- TODO: Redundant? Just flip JumpIfZero branches?
-define JumpIfNotZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) = {
+define JumpIfNotZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) =
    if ALU (func, ri2word (a), ri2word (b)) <> 0 then
      PC <- PC + (ri2word (w))
    else
      incPC ()
-}
 
 -- Do nothing, do not want the original definition:
 --
@@ -244,21 +243,19 @@ define Run
 -- Decode
 ---------------------------------------------
 
-reg_immT DecodeReg_imm (flag::bits(1), v::bits(6)) = {
+reg_immT DecodeReg_imm (flag::bits(1), v::bits(6)) =
   if flag == 0 then
     Reg (v)
   else
     Imm (v)
-}
 
 instruction Decode (opc::wordT) =
    match opc {
-      case 'RIw`1 RIwV 1 const`24' => {
+      case 'RIw`1 RIwV 1 const`24' =>
         if RIw == 1 then
           LoadConstant (RIwV, const)
         else
           ReservedInstr
-      }
 
       case 'RIw`1 RIwV 0 RIa`1 RIaV RIb`1 RIbV OpArg Op' => {
         w = DecodeReg_imm (RIw, RIwV);
@@ -268,11 +265,11 @@ instruction Decode (opc::wordT) =
         shift = [OpArg`4] :: shiftT;
 
         match Op {
-	  case 9 => JumpIfZero (func, w, a, b)
+          case 9 => JumpIfZero (func, w, a, b)
           case 10 => JumpIfNotZero (func, w, a, b)
 
           -- Instructions where only RIw = reg makes sense
-          case _ => {
+          case _ =>
             match w {
               case Imm (_) => ReservedInstr
               case Reg (wi) =>
@@ -291,28 +288,24 @@ instruction Decode (opc::wordT) =
 
                   case _ => ReservedInstr
                 }
-              }
             }
-          }
         }
       }
+   }
 
 ---------------------------------------------
 -- Next State
 ---------------------------------------------
 
-unit Next = {
-   if Reset then {
-      PC <- 0
-   } else {
-      when PC <=+ lastIMAddr do {
-        alignedAddr = PC<31:2> : (0::bits(2));
-        i = Decode (IM (PC + 3) : IM (PC + 2) : IM (PC + 1) : IM (PC));
-        -- NOTE: "Do nothing" if unknown instruction
-        when i <> ReservedInstr do Run (i)
-      }
-   }
-}
+unit Next =
+  if Reset then
+    PC <- 0
+  else
+    when PC <=+ lastIMAddr do {
+      alignedAddr = PC<31:2> : (0::bits(2));
+      Run (Decode (IM (alignedAddr + 3) : IM (alignedAddr + 2) :
+                   IM (alignedAddr + 1) : IM (alignedAddr)))
+    }
 
 ---------------------------------------------
 -- Encode
@@ -324,13 +317,11 @@ bits(7) ri2bits (ri::reg_immT) =
     case Imm (v) => 1::bits(1) : v
   }
 
-wordT enc (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT, opc::bits(6)) = {
-   return (ri2bits (w) : '0' : ri2bits (a) : ri2bits (b) : [func]`4 : opc)
-}
+wordT enc (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT, opc::bits(6)) =
+   ri2bits (w) : '0' : ri2bits (a) : ri2bits (b) : [func]`4 : opc
 
-wordT encShift (shift::shiftT, w::reg_immT, a::reg_immT, b::reg_immT, opc::bits(6)) = {
-   return (ri2bits (w) : '0' : ri2bits (a) : ri2bits (b) : [shift]`4 : opc)
-}
+wordT encShift (shift::shiftT, w::reg_immT, a::reg_immT, b::reg_immT, opc::bits(6)) =
+   ri2bits (w) : '0' : ri2bits (a) : ri2bits (b) : [shift]`4 : opc
 
 wordT Encode (i::instruction) =
    match i {
@@ -352,46 +343,50 @@ wordT Encode (i::instruction) =
       case _ => 0b111111
    }
 
+{-----------------------------------------------------------------------------
+
 ---------------------------------------------
 -- Load into Instruction Memory
 ---------------------------------------------
 
---unit LoadIM (a::wordT, i::instruction list) measure Length (i) =
---   match i
---   {
---      case Nil => nothing
---      case h @ t =>
---        {
---           IM(a) <- Encode (h);
---           LoadIM (a + 1, t)
---        }
---   }
+unit LoadIM (a::wordT, i::instruction list) measure Length (i) =
+   match i
+   {
+      case Nil => nothing
+      case h @ t =>
+        {
+           IM(a) <- Encode (h);
+           LoadIM (a + 1, t)
+        }
+   }
 
 ---------------------------------------------
 -- Initialization & testing
 ---------------------------------------------
 
---unit initialize (p::instruction list) =
---{
---   Reset <- false;
---   PC <- 0;
---   R <- InitMap (0);
---   DM <- InitMap (0);
----- InRdy <- false;
----- InData <- 0;
---   OutStrobe <- 0;
---   IM <- InitMap (Encode (ReservedInstr));
---   LoadIM (0, p)
---}
+unit initialize (p::instruction list) =
+{
+   Reset <- false;
+   PC <- 0;
+   R <- InitMap (0);
+   DM <- InitMap (0);
+-- InRdy <- false;
+-- InData <- 0;
+   OutStrobe <- 0;
+   IM <- InitMap (Encode (ReservedInstr));
+   LoadIM (0, p)
+}
 
---instruction list test_prog =
---   list {
---      LoadConstant (0, 0),
---      LoadConstant (1, 1000),
---      LoadConstant (2, 1010),
---      LoadConstant (3, 4),
---      StoreDM (fINC, noShift, skipNever, 1, 1, 1),
---      Normal (fXOR, noShift, skipZero, 4, 1, 2),
---      Jump (fADD, noShift, 4, 3, 0),
---      Out (fADD, noShift, skipNever, 1, 1, 0)
---   }
+instruction list test_prog =
+   list {
+      LoadConstant (0, 0),
+      LoadConstant (1, 1000),
+      LoadConstant (2, 1010),
+      LoadConstant (3, 4),
+      StoreDM (fINC, noShift, skipNever, 1, 1, 1),
+      Normal (fXOR, noShift, skipZero, 4, 1, 2),
+      Jump (fADD, noShift, 4, 3, 0),
+      Out (fADD, noShift, skipNever, 1, 1, 0)
+   }
+
+-----------------------------------------------------------------------------}
