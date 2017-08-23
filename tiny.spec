@@ -3,7 +3,6 @@
 ---------------------------------------------
 
 type byteT  = bits(8)
-type constT = bits(24)
 type wordT  = bits(32)
 type memT   = wordT -> byteT
 
@@ -40,9 +39,9 @@ declare {
 
    PC :: wordT          -- Program Counter
    R :: regT -> wordT   -- Registers
-   IM :: memT           -- Instruction Memory
-   DM :: memT           -- Data Memory, byte-addressed as required by the CakeML compiler,
-                        -- and words stored in little-endian format
+   MEM :: memT          -- Main Memory, byte-addressed as required by the
+                        -- CakeML compiler, and words stored in little-endian
+                        -- format
 
    CarryFlag :: bool    -- Carry bit, from ALU add
    OverflowFlag :: bool -- Overflow bit, from ALU add and sub
@@ -58,8 +57,7 @@ declare {
 -- Architecture parameters
 
    f :: wordT -> wordT  -- Function computed by accelerator
-   lastIMAddr :: wordT  -- All IM addresses above this contain zero
-   lastDMAddr :: wordT  -- All DM addresses above this contain zero
+   lastMemAddr :: wordT -- All MEM addresses above this contain zero
 }
 
 ---------------------------------------------
@@ -75,7 +73,7 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
        ret
      }
      case fAddWithCarry => {
-      ret = a + b + [CarryFlag]::bits(32);
+      ret = a + b + [CarryFlag]`32;
       CarryFlag <- 0n2**0n32 <= [a]::nat + [b]::nat + [CarryFlag]::nat;
       OverflowFlag <- [ret]::int <> [a]::int + [b]::int + [CarryFlag]::int;
       ret
@@ -129,15 +127,21 @@ unit norm (func::funcT, wback::bool, strobe::bool, w::regT, a::wordT, b::wordT) 
 wordT ri2word (ri::reg_immT) =
   match ri {
     case Reg (i) => R (i)
-    case Imm (v) => ZeroExtend (v)
+    case Imm (v) => SignExtend (v)
   }
 
 ---------------------------------------------
 -- Instructions
 ---------------------------------------------
 
-define LoadConstant (reg::regT, imm::constT) = {
-   R(reg) <- ZeroExtend (imm);
+define LoadUpperConstant (reg::regT, imm::bits(9)) = {
+   R(reg)<31:23> <- imm;
+   incPC ()
+}
+
+define LoadConstant (reg::regT, negate::bool, imm::bits(23)) = {
+   v = ZeroExtend (imm);
+   R(reg) <- if negate then -v else v;
    incPC ()
 }
 
@@ -153,48 +157,48 @@ define Shift (shiftOp::shiftT, w::regT, a::reg_immT, b::reg_immT) = {
 -- word IO addresses must be word-aliged, and non-aliged addresses are rounded down
 -- to the closest aligned address.
 
-define StoreDM (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
+define StoreMEM (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
   aV = ri2word (a);
   bV = ri2word (b);
 
-  when bV <=+ lastDMAddr do {
-    alignedAddr = bV<31:2> : (0::bits(2));
-    DM(alignedAddr) <- aV<7:0>;
-    DM(alignedAddr + 1) <- aV<15:8>;
-    DM(alignedAddr + 2) <- aV<23:16>;
-    DM(alignedAddr + 3) <- aV<31:24>
+  when bV <=+ lastMemAddr do {
+    alignedAddr = bV<31:2> : 0`2;
+    MEM(alignedAddr) <- aV<7:0>;
+    MEM(alignedAddr + 1) <- aV<15:8>;
+    MEM(alignedAddr + 2) <- aV<23:16>;
+    MEM(alignedAddr + 3) <- aV<31:24>
   };
 
   norm (func, true, false, w, aV, bV)
 }
 
-define StoreDMByte (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
+define StoreMEMByte (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
   aV = ri2word (a);
   bV = ri2word (b);
 
-  when bV <=+ lastDMAddr do
-    DM(bV) <- aV<7:0>;
+  when bV <=+ lastMemAddr do
+    MEM(bV) <- aV<7:0>;
 
   norm (func, true, false, w, aV, bV)
 }
 
-define LoadDM (w::regT, a::reg_immT) = {
+define LoadMEM (w::regT, a::reg_immT) = {
   aV = ri2word (a);
 
-  if aV <=+ lastDMAddr then {
-    alignedAddr = aV<31:2> : (0::bits(2));
-    R(w) <- DM(alignedAddr + 3) : DM(alignedAddr + 2) :
-            DM(alignedAddr + 1) : DM(alignedAddr)
+  if aV <=+ lastMemAddr then {
+    alignedAddr = aV<31:2> : 0`2;
+    R(w) <- MEM(alignedAddr + 3) : MEM(alignedAddr + 2) :
+            MEM(alignedAddr + 1) : MEM(alignedAddr)
   } else
     R(w) <- 0;
 
   incPC ()
 }
 
-define LoadDMByte (w::regT, a::reg_immT) = {
+define LoadMEMByte (w::regT, a::reg_immT) = {
   aV = ri2word (a);
-  if aV <=+ lastDMAddr then
-    R(w) <- ZeroExtend (DM(aV))
+  if aV <=+ lastMemAddr then
+    R(w) <- ZeroExtend (MEM(aV))
   else
     R(w) <- 0;
   incPC ()
@@ -219,14 +223,14 @@ define Jump (func::funcT, w::regT, a::reg_immT) = {
 
 define JumpIfZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) =
    if ALU (func, ri2word (a), ri2word (b)) == 0 then
-     PC <- PC + (ri2word (w))
+     PC <- PC + ri2word (w)
    else
      incPC ()
 
 -- TODO: Redundant? Just flip JumpIfZero branches?
 define JumpIfNotZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) =
    if ALU (func, ri2word (a), ri2word (b)) <> 0 then
-     PC <- PC + (ri2word (w))
+     PC <- PC + ri2word (w)
    else
      incPC ()
 
@@ -251,11 +255,10 @@ reg_immT DecodeReg_imm (flag::bits(1), v::bits(6)) =
 
 instruction Decode (opc::wordT) =
    match opc {
-      case 'RIw`1 RIwV 1 const`24' =>
-        if RIw == 1 then
-          LoadConstant (RIwV, const)
-        else
-          ReservedInstr
+
+      case '0 RIwV 1 0`15 const`9' => LoadUpperConstant (RIwV, const)
+      case '1 RIwV 1 neg`1 const`23' => LoadConstant (RIwV, [neg], const)
+      case '_`7 1 _`24' => ReservedInstr
 
       case 'RIw`1 RIwV 0 RIa`1 RIaV RIb`1 RIbV OpArg Op' => {
         w = DecodeReg_imm (RIw, RIwV);
@@ -277,10 +280,10 @@ instruction Decode (opc::wordT) =
                   case 0 => Normal (func, wi, a, b)
                   case 1 => Shift (shift, wi, a, b)
 
-                  case 2 => StoreDM (func, wi, a, b)
-                  case 3 => StoreDMByte (func, wi, a, b)
-                  case 4 => LoadDM (wi, a)
-                  case 5 => LoadDMByte (wi, a)
+                  case 2 => StoreMEM (func, wi, a, b)
+                  case 3 => StoreMEMByte (func, wi, a, b)
+                  case 4 => LoadMEM (wi, a)
+                  case 5 => LoadMEMByte (wi, a)
                   case 6 => Out (func, wi, a, b)
                   case 7 => Accelerator (wi, a)
 
@@ -301,10 +304,10 @@ unit Next =
   if Reset then
     PC <- 0
   else
-    when PC <=+ lastIMAddr do {
-      alignedAddr = PC<31:2> : (0::bits(2));
-      Run (Decode (IM (alignedAddr + 3) : IM (alignedAddr + 2) :
-                   IM (alignedAddr + 1) : IM (alignedAddr)))
+    when PC <=+ lastMemAddr do {
+      alignedAddr = PC<31:2> : 0`2;
+      Run (Decode (MEM (alignedAddr + 3) : MEM (alignedAddr + 2) :
+                   MEM (alignedAddr + 1) : MEM (alignedAddr)))
     }
 
 ---------------------------------------------
@@ -313,8 +316,8 @@ unit Next =
 
 bits(7) ri2bits (ri::reg_immT) =
   match ri {
-    case Reg (i) => 0::bits(1) : i
-    case Imm (v) => 1::bits(1) : v
+    case Reg (i) => 0 : i
+    case Imm (v) => 1 : v
   }
 
 wordT enc (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT, opc::bits(6)) =
@@ -325,15 +328,16 @@ wordT encShift (shift::shiftT, w::reg_immT, a::reg_immT, b::reg_immT, opc::bits(
 
 wordT Encode (i::instruction) =
    match i {
-      case LoadConstant (Rw, const) => '0' : Rw : '1' : const
+      case LoadUpperConstant (Rw, const) => '0' : Rw : '1' : 0`15 : const
+      case LoadConstant (Rw, neg, const) => '1' : Rw : '1' : [neg] : const
 
       case Normal (func, w, a, b) => enc (func, Reg (w), a, b, '000000')
       case Shift (shift, w, a, b) => encShift (shift, Reg (w), a, b, '000001')
 
-      case StoreDM (func, w, a, b) => enc (func, Reg (w), a, b, '000010')
-      case StoreDMByte (func, w, a, b) => enc (func, Reg (w), a, b, '000011')
-      case LoadDM (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000100')
-      case LoadDMByte (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000101')
+      case StoreMEM (func, w, a, b) => enc (func, Reg (w), a, b, '000010')
+      case StoreMEMByte (func, w, a, b) => enc (func, Reg (w), a, b, '000011')
+      case LoadMEM (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000100')
+      case LoadMEMByte (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000101')
       case Out (func, w, a, b) => enc (func, Reg (w), a, b, '000110')
       case Accelerator (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000111')
 
@@ -349,14 +353,18 @@ wordT Encode (i::instruction) =
 -- Load into Instruction Memory
 ---------------------------------------------
 
-unit LoadIM (a::wordT, i::instruction list) measure Length (i) =
+unit LoadMEM (a::wordT, i::instruction list) measure Length (i) =
    match i
    {
       case Nil => nothing
       case h @ t =>
         {
-           IM(a) <- Encode (h);
-           LoadIM (a + 1, t)
+           'b1 b2 b3 b4' = Encode (h);
+           MEM(a)   <- b4;
+           MEM(a+1) <- b3;
+           MEM(a+2) <- b2;
+           MEM(a+3) <- b1;
+           LoadMEM (a + 4, t)
         }
    }
 
@@ -369,24 +377,11 @@ unit initialize (p::instruction list) =
    Reset <- false;
    PC <- 0;
    R <- InitMap (0);
-   DM <- InitMap (0);
+   MEM <- InitMap (0);
 -- InRdy <- false;
 -- InData <- 0;
    OutStrobe <- 0;
-   IM <- InitMap (Encode (ReservedInstr));
-   LoadIM (0, p)
+   LoadMEM (0, p)
 }
-
-instruction list test_prog =
-   list {
-      LoadConstant (0, 0),
-      LoadConstant (1, 1000),
-      LoadConstant (2, 1010),
-      LoadConstant (3, 4),
-      StoreDM (fINC, noShift, skipNever, 1, 1, 1),
-      Normal (fXOR, noShift, skipZero, 4, 1, 2),
-      Jump (fADD, noShift, 4, 3, 0),
-      Out (fADD, noShift, skipNever, 1, 1, 0)
-   }
 
 -----------------------------------------------------------------------------}
