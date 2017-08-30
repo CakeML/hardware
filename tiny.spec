@@ -12,8 +12,8 @@ construct funcT {
   fSub,
   fCarry, fOverflow, -- Get flags, overflow set by both add and sub
 
-  -- Multiplication, same as RISC-V (copy them from there?)
-  fLongMul, fLongMulH, fLongHulHSigned,
+  -- Multiplication, same as RISC-V's MUL and MULHU
+  fMul, fMulHU,
 
   -- Bit operations
   fAnd, fOr, fXor,
@@ -101,10 +101,11 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
 
      case fSnd => b
 
-     -- TODO
-     case fLongMul => 0
-     case fLongMulH => 0
-     case fLongHulHSigned => 0
+     case fMul => a * b
+     case fMulHU => {
+       prod`64 = ZeroExtend (a) * ZeroExtend (b);
+       prod<63:32>
+     }
 
      -- NOTE: "Do nothing"
      case fReserved => 0
