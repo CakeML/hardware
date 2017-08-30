@@ -20,6 +20,10 @@ construct funcT {
 
   -- Cmp
   fEqual, fLess, fLower,
+
+  -- Snd
+  fSnd
+
   fReserved
 }
 
@@ -94,6 +98,8 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
      case fEqual => [a == b]
      case fLess => [a < b]
      case fLower => [a <+ b]
+
+     case fSnd => b
 
      -- TODO
      case fLongMul => 0
