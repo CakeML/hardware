@@ -90,6 +90,9 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
      case fCarry => [CarryFlag]
      case fOverflow => [OverflowFlag]
 
+     case fInc => a + 1
+     case fDec => a - 1
+
      case fAnd => a && b
      case fOr  => a || b
      case fXor => a ?? b
@@ -97,8 +100,6 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
      case fEqual => [a == b]
      case fLess => [a < b]
      case fLower => [a <+ b]
-
-     case fSnd => b
 
      case fMul => a * b
      case fMulHU => {
