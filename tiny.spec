@@ -12,6 +12,8 @@ construct funcT {
   fSub,
   fCarry, fOverflow, -- Get flags, overflow set by both add and sub
 
+  fInc, fDec, -- Add and subtract by 1
+
   -- Multiplication, same as RISC-V's MUL and MULHU
   fMul, fMulHU,
 
@@ -20,9 +22,6 @@ construct funcT {
 
   -- Cmp
   fEqual, fLess, fLower,
-
-  -- Snd
-  fSnd
 
   fReserved
 }
@@ -176,7 +175,7 @@ define StoreMEM (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
     MEM(alignedAddr + 3) <- aV<31:24>
   };
 
-  norm (func, true, false, w, aV, bV)
+  norm (func, true, false, w, bV, bV)
 }
 
 define StoreMEMByte (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
@@ -186,7 +185,7 @@ define StoreMEMByte (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
   when bV <=+ lastMemAddr do
     MEM(bV) <- aV<7:0>;
 
-  norm (func, true, false, w, aV, bV)
+  norm (func, true, false, w, bV, bV)
 }
 
 define LoadMEM (w::regT, a::reg_immT) = {
