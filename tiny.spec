@@ -23,7 +23,8 @@ construct funcT {
   -- Cmp
   fEqual, fLess, fLower,
 
-  fReserved
+  -- Snd
+  fSnd
 }
 
 construct shiftT {shiftLL, shiftLR, shiftAR, shiftRor, shiftReserved}
@@ -101,14 +102,13 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
      case fLess => [a < b]
      case fLower => [a <+ b]
 
+     case fSnd => b
+
      case fMul => a * b
      case fMulHU => {
        prod`64 = ZeroExtend (a) * ZeroExtend (b);
        prod<63:32>
      }
-
-     -- NOTE: "Do nothing"
-     case fReserved => 0
    }
 
 wordT shift (shiftOp::shiftT, a::wordT, b::wordT) =
@@ -343,10 +343,10 @@ wordT Encode (i::instruction) =
 
       case StoreMEM (func, w, a, b) => enc (func, Reg (w), a, b, '000010')
       case StoreMEMByte (func, w, a, b) => enc (func, Reg (w), a, b, '000011')
-      case LoadMEM (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000100')
-      case LoadMEMByte (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000101')
+      case LoadMEM (w, a) => enc (fAdd, Reg (w), a, Imm (0), '000100')
+      case LoadMEMByte (w, a) => enc (fAdd, Reg (w), a, Imm (0), '000101')
       case Out (func, w, a, b) => enc (func, Reg (w), a, b, '000110')
-      case Accelerator (w, a) => enc (fReserved, Reg (w), a, Imm (0), '000111')
+      case Accelerator (w, a) => enc (fAdd, Reg (w), a, Imm (0), '000111')
 
       case Jump (func, w, a) => enc (func, Reg (w), a, Imm (0), '001000')
       case JumpIfZero (func, w, a, b) => enc (func, w, a, b, '001001')
