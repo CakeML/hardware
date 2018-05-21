@@ -50,13 +50,10 @@ declare {
    CarryFlag :: bool    -- Carry bit, from ALU add
    OverflowFlag :: bool -- Overflow bit, from ALU add and sub
 
--- Input
+-- IO
 
-   Reset :: bool        -- Reset machine (Input)
-
--- Output
-
-   OutStrobe :: wordT   -- Output Data (Output)
+   data_out :: bits(16) -- Output Data (Output)
+   data_in  :: bits(16) -- Output Data (Input)
 
 -- Architecture parameters
 
@@ -94,6 +91,12 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
      case fInc => a + 1
      case fDec => a - 1
 
+     case fMul => a * b
+     case fMulHU => {
+       prod`64 = ZeroExtend (a) * ZeroExtend (b);
+       prod<63:32>
+     }
+
      case fAnd => a && b
      case fOr  => a || b
      case fXor => a ?? b
@@ -103,12 +106,6 @@ wordT ALU (func::funcT, a::wordT, b::wordT) =
      case fLower => [a <+ b]
 
      case fSnd => b
-
-     case fMul => a * b
-     case fMulHU => {
-       prod`64 = ZeroExtend (a) * ZeroExtend (b);
-       prod<63:32>
-     }
    }
 
 wordT shift (shiftOp::shiftT, a::wordT, b::wordT) =
@@ -124,10 +121,10 @@ wordT shift (shiftOp::shiftT, a::wordT, b::wordT) =
 unit incPC () = PC <- PC + 4
 
 -- Common functionality
-unit norm (func::funcT, wback::bool, strobe::bool, w::regT, a::wordT, b::wordT) = {
+unit norm (func::funcT, wback::bool, out::bool, w::regT, a::wordT, b::wordT) = {
    alu = ALU (func, a, b);
    when wback do R(w) <- alu;
-   when strobe do OutStrobe <- alu;
+   when out do data_out <- [alu];
    incPC ()
 }
 
@@ -168,7 +165,7 @@ define StoreMEM (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
   aV = ri2word (a);
   bV = ri2word (b);
 
-  when bV <=+ lastMemAddr do {
+  when bV <+ lastMemAddr do {
     alignedAddr = bV<31:2> : 0`2;
     MEM(alignedAddr) <- aV<7:0>;
     MEM(alignedAddr + 1) <- aV<15:8>;
@@ -183,7 +180,7 @@ define StoreMEMByte (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
   aV = ri2word (a);
   bV = ri2word (b);
 
-  when bV <=+ lastMemAddr do
+  when bV <+ lastMemAddr do
     MEM(bV) <- aV<7:0>;
 
   norm (func, true, false, w, bV, bV)
@@ -192,7 +189,7 @@ define StoreMEMByte (func::funcT, w::regT, a::reg_immT, b::reg_immT) = {
 define LoadMEM (w::regT, a::reg_immT) = {
   aV = ri2word (a);
 
-  if aV <=+ lastMemAddr then {
+  if aV <+ lastMemAddr then {
     alignedAddr = aV<31:2> : 0`2;
     R(w) <- MEM(alignedAddr + 3) : MEM(alignedAddr + 2) :
             MEM(alignedAddr + 1) : MEM(alignedAddr)
@@ -204,7 +201,7 @@ define LoadMEM (w::regT, a::reg_immT) = {
 
 define LoadMEMByte (w::regT, a::reg_immT) = {
   aV = ri2word (a);
-  if aV <=+ lastMemAddr then
+  if aV <+ lastMemAddr then
     R(w) <- ZeroExtend (MEM(aV))
   else
     R(w) <- 0;
@@ -213,6 +210,11 @@ define LoadMEMByte (w::regT, a::reg_immT) = {
 
 define Out (func::funcT, w::regT, a::reg_immT, b::reg_immT) =
   norm (func, true, true, w, ri2word (a), ri2word (b))
+
+define In (w::regT) = {
+   R(w) <- ZeroExtend (data_in);
+   incPC ()
+}
 
 define Accelerator (w::regT, a::reg_immT) = {
    -- This is fairly limited, might want to send both a and b.
@@ -275,8 +277,8 @@ instruction Decode (opc::wordT) =
         shift = [OpArg`4] :: shiftT;
 
         match Op {
-          case 9 => JumpIfZero (func, w, a, b)
-          case 10 => JumpIfNotZero (func, w, a, b)
+          case 10 => JumpIfZero (func, w, a, b)
+          case 11 => JumpIfNotZero (func, w, a, b)
 
           -- Instructions where only RIw = reg makes sense
           case _ =>
@@ -292,9 +294,10 @@ instruction Decode (opc::wordT) =
                   case 4 => LoadMEM (wi, a)
                   case 5 => LoadMEMByte (wi, a)
                   case 6 => Out (func, wi, a, b)
-                  case 7 => Accelerator (wi, a)
+                  case 7 => In (wi)
+                  case 8 => Accelerator (wi, a)
 
-                  case 8 => Jump (func, wi, a)
+                  case 9 => Jump (func, wi, a)
 
                   case _ => ReservedInstr
                 }
@@ -308,14 +311,11 @@ instruction Decode (opc::wordT) =
 ---------------------------------------------
 
 unit Next =
-  if Reset then
-    PC <- 0
-  else
-    when PC <=+ lastMemAddr do {
-      alignedAddr = PC<31:2> : 0`2;
-      Run (Decode (MEM (alignedAddr + 3) : MEM (alignedAddr + 2) :
-                   MEM (alignedAddr + 1) : MEM (alignedAddr)))
-    }
+  when PC <+ lastMemAddr do {
+    alignedAddr = PC<31:2> : 0`2;
+    Run (Decode (MEM (alignedAddr + 3) : MEM (alignedAddr + 2) :
+                 MEM (alignedAddr + 1) : MEM (alignedAddr)))
+  }
 
 ---------------------------------------------
 -- Encode
@@ -346,11 +346,12 @@ wordT Encode (i::instruction) =
       case LoadMEM (w, a) => enc (fAdd, Reg (w), a, Imm (0), '000100')
       case LoadMEMByte (w, a) => enc (fAdd, Reg (w), a, Imm (0), '000101')
       case Out (func, w, a, b) => enc (func, Reg (w), a, b, '000110')
-      case Accelerator (w, a) => enc (fAdd, Reg (w), a, Imm (0), '000111')
+      case In (w) => enc (fAdd, Reg (w), Imm (0), Imm (0), '000111')
+      case Accelerator (w, a) => enc (fAdd, Reg (w), a, Imm (0), '001000')
 
-      case Jump (func, w, a) => enc (func, Reg (w), a, Imm (0), '001000')
-      case JumpIfZero (func, w, a, b) => enc (func, w, a, b, '001001')
-      case JumpIfNotZero (func, w, a, b) => enc (func, w, a, b, '001010')
+      case Jump (func, w, a) => enc (func, Reg (w), a, Imm (0), '001001')
+      case JumpIfZero (func, w, a, b) => enc (func, w, a, b, '001010')
+      case JumpIfNotZero (func, w, a, b) => enc (func, w, a, b, '001011')
       case _ => 0b111111
    }
 
@@ -381,13 +382,13 @@ unit LoadMEM (a::wordT, i::instruction list) measure Length (i) =
 
 unit initialize (p::instruction list) =
 {
-   Reset <- false;
+-- Reset <- false;
    PC <- 0;
    R <- InitMap (0);
    MEM <- InitMap (0);
 -- InRdy <- false;
--- InData <- 0;
-   OutStrobe <- 0;
+   data_in <- 0;
+   data_out <- 0;
    LoadMEM (0, p)
 }
 
