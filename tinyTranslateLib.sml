@@ -254,7 +254,7 @@ end;
 val init_vars = [(* IO: *) "data_in", "data_out",
                  "PC", "mem_inst_addr", "lastMemAddr",
                  "do_delay_write", "state", "acc_state", "acc_arg_ready",
-                 "mem_fun"];
+                 "mem_fun", "mem_data_mask"];
 
 fun print_state_var tm = let
   val (_, [_, _, var, ty, _]) = strip_comb tm
@@ -297,6 +297,7 @@ let
            "logic[1:0] state = 1;\n" ^
            "logic acc_arg_ready = 0;\n" ^
            "logic[1:0] acc_state = 0;\n" ^
+           "logic[3:0] mem_data_mask = 0;\n" ^
            "\n";
 
   val ss = ss ^ print_all_vars (envP_def |> SPEC_ALL |> concl |> dest_eq |> snd |> strip_conj)
