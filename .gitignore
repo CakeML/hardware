@@ -1,0 +1,12 @@
+.HOLMK
+.hollogs
+
+*.dat
+*.ui
+*.uo
+
+*Theory.sig
+*Theory.sml
+
+ag32Lib*
+ag32Script*

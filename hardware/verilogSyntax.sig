@@ -7,6 +7,8 @@ sig
   val value_ty : hol_type
 
   (* Values *)
+  val VBool_tm : term
+  val mk_VBool : term -> term
   val dest_VBool : term -> term
   val is_VBool : term -> bool
 
@@ -29,11 +31,13 @@ sig
   val Arith_tm : term
   val ArrayIndex_tm : term
   val ArraySlice_tm : term
+  val ArrayConcat_tm : term
   val BBOp_tm : term
   val BUOp_tm : term
   val Cmp_tm : term
   val Const_tm : term
   val InlineIf_tm : term
+  val InputVar_tm : term
   val Resize_tm : term
   val Shift_tm : term
   val Var_tm : term
@@ -41,11 +45,13 @@ sig
   val dest_Arith : term -> term * term * term
   val dest_ArrayIndex : term -> term * term
   val dest_ArraySlice : term -> term * term * term * term
+  val dest_ArrayConcat : term -> term * term
   val dest_BBOp : term -> term * term * term
   val dest_BUOp : term -> term * term
   val dest_Cmp : term -> term * term * term
   val dest_Const : term -> term
   val dest_InlineIf : term -> term * term * term
+  val dest_InputVar : term -> term
   val dest_Resize : term -> term * term * term
   val dest_Shift : term -> term * term * term
   val dest_Var : term -> term
@@ -53,11 +59,13 @@ sig
   val is_Arith : term -> bool
   val is_ArrayIndex : term -> bool
   val is_ArraySlice : term -> bool
+  val is_ArrayConcat : term -> bool
   val is_BBOp : term -> bool
   val is_BUOp : term -> bool
   val is_Cmp : term -> bool
   val is_Const : term -> bool
   val is_InlineIf : term -> bool
+  val is_InputVar : term -> bool
   val is_Resize : term -> bool
   val is_Shift : term -> bool
   val is_Var : term -> bool
@@ -65,14 +73,18 @@ sig
   val mk_Arith : term * term * term -> term
   val mk_ArrayIndex : term * term -> term
   val mk_ArraySlice : term * term * term * term -> term
+  val mk_ArrayConcat : term * term -> term
   val mk_BBOp : term * term * term -> term
   val mk_BUOp : term * term -> term
   val mk_Cmp : term * term * term -> term
   val mk_Const : term -> term
   val mk_InlineIf : term * term * term -> term
+  val mk_InputVar : term -> term
   val mk_Resize : term * term * term -> term
   val mk_Shift : term * term * term -> term
   val mk_Var : term -> term
+
+  val dest_Var_generic : term -> term
 
   (* Statements *)
 
@@ -102,6 +114,8 @@ sig
 
   (* Other, and some convenience functions *)
 
+  val w2ver_tm : term
+  val mk_w2ver : term -> term
   val dest_w2ver : term -> term
   val is_w2ver : term -> bool
 
@@ -110,4 +124,16 @@ sig
 
   val mk_Var_ : string -> term
 
+  (* Types *)
+
+  val BOOL_tm : term
+  val WORD_tm : term
+  val WORD_ARRAY_tm : term
+
+  (* New types *)
+
+  val is_VBool_t : term -> bool
+
+  val is_VArray_t : term -> bool
+  val dest_VArray_t : term -> term list
 end

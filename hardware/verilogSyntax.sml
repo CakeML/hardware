@@ -2,8 +2,8 @@ structure verilogSyntax :> verilogSyntax =
 struct
 
 open HolKernel Abbrev;
-open stringSyntax;
-open verilogTheory;
+open listSyntax stringSyntax;
+open verilogTheory verilogTypeTheory;
 
 (* Internal helpers *)
 val op1 = HolKernel.syntax_fns1 "verilog";
@@ -60,8 +60,10 @@ val is_SignExtend = same_const SignExtend_tm;
 
 val (Const_tm, mk_Const, dest_Const, is_Const) = op1 "Const"
 val (Var_tm, mk_Var, dest_Var, is_Var) = op1 "Var"
+val (InputVar_tm, mk_InputVar, dest_InputVar, is_InputVar) = op1 "InputVar"
 val (ArrayIndex_tm, mk_ArrayIndex, dest_ArrayIndex, is_ArrayIndex) = op2 "ArrayIndex"
 val (ArraySlice_tm, mk_ArraySlice, dest_ArraySlice, is_ArraySlice) = op4 "ArraySlice"
+val (ArrayConcat_tm, mk_ArrayConcat, dest_ArrayConcat, is_ArrayConcat) = op2 "ArrayConcat"
 val (InlineIf_tm, mk_InlineIf, dest_InlineIf, is_InlineIf) = op3 "InlineIf"
 val (BUOp_tm, mk_BUOp, dest_BUOp, is_BUOp) = op2 "BUOp"
 val (BBOp_tm, mk_BBOp, dest_BBOp, is_BBOp) = op3 "BBOp"
@@ -70,6 +72,15 @@ val (Shift_tm, mk_Shift, dest_Shift, is_Shift) = op3 "Shift"
 val (Arith_tm, mk_Arith, dest_Arith, is_Arith) = op3 "Arith"
 val (Cmp_tm, mk_Cmp, dest_Cmp, is_Cmp) = op3 "Cmp"
 val (Resize_tm, mk_Resize, dest_Resize, is_Resize) = op3 "Resize"
+
+(* dest either Var or InputVar *)
+fun dest_Var_generic tm =
+ if is_Var tm then
+   dest_Var tm
+ else if is_InputVar tm then
+  dest_InputVar tm
+ else
+  failwith "Not a Var nor a InputVar";
 
 (** Statements **)
 
@@ -84,7 +95,7 @@ val (NonBlockingAssign_tm, mk_NonBlockingAssign, dest_NonBlockingAssign, is_NonB
 
 (* Other, and some convenience functions *)
 
-val (_, _, dest_w2ver, is_w2ver) = op1 "w2ver"
+val (w2ver_tm, mk_w2ver, dest_w2ver, is_w2ver) = op1 "w2ver"
 val (_, _, dest_n2ver, is_n2ver) = op1 "n2ver"
 
 fun mk_Var_ var = mk_Var (fromMLstring var);
@@ -96,5 +107,18 @@ local val s = HolKernel.syntax_fns1 "verilog" in
   val (vwrites_tm, mk_vwrites, dest_vwrites, is_vwrites) = s "vwrites"
 end;
 *)
+
+(** Syntax for verilogTypeTheory **)
+
+val BOOL_tm = ``BOOL``;
+val WORD_tm = ``WORD``;
+val WORD_ARRAY_tm = ``WORD_ARRAY``;
+
+val VBool_t_tm = ``VBool_t``;
+fun is_VBool_t tm = tm = VBool_t_tm;
+
+val VArray_t_tm = ``VArray_t``;
+fun is_VArray_t tm = is_comb tm andalso (rator tm) = VArray_t_tm;
+fun dest_VArray_t tm = tm |> rand |> dest_list |> fst;
 
 end

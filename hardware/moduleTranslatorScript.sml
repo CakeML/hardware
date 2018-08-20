@@ -2,40 +2,51 @@ open preamble;
 
 open stringSyntax;
 
-open verilogTheory verilogMetaTheory;
-open translatorCoreLib translatorTheory;
+open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory;
+open translatorTheory;
 
-open tinyConfigLib;
+open ag32ConfigLib translatorCoreLib;
 
 val _ = new_theory "moduleTranslator";
 
 (* TODO: More or less duplicates relS, can be fixed... *)
 
 val relM_var_def = Define `
- relM_var hol_s (mod_s:module) var a accessf =
-  (?v. mget_var mod_s var = INR v /\ a (accessf hol_s) v)`;
+ relM_var hol_s (vs:envT) var a accessf =
+  (?v. mget_var vs var = INR v /\ a (accessf hol_s) v)`;
 
 fun build_relM_var (name, accessf) = let
   val nameHOL = fromMLstring name
   val pred = accessf |> dest_const |> snd |> dom_rng |> snd |> predicate_for_type_ty
 in
-  ``relM_var hol_s mod_s ^nameHOL ^pred ^accessf``
+  ``relM_var hol_s vs ^nameHOL ^pred ^accessf``
 end;
 
 val relM_def =
  accessors
  |> map build_relM_var
  |> list_mk_conj
-(* |> (curry mk_icomb) (mk_icomb (equality, mk_comb (mk_comb (mk_var ("relM", ``:tinyImpl_state -> module -> bool``), mk_var ("hol_s", ``:tinyImpl_state``)), mk_var ("mod_s", ``:module``))))
- |> (curry new_definition) "relM";*)
- |> (fn tm => Define `relM hol_s mod_s = ^tm`);
+ |> (fn tm => Define `relM hol_s vs = ^tm`);
+
+val relM_fextv_def =
+ zip (TypeBase.fields_of fext_ty)
+     (TypeBase.accessors_of fext_ty |> map (rator o lhs o concl o SPEC_ALL))
+ |> filter (not o equal "fun" o fst o dest_type o snd o fst)
+ |> map (fn ((f, ty), accessor) => (fromMLstring f, hol2ver_for_type ty, accessor))
+ |> map (fn (f, ty, accessor) => ``fextv (n:num) ^f = INR (^ty (^accessor (fext n)))``)
+ |> list_mk_conj
+ |> (fn tm => Define `relM_fextv fextv fext = !n. ^tm`);
+
+val relM_fextv_fext_relS_fextv_fext = Q.store_thm("relM_fextv_fext_relS_fextv_fext",
+ `!fextv fext. relM_fextv fextv fext <=> (!n. relS_fextv (fextv n) (fext n))`,
+ rw [relM_fextv_def, relS_fextv_def]);
 
 (** Introduce non-blocking writes **)
 
 val get_assn_var_def = Define `
  (get_assn_var (Var vname) = SOME vname) /\
- (get_assn_var (ArrayIndex vname _) = SOME vname) /\
- (get_assn_var (ArraySlice vname _ _ _) = SOME vname) /\
+ (get_assn_var (ArrayIndex (Var vname) _) = SOME vname) /\
+ (get_assn_var (ArraySlice (Var vname) _ _ _) = SOME vname) /\
  (get_assn_var _  = NONE)`;
 
 val intro_cvars_def = tDefine "intro_cvars" `
@@ -74,8 +85,9 @@ val vwrites_intro_cvars_eq = Q.store_thm("vwrites_intro_cvars_eq",
        qexists_tac `(y0, intro_cvars vars y1)` \\ simp [] \\
        qexists_tac `(y0, y1)` \\ simp [])
     \\ Cases_on `def` \\ fs [])
- \\ Cases_on `lhs` \\ fs [get_assn_var_def, evwrites_def, vwrites_def] \\ EQ_TAC \\
-    FULL_CASE_TAC \\ fs [vwrites_def, evwrites_def] \\ Cases_on `var = s` \\ simp []);
+ \\ Cases_on `lhs` \\ fs [get_assn_var_def, vwrites_def, evwrites_def] \\
+    TRY (Cases_on `e`) \\ rw [get_assn_var_def, vwrites_def, evwrites_def] \\
+    Cases_on `var = s` \\ simp []);
 
 val not_vwrites_intro_cvars = Q.store_thm("not_vwrites_intro_cvars",
  `!var vars p. ~MEM var (vwrites p) ==> ~MEM var (vwrites (intro_cvars vars p))`,
@@ -105,36 +117,37 @@ val vnwrites_intro_cvars_eq = Q.store_thm("vnwrites_intro_cvars_eq",
        qexists_tac `(y0, intro_cvars vars y1)` \\ simp [] \\
        qexists_tac `(y0, y1)` \\ simp [])
     \\ (Cases_on `def` \\ fs []))
- \\ Cases_on `lhs` \\ fs [get_assn_var_def, evwrites_def, vnwrites_def] \\ EQ_TAC \\
-    FULL_CASE_TAC \\ fs [vnwrites_def, evwrites_def] \\ Cases_on `var = s` \\ simp []);
+ \\ Cases_on `lhs` \\ fs [get_assn_var_def, vnwrites_def, evwrites_def] \\
+    TRY (Cases_on `e`) \\ rw [get_assn_var_def, vnwrites_def, evwrites_def] \\
+    Cases_on `var = s` \\ simp []);
 
 val not_vnwrites_intro_cvars = Q.store_thm("not_vnwrites_intro_cvars",
  `!var vars p. ~MEM var (vwrites p) /\ ~MEM var (vnwrites p) ==> ~MEM var (vnwrites (intro_cvars vars p))`,
  metis_tac [vnwrites_intro_cvars_eq]);
 
 val prun_intro_cvars_same_after = Q.store_thm("prun_intro_cvars_same_after",
- `!ver_s vars p v ver_s'.
-   prun ver_s (intro_cvars vars p) = INR (v, ver_s') /\ vnwrites p = [] ==>
+ `!fext ver_s vars p ver_s'.
+   prun fext ver_s (intro_cvars vars p) = INR ver_s' /\ vnwrites p = [] ==>
    !var. ~MEM var (vwrites p) ==> get_var ver_s' var = get_var ver_s var /\
                                   get_nbq_var ver_s' var = get_nbq_var ver_s var`,
  rpt strip_tac
- >- metis_tac [not_vwrites_intro_cvars, prun_same_after_general]
+ >- metis_tac [not_vwrites_intro_cvars, prun_same_after]
  \\ `~MEM var (vnwrites p)` by simp [] \\
-    metis_tac [not_vnwrites_intro_cvars, prun_same_after_general]);
+    metis_tac [not_vnwrites_intro_cvars, prun_same_after]);
 
 val prun_intro_cvars_same_after2 = Q.store_thm("prun_intro_cvars_same_after2",
- `!ver_s vars p v ver_s'.
-   prun ver_s (intro_cvars vars p) = INR (v, ver_s') ==>
+ `!fext ver_s vars p ver_s'.
+   prun fext ver_s (intro_cvars vars p) = INR ver_s' ==>
    !var. MEM var vars ==> get_var ver_s' var = get_var ver_s var`,
- rpt strip_tac \\ metis_tac [vwrites_intro_cvars_eq, prun_same_after_general]);
+ rpt strip_tac \\ metis_tac [vwrites_intro_cvars_eq, prun_same_after]);
 
 (* Can be generalized *)
 val prun_intro_cvars_same_after3 = Q.store_thm("prun_intro_cvars_same_after3",
- `!ver_s vars p v ver_s'.
-   prun ver_s (intro_cvars vars p) = INR (v, ver_s') /\ vnwrites p = [] ==>
+ `!fext ver_s vars p ver_s'.
+   prun fext ver_s (intro_cvars vars p) = INR ver_s' /\ vnwrites p = [] ==>
    !var. ~MEM var vars ==> get_nbq_var ver_s' var = get_nbq_var ver_s var`,
   rpt strip_tac \\ `~MEM var (vnwrites p)` by simp [] \\
-  metis_tac [vnwrites_intro_cvars_eq, prun_same_after_general]);
+  metis_tac [vnwrites_intro_cvars_eq, prun_same_after]);
 
 (*
 val vwrites_intro_cvars = Q.store_thm("vwrites_intro_cvars",
@@ -205,44 +218,63 @@ val valid_ps_for_module_tl_vwrites = Q.store_thm("valid_ps_for_module_tl_vwrites
  rewrite_tac [valid_ps_for_module_def] \\ rpt strip_tac \\ last_x_assum (qspecl_then [`p`, `h`] mp_tac) \\
  impl_tac >- fs [] \\ strip_tac \\ metis_tac []);
 
-(* Just for the itp 2018 paper, not part of the formal development. *)
-val valid_program_def = Define `
- valid_program ps = !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
-                     (!x. MEM x (vreads p) ==> ~MEM x (vwrites q)) /\
-                     (!x. (MEM x (vnwrites p) \/ MEM x (vwrites p)) ==>
-                          (~MEM x (vwrites q) /\ ~MEM x (vnwrites q)))`;
-
 val relM_relS = Q.store_thm("relM_relS",
- `!s env ps. relM s <| vars := env; ps := ps |> ==> relS s <| vars := env; nbq := [] |>`,
+ `!s env. relM s env ==> relS s <| vars := env; nbq := [] |>`,
  rw [relM_def, relS_def, relM_var_def, mget_var_def, relS_var_def, get_var_def] \\ fs []);
 
 (*
 val no_writes_before_read_exp_def = Define `
- no_writes_before_read_exp vars writes exp = EVERY (\v. MEM v vars ==> ~MEM v writes) (evreads exp)`;
+ no_writes_before_read_exp var written exp = (~written \/ ~MEM var (evreads exp))`;
 
+val no_writes_before_read_lhs = Define `
+ (no_writes_before_read_lhs var (Var name) = (name = var)) /\
+ (no_writes_before_read_lhs var (ArrayIndex (Var name) _) = (name = var)) /\
+ (no_writes_before_read_lhs var (ArraySlice (Var name) _ _ _) = (name = var)) /\
+ (no_writes_before_read_lhs var _ = F)`;
+
+(* The only case we care about here is when ret is T *)
 val no_writes_before_read_def = tDefine "no_writes_before_read" `
- (no_writes_before_read vars writes Skip = T) /\
- (no_writes_before_read vars writes (Seq p1 p2) = (no_writes_before_read vars writes p1 /\
-                                                   no_writes_before_read vars (vnwrites p1 ++ writes) p2)) /\
- (no_writes_before_read vars writes (IfElse c pt pf) = (no_writes_before_read_exp vars writes c /\
-                                                        no_writes_before_read vars writes pt /\
-                                                        no_writes_before_read vars writes pf)) /\
- (no_writes_before_read vars writes (Case m cs d) = (no_writes_before_read_exp vars writes m /\
-                                                     EVERY (\(cc, cb). no_writes_before_read_exp vars writes cc /\
-                                                                       no_writes_before_read vars writes cb)
-                                                           cs /\
-                                                     (case d of SOME d' => no_writes_before_read vars writes d'
-                                                              | NONE => T))) /\
- (no_writes_before_read vars writes (BlockingAssign lhs rhs) = no_writes_before_read_exp vars writes rhs) /\
- (no_writes_before_read vars writes (NonBlockingAssign lhs rhs) = no_writes_before_read_exp vars writes rhs)`
+ (no_writes_before_read var written Skip = (T, written)) /\
+ (no_writes_before_read var written (Seq p1 p2) =
+  let (ret, written') = no_writes_before_read var written p1;
+      (ret', written'') = no_writes_before_read var written' p2 in
+       (ret /\ ret', written'')) /\
+ (no_writes_before_read var written (IfElse c pt pf) =
+  let ret = no_writes_before_read_exp var written c;
+      (ret', written') = no_writes_before_read var written pt;
+      (ret'', written'') = no_writes_before_read var written pf in
+       (ret /\ ret' /\ ret'', written' \/ written'')) /\
+ (no_writes_before_read var written (Case m cs d) =
+  let mret = no_writes_before_read_exp var written m;
+      (ret', written') =
+       FOLDR (λ(cc, cb) (ret, written').
+        let ccret = no_writes_before_read_exp var written cc;
+            (ret', written'') = no_writes_before_read var written cb in
+           (ccret /\ ret', written' \/ written'')) (T, written) cs;
+      (ret'', written'') =
+       (case d of SOME d' => no_writes_before_read var written d'
+                | NONE => (T, F)) in
+    (mret /\ ret' /\ ret'', written' \/ written'')) /\
+ (no_writes_before_read var written (BlockingAssign lhs rhs) =
+  (no_writes_before_read_exp var written rhs,
+   written \/ no_writes_before_read_lhs var lhs)) /\
+ (no_writes_before_read var written (NonBlockingAssign lhs rhs) =
+  (no_writes_before_read_exp var written rhs, written))`
 
  (WF_REL_TAC `measure (vprog_size o (\(a,b,c). c))` \\ rw [] \\
  imp_res_tac MEM_IMP_vprog_size \\ DECIDE_TAC);
+
+(*
+(* No reads after writes to communication variables *)
+val cvar_writes_cond_def = Define `
+ cvar_writes_cond vars p = EVERY (\var. FST (no_writes_before_read var F p)) vars`;
+*)
 *)
 
+(* No reads after writes to communication variables, inefficient version *)
 val cvar_writes_cond_def = tDefine "cvar_writes_cond" `
  (cvar_writes_cond vars (Seq p q) =
-  (EVERY (\var. ~(MEM var (vwrites p) /\ MEM var (vwrites q))) vars /\
+  (EVERY (\var. MEM var (vwrites p) ==> ~MEM var (vreads q)) vars /\
   cvar_writes_cond vars p /\ cvar_writes_cond vars q)) /\
  (cvar_writes_cond vars (IfElse _ p q) = (cvar_writes_cond vars p /\ cvar_writes_cond vars q)) /\
  (cvar_writes_cond vars (Case _ cs d) = (EVERY (\(_, p). cvar_writes_cond vars p) cs /\
@@ -252,14 +284,32 @@ val cvar_writes_cond_def = tDefine "cvar_writes_cond" `
  (WF_REL_TAC `measure (vprog_size o SND)` \\ rw [] \\
   imp_res_tac MEM_IMP_vprog_size \\ DECIDE_TAC);
 
+(* No writes after writes to communication variables *)
+val cvar_writes_cond2_def = tDefine "cvar_writes_cond2" `
+ (cvar_writes_cond2 vars (Seq p q) =
+  (EVERY (\var. ~(MEM var (vwrites p) /\ MEM var (vwrites q))) vars /\
+  cvar_writes_cond2 vars p /\ cvar_writes_cond2 vars q)) /\
+ (cvar_writes_cond2 vars (IfElse _ p q) = (cvar_writes_cond2 vars p /\ cvar_writes_cond2 vars q)) /\
+ (cvar_writes_cond2 vars (Case _ cs d) = (EVERY (\(_, p). cvar_writes_cond2 vars p) cs /\
+                                         case d of SOME dp => cvar_writes_cond2 vars dp | NONE => T)) /\
+ (cvar_writes_cond2 _ _ = T)`
+
+ (WF_REL_TAC `measure (vprog_size o SND)` \\ rw [] \\
+  imp_res_tac MEM_IMP_vprog_size \\ DECIDE_TAC);
+
+val Abbrev_SYM = Q.store_thm("Abbrev_SYM",
+ `!x y. Abbrev (x = y) <=> Abbrev (y = x)`,
+ metis_tac [markerTheory.Abbrev_def]);
+
 val prun_untainted_state = Q.store_thm("prun_untainted_state",
- `!vars ver_s p ver_s' v ver_s''.
-  prun ver_s p = INR (v, ver_s') /\
+ `!vars fext ver_s p ver_s' ver_s''.
+  prun fext ver_s p = INR ver_s' /\
 
   (* Conditions on what programs can be lifted *)
   vnwrites p = [] /\
-  (!var. MEM var vars /\ MEM var (vreads p) ==> ~MEM var (vwrites p)) /\
   cvar_writes_cond vars p /\
+  (*(!var. MEM var vars /\ MEM var (vreads p) ==> ~MEM var (vwrites p)) /\*)
+  cvar_writes_cond2 vars p /\
 
   (* Conditions on the environment *)
   (!var. MEM var (vreads p) \/ MEM var (vwrites p) ==>
@@ -268,58 +318,65 @@ val prun_untainted_state = Q.store_thm("prun_untainted_state",
          (get_nbq_var ver_s'' var = get_var ver_s var \/
          get_nbq_var ver_s'' var = get_nbq_var ver_s var))
   ==>
-  ?ver_s'''. prun ver_s'' (intro_cvars vars p) = INR (v, ver_s''') /\
-             (!var. MEM var (vreads p) \/ (~MEM var vars /\ MEM var (vwrites p)) ==>
+  ?ver_s'''. prun fext ver_s'' (intro_cvars vars p) = INR ver_s''' /\
+             (!var. ~MEM var vars /\ MEM var (vwrites p) ==>
                     get_var ver_s''' var = get_var ver_s' var) /\
              (!var. MEM var vars /\ MEM var (vwrites p) ==>
                     get_nbq_var ver_s''' var = get_var ver_s' var \/
-                    (get_nbq_var ver_s''' var = get_nbq_var ver_s'' var /\
+                    (get_nbq_var ver_s''' var = get_nbq_var ver_s'' var) /\
                      get_var ver_s''' var = get_var ver_s' var /\
-                     get_var ver_s' var = get_var ver_s var))`,
+                     get_var ver_s' var = get_var ver_s var)`,
  gen_tac \\ recInduct prun_ind \\ rpt strip_tac
  >- (* Skip *)
  fs [intro_cvars_def, prun_def, vwrites_def, vreads_def]
  >- (* Seq *)
- (fs [intro_cvars_def, prun_Seq, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, EVERY_MEM] \\
+ (fs [intro_cvars_def, prun_Seq, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, cvar_writes_cond2_def, EVERY_MEM] \\
  first_x_assum drule \\ disch_then (qspec_then `ver_s''` mp_tac) \\
  impl_tac >- (simp [] \\ metis_tac []) \\ strip_tac \\ simp [] \\
  first_x_assum drule \\ disch_then (qspec_then `ver_s'''` mp_tac) \\
  impl_tac \\ (* TOOD: inefficient but works: *)
- TRY (rpt strip_tac) \\ `~MEM var (vnwrites p0)` by fs [] \\ simp [] \\ metis_tac [prun_intro_cvars_same_after, prun_same_after_general])
+ rpt strip_tac \\ `~MEM var (vnwrites p0)` by fs [] \\ `~MEM var (vnwrites p1)` by fs [] \\
+ simp [] \\ metis_tac [prun_intro_cvars_same_after, prun_intro_cvars_same_after2, prun_same_after])
 
  >- (* IfElse *)
- (fs [intro_cvars_def, prun_IfElse, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, EVERY_MEM] \\
+ (fs [intro_cvars_def, prun_IfElse, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, cvar_writes_cond2_def, EVERY_MEM] \\
  first_x_assum drule \\ disch_then (qspec_then `ver_s''` mp_tac) \\
  (impl_tac >- (simp [] \\ metis_tac [])) \\ strip_tac \\ qexists_tac `ver_s'''` \\ simp [] \\
  (conj_tac >- metis_tac [erun_cong]) \\
  (* TODO: metis takes forever here *)
- conj_tac \\ gen_tac \\ metis_tac [prun_intro_cvars_same_after, prun_same_after_general])
+ conj_tac \\ gen_tac \\ metis_tac [prun_intro_cvars_same_after, prun_intro_cvars_same_after2, prun_same_after])
 
  >- (* Case *)
- (fs [intro_cvars_def, prun_Case, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, EVERY_MEM] \\
- last_x_assum drule \\ last_x_assum (fn _ => all_tac) \\
+ (fs [intro_cvars_def, prun_Case, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, cvar_writes_cond2_def, EVERY_MEM] \\
+ last_x_assum drule \\ last_x_assum kall_tac \\
  TRY (disch_then drule) \\ disch_then (qspec_then `ver_s''` mp_tac) \\
  rpt (impl_tac >- (simp [] \\ metis_tac [])) \\
  strip_tac \\ simp [] \\
- `erun ver_s'' e = erun s e` by metis_tac [erun_cong] \\
- `erun ver_s'' ccond = erun s ccond` by metis_tac [erun_cong] \\ simp []
- >- (rveq \\ TRY strip_tac \\ metis_tac [prun_intro_cvars_same_after, prun_same_after_general])
- \\
+ `erun fext ver_s'' e = erun fext s e` by metis_tac [erun_cong] \\
+ `erun fext ver_s'' ccond = erun fext s ccond` by metis_tac [erun_cong] \\ simp []
+ >-
+ (rveq \\ TRY strip_tac \\ metis_tac [prun_intro_cvars_same_after, prun_intro_cvars_same_after2, prun_same_after])
+ >-
  (* UGLY, TODO, OMG: *)
- qspecl_then [`ver_s''`, `vars`, `Case e cs default`] mp_tac prun_intro_cvars_same_after \\
+ (qspecl_then [`fext`, `ver_s''`, `vars`, `Case e cs default`] mp_tac prun_intro_cvars_same_after \\
  simp [intro_cvars_def, vnwrites_def, vwrites_def] \\ strip_tac \\
 
- qpat_x_assum `prun s _ = _` assume_tac \\
- drule prun_same_after_general \\ strip_tac \\
+ qpat_x_assum `prun _ s _ = _` assume_tac \\
+ drule prun_same_after \\ strip_tac \\
 
  strip_tac \\ gen_tac \\ Cases_on `MEM var (vwrites (Case e cs default))` \\
  fs [vwrites_def] \\ metis_tac [])
+ \\
+ fs [intro_cvars_def, vnwrites_def, vwrites_def, vreads_def, prun_def,
+     cvar_writes_cond_def, cvar_writes_cond2_def] \\
+ first_x_assum match_mp_tac \\
+ metis_tac [prun_intro_cvars_same_after, prun_intro_cvars_same_after2, prun_same_after])
 
  >- (* Case ii *)
- (fs [intro_cvars_def, prun_def, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, EVERY_MEM] \\
+ (fs [intro_cvars_def, prun_def, vwrites_def, vnwrites_def, vreads_def, cvar_writes_cond_def, cvar_writes_cond2_def, EVERY_MEM] \\
  last_x_assum (qspec_then `ver_s''` mp_tac) \\ impl_tac >- (simp [] \\ metis_tac []) \\
  strip_tac \\ asm_exists_tac \\ simp [] \\
- metis_tac [prun_intro_cvars_same_after, prun_same_after_general])
+ metis_tac [prun_intro_cvars_same_after, prun_intro_cvars_same_after2, prun_same_after])
 
  >- (* Case iii *)
  fs [intro_cvars_def, prun_def, vwrites_def, vnwrites_def, vreads_def]
@@ -329,40 +386,27 @@ val prun_untainted_state = Q.store_thm("prun_untainted_state",
  imp_res_tac sum_bind_INR \\ fs [sum_bind_def, prun_bassn_def] \\
  imp_res_tac sum_for_INR \\ fs [sum_for_def, sum_map_def] \\
 
- `erun ver_s'' rhs = erun s rhs` by metis_tac [erun_cong] \\
-
+ (* TODO: Can probably be done in better order: *)
+ `erun fext ver_s'' rhs = erun fext s rhs` by metis_tac [erun_cong] \\
  qabbrev_tac `lhs_ = lhs` \\
- Cases_on `lhs` \\ TRY (unabbrev_all_tac \\ fs [assn_def] \\ NO_TAC) \\
+ drule assn_INR \\ strip_tac \\ rveq \\ fs [Abbrev_SYM] \\
 
- `(!var. MEM var (evreads lhs_) ==> get_var ver_s'' var = get_var s var)`
+ `(!var. MEM var (evreads lhs) ==> get_var ver_s'' var = get_var s var)`
  by (unabbrev_all_tac \\ fs [evwrites_def, evreads_def, evreads_index_def] \\ metis_tac []) \\
 
- `assn ver_s'' lhs_ v' = assn s lhs_ v'` by metis_tac [assn_cong] \\
+ `assn fext ver_s'' lhs v' = assn fext s lhs v'` by metis_tac [assn_cong] \\
 
  unabbrev_all_tac \\
- (* UGLY: Can we rewrite this directly instead of using imp_res_tac? *)
- imp_res_tac assn_Var_INR \\ imp_res_tac assn_ArrayIndex_INR \\
- rveq \\ fs [] \\ rveq \\
 
- simp [get_assn_var_def] \\ Cases_on `MEM s' vars` \\
+ simp [get_assn_var_def] \\ Cases_on `MEM name vars` \\
  simp [prun_def, sum_bind_def, sum_for_def, sum_map_def, prun_bassn_def, prun_nbassn_def] \\
- fs [evreads_def, evwrites_def, get_var_set_var, get_var_cleanup, get_nbq_var_def] \\ metis_tac [])
+ fs [evreads_def, evwrites_def, get_var_cleanup])
 
  \\ (* NonBlockingAssign *)
  fs [prun_def] \\ imp_res_tac sum_bind_INR \\ fs [sum_bind_def, prun_nbassn_def] \\
  imp_res_tac sum_for_INR \\ fs [sum_for_def, sum_map_def] \\ rveq \\
- Cases_on `lhs` \\ fs [vnwrites_def, evwrites_def, assn_def]);
-
-val mstep_unfold1 = Q.store_thm("mstep_unfold1",
- `!ps p ver_s ver_s' vars.
-  mstep ver_s (p::ps) = INR ver_s' <=>
-  ?ver_s''. prun ver_s p = INR (NONE, ver_s'') /\
-            mstep ver_s'' ps = INR ver_s'`,
-  rw [mstep_def, sum_foldM_def] \\ EQ_TAC \\ strip_tac
-  >- (imp_res_tac sum_bind_INR \\ fs [sum_bind_def] \\
-     imp_res_tac sum_map_INR \\ fs [sum_map_def] \\
-     PairCases_on `v''` \\ imp_res_tac prun_val_always_NONE \\ fs [])
-  \\ fs [sum_map_def, sum_bind_def]);
+ drule assn_INR \\ strip_tac \\ rveq \\
+ fs [vnwrites_def, evwrites_def]);
 
 val relS_with_same_vars = Q.store_thm("relS_with_same_vars",
  `!s ver_s. relS s ver_s ==> relS s (ver_s with vars := ver_s.vars)`,
@@ -373,10 +417,10 @@ val pstate_vars_cleanup = Q.store_thm("pstate_vars_cleanup",
  rw [pstate_component_equality]);
 
 val mstep_no_writes = Q.store_thm("mstep_no_writes",
- `!ps var vars ver_s ver_s'.
+ `!ps fext var vars ver_s ver_s'.
   EVERY (\p. ~MEM var (vwrites p)) ps /\
   EVERY (\p. vnwrites p = []) ps /\
-  mstep ver_s (MAP (intro_cvars vars) ps) = INR ver_s' ==>
+  mstep fext (MAP (intro_cvars vars) ps) ver_s = INR ver_s' ==>
   get_var ver_s' var = get_var ver_s var /\
   get_nbq_var ver_s' var = get_nbq_var ver_s var`,
  Induct >- rw [mstep_def, sum_foldM_def] \\
@@ -384,17 +428,18 @@ val mstep_no_writes = Q.store_thm("mstep_no_writes",
  metis_tac [prun_intro_cvars_same_after]);
 
 val mstep_untainted_state = Q.store_thm("mstep_untainted_state",
- `!vars ps ver_s ver_s' s Penv.
+ `!vars fext ps fextv ver_s ver_s' s Penv.
   Penv ver_s.vars /\
   (* Conditions on what programs can be lifted *)
-  (!p. MEM p ps ==> (?s'. !env. Penv env ==> EvalS s env s' p) /\
+  (!p. MEM p ps ==> (?s'. !env. Penv env ==> EvalS fext s env s' p) /\
                     vnwrites p = [] /\
                     cvar_writes_cond vars p /\
-                    (!var. MEM var vars /\ MEM var (vreads p) ==> ~MEM var (vwrites p))) /\
+                    cvar_writes_cond2 vars p) /\
   ALL_DISTINCT ps /\
 
   (* Conditions on the environment *)
   relS s ver_s /\
+  relS_fextv fextv fext /\
   valid_ps_for_module vars ps /\
 
   (!p. MEM p ps ==>
@@ -403,9 +448,9 @@ val mstep_untainted_state = Q.store_thm("mstep_untainted_state",
   (!var. MEM var (vwrites p) ==>
          get_nbq_var ver_s' var = get_nbq_var ver_s var))
   ==>
-  ?ver_s''. mstep ver_s' (MAP (intro_cvars vars) ps) = INR ver_s'' /\
+  ?ver_s''. mstep fextv (MAP (intro_cvars vars) ps) ver_s' = INR ver_s'' /\
             (!p. MEM p ps ==>
-             (?ver_s_p. prun ver_s p = INR (NONE, ver_s_p) /\
+             (?ver_s_p. prun fextv ver_s p = INR ver_s_p /\
              (!var. MEM var (vwrites p) ==>
               if MEM var vars
               then get_nbq_var ver_s'' var = get_var ver_s_p var \/
@@ -413,46 +458,115 @@ val mstep_untainted_state = Q.store_thm("mstep_untainted_state",
                    get_var ver_s'' var = get_var ver_s_p var)
               else get_var ver_s'' var = get_var ver_s_p var /\
                    get_nbq_var ver_s'' var = get_nbq_var ver_s' var)))`,
- gen_tac \\ Induct >- rw [mstep_def, sum_foldM_def] \\
- simp [mstep_unfold1] \\ Ho_Rewrite.ONCE_REWRITE_TAC [MEM_disj_impl] \\ simp [] \\ rpt strip_tac \\
+ ntac 2 gen_tac \\ Induct >- rw [mstep_def, sum_foldM_def] \\
+ simp [mstep_unfold1] \\ Ho_Rewrite.ONCE_REWRITE_TAC [MEM_disj_impl] \\ rpt strip_tac \\ fs [] \\
  CONV_TAC (DEPTH_CONV LEFT_AND_EXISTS_CONV) \\
 
- (* TODO: This is ugly... *)
- imp_res_tac relS_with_same_vars \\
- first_x_assum drule \\ disch_then (drule o (PURE_REWRITE_RULE [EvalS_def])) \\
- simp [pstate_vars_cleanup] \\ strip_tac \\
+ first_x_assum drule \\ simp [EvalS_def] \\ imp_res_tac relS_with_same_vars \\
+ rpt (disch_then drule) \\ simp [pstate_vars_cleanup] \\ strip_tac \\
 
- drule prun_untainted_state \\ rpt (disch_then drule) \\
- (*disch_then (qspec_then `ver_s'` mp_tac) \\*)
- impl_tac >- (simp [] \\ metis_tac []) \\ strip_tac \\
+ drule prun_untainted_state \\ rpt (disch_then drule) \\ simp [] \\ strip_tac \\
  asm_exists_tac \\ simp [] \\
 
- imp_res_tac valid_ps_for_module_tl \\
- last_x_assum drule \\ disch_then (qspec_then `ver_s'''` mp_tac) \\ rpt (disch_then drule) \\
- impl_tac >- metis_tac [valid_ps_for_module_tl_vreads, valid_ps_for_module_tl_vwrites,
-                        prun_intro_cvars_same_after, prun_intro_cvars_same_after2] \\
- strip_tac \\ simp [] \\
- `EVERY (\p. vnwrites p = []) ps` by (rw [EVERY_MEM]) \\
+ first_x_assum drule \\ disch_then (qspecl_then [`fextv`, `ver_s'''`, `s`] mp_tac) \\
+ impl_tac >- (simp [] \\ metis_tac [valid_ps_for_module_tl, valid_ps_for_module_tl_vreads,
+                                    valid_ps_for_module_tl_vwrites, prun_intro_cvars_same_after,
+                                    prun_intro_cvars_same_after2]) \\ strip_tac \\
+ asm_exists_tac \\ simp [] \\
+
+ `EVERY (\p. vnwrites p = []) ps` by (simp [EVERY_MEM]) \\
  rpt strip_tac
+ >- (`EVERY (\p. ~MEM var (vwrites p)) ps` by
+     (simp [EVERY_MEM] \\ metis_tac [valid_ps_for_module_tl_vwrites]) \\
+    metis_tac [prun_intro_cvars_same_after3, mstep_no_writes])
 
- >- (`EVERY (\p. ~MEM var (vwrites p)) ps` by (simp [EVERY_MEM] \\
-                                              metis_tac [valid_ps_for_module_tl_vwrites]) \\
- metis_tac [valid_ps_for_module_tl_vwrites, prun_intro_cvars_same_after3, mstep_no_writes])
+ \\ metis_tac [valid_ps_for_module_tl_vwrites, prun_intro_cvars_same_after]);
 
- \\ (*first_x_assum drule \\ strip_tac \\ asm_exists_tac \\ simp [] \\ rpt strip_tac \\
-    first_x_assum drule \\ strip_tac \\ `p <> h` by metis_tac [MEM] \\*)
-    metis_tac [valid_ps_for_module_tl_vwrites, prun_intro_cvars_same_after]);
+val mget_var_append = Q.store_thm("mget_var_append",
+ `!var xs ys.
+   mget_var (xs ⧺ ys) var = case mget_var xs var of INL _ => mget_var ys var | INR v => INR v`,
+ rw [mget_var_def, alistTheory.ALOOKUP_APPEND] \\ EVERY_CASE_TAC \\ simp []);
+
+val mget_var_get_nbq_var = Q.store_thm("mget_var_get_nbq_var",
+ `!s var. mget_var s.nbq var = get_nbq_var s var`,
+ simp [mget_var_def, get_nbq_var_def]);
+
+val mget_var_get_var = Q.store_thm("mget_var_get_var",
+ `!s var. mget_var s.vars var = get_var s var`,
+ simp [mget_var_def, get_var_def]);
+
+(* Variant of prun_intro_cvars_same_after2 *)
+val mrun_intro_cvars_same_after2 = Q.store_thm("mrun_intro_cvars_same_after2",
+ `!ps fext ver_s ver_s' var vars.
+   mstep fext (MAP (intro_cvars vars) ps) ver_s = INR ver_s' /\ MEM var vars ==>
+   get_var ver_s' var = get_var ver_s var`,
+ Induct >- rw [mstep_def, sum_foldM_def] \\
+ rw [mstep_unfold1] \\ metis_tac [prun_intro_cvars_same_after2]);
+
+(* mstep_untainted_state is very general because otherwise the induction does not work,
+   this thm is a simpler version that is what we actually need in practice *)
+val mstep_commit_lift_EvalSs = Q.store_thm("mstep_commit_lift_EvalSs",
+ `!vars fext ps fextv vs s Penv.
+  Penv vs /\ (* <-- always "Penv = vars_has_type ver_s.vars ty" *)
+  (* Conditions on what programs can be lifted *)
+  (!p. MEM p ps ==> (!s. ?s'. !env. Penv env ==> EvalS fext s env s' p) /\
+                    vnwrites p = [] /\
+                    cvar_writes_cond vars p /\
+                    cvar_writes_cond2 vars p) /\
+  ALL_DISTINCT ps /\
+
+  (* Conditions on the environment *)
+  relM s vs /\
+  relS_fextv fextv fext /\
+  valid_ps_for_module vars ps
+  ==>
+  ?vs'. mstep_commit fextv (MAP (intro_cvars vars) ps) vs = INR vs' /\
+        (!p. MEM p ps ==>
+             (?ver_s_p. prun fextv <| vars := vs; nbq := [] |> p = INR ver_s_p /\ (* relS hp ver_s' ... *)
+                        (!var. MEM var (vwrites p) ==> mget_var vs' var = get_var ver_s_p var)))`,
+ rpt strip_tac \\
+ qspecl_then [`vars`, `fext`, `ps`, `fextv`,
+              `<| vars := vs; nbq := [] |>`, `<| vars := vs; nbq := [] |>`,
+              `s`, `Penv`] mp_tac mstep_untainted_state \\
+ impl_tac >- simp [relM_relS] \\ strip_tac \\
+ simp [mstep_commit_def, sum_map_def] \\ rpt strip_tac \\ drule_last \\ drule_first \\
+ fs [EvalS_def] \\ first_x_assum (qspec_then `s` strip_assume_tac) \\ drule_strip relM_relS \\
+ drule_first \\ rpt strip_tac \\
+ drule_first \\ simp [mget_var_append, mget_var_get_var, mget_var_get_nbq_var] \\
+ pop_assum mp_tac \\ EVERY_CASE_TAC \\ fs [get_nbq_var_def] \\
+ drule_strip mrun_intro_cvars_same_after2 \\ drule_strip prun_get_var_INL \\ metis_tac []);
+
+(* From mstep_commit to mrun *)
+
+val mstep_commit_mrun = Q.store_thm("mstep_commit_mrun",
+ `!n vs ps fextv step tys.
+   relM (step 0) vs /\
+   vars_has_type vs tys /\
+   (!n vs. relM (step n) vs /\ vars_has_type vs tys ==>
+           ?vs'. mstep_commit (fextv n) ps vs = INR vs' /\ relM (step (SUC n)) vs')
+   ==>
+   ?vs'. mrun fextv ps vs n = INR vs' /\ relM (step n) vs'`,
+ Induct_on `n` >- rw [mrun_def] \\ rpt strip_tac \\ drule_last \\
+ drule_strip vars_has_type_mrun \\ simp [mrun_unfold1]);
 
 (* Useful for variables never written to *)
-val mget_var_mstep_no_writes = Q.store_thm("mget_var_mstep_no_writes",
- `!ps var vars ver_s ver_s'.
-  mstep ver_s (MAP (intro_cvars vars) ps) = INR ver_s' /\
+val mstep_intro_cvars_no_writes = Q.store_thm("mstep_intro_cvars_no_writes",
+ `!fext ps var vars ver_s ver_s'.
+  mstep fext (MAP (intro_cvars vars) ps) ver_s = INR ver_s' /\
   EVERY (\p. ~MEM var (vwrites p)) ps /\
   EVERY (\p. vnwrites p = []) ps /\
   get_nbq_var ver_s var = INL UnknownVariable ==>
-  mget_var <| vars := ver_s'.nbq ++ ver_s'.vars; ps := MAP (intro_cvars vars) ps |> var =
-  get_var ver_s var`,
+  mget_var (ver_s'.nbq ++ ver_s'.vars) var = get_var ver_s var`,
  rw [mget_var_def, alistTheory.ALOOKUP_APPEND] \\ drule mstep_no_writes \\
  rpt (disch_then drule) \\ EVERY_CASE_TAC \\ fs [get_var_def, get_nbq_var_def]);
+
+val mstep_commit_intro_cvars_no_writes = Q.store_thm("mstep_commit_intro_cvars_no_writes",
+ `!fext ps var vars vs vs'.
+  mstep_commit fext (MAP (intro_cvars vars) ps) vs = INR vs' /\
+  EVERY (\p. ~MEM var (vwrites p)) ps /\
+  EVERY (\p. vnwrites p = []) ps ==>
+  mget_var vs' var = mget_var vs var`,
+ rw [mstep_commit_def] \\ drule_strip sum_map_INR \\ drule_strip mstep_intro_cvars_no_writes \\
+ fs [get_nbq_var_def, sum_map_def, get_var_def, mget_var_def]);
 
 val _ = export_theory();

@@ -3,26 +3,12 @@ struct
 
 open preamble;
 
-open bitstringSyntax boolSyntax combinSyntax numSyntax stringSyntax;
-open arithmeticTheory bitstringTheory indexedListsTheory optionTheory wordsTheory wordsSyntax;
+open wordsSyntax;
 
-open dep_rewrite;
-open Abbrev;
-
-open wordsLib;
-
-open verilogTheory verilogMetaTheory verilogSyntax;
-
-open translatorCoreTheory;
+open verilogSyntax;
 
 exception UnableToTranslate of term * string;
 exception UnableToTranslateTy of hol_type * string;
-
-(** Syntax for translatorCoreTheory **)
-
-val BOOL_tm = ``BOOL``;
-val WORD_tm = ``WORD``;
-val WORD_ARRAY_tm = ``WORD_ARRAY``;
 
 (** Type predicates **)
 
@@ -47,5 +33,15 @@ fun predicate_for_type_ty ty =
 
 (* TODO: Rename function? *)
 fun predicate_for_type tm = predicate_for_type_ty (type_of tm);
+
+fun hol2ver_for_type ty =
+  if ty = bool then
+    VBool_tm
+  else if is_word_type ty then let
+    val alpha' = dest_word_type ty
+  in
+    inst [ alpha |-> alpha' ] w2ver_tm
+  end else
+    raise UnableToTranslateTy (ty, "unknown type");
 
 end

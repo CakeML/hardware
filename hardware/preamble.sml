@@ -1,14 +1,20 @@
-structure preamble =
-struct
+structure preamble = struct
 
 (* Basic *)
 open HolKernel Parse boolLib bossLib BasicProvers;
 
 (* Additional *)
-open listTheory;
+open listTheory wordsTheory;
+open numLib wordsLib;
 
 (* Project libraries *)
 open miscTheory;
+
+(*
+Setup:
+guess_lengths ();
+prefer_num ();
+*)
 
 (* Borrowed from cakeml: *)
 val rveq = rpt BasicProvers.VAR_EQ_TAC;
@@ -16,9 +22,36 @@ val match_exists_tac = part_match_exists_tac (hd o strip_conj);
 val asm_exists_tac = first_assum (match_exists_tac o concl);
 (* *)
 
+fun drule_strip_tac (g as (tms, tm)) = let
+  val tm = tm |> dest_imp |> fst |> strip_forall |> snd
+in
+ if not (is_imp tm) orelse is_neg tm then
+   strip_tac g
+ else
+   FAIL_TAC "drule_strip_tac" g
+end;
+
+fun drule_strip th = drule th \\ rpt (disch_then drule) \\ TRY drule_strip_tac \\ rveq;
+val drule_first = first_x_assum drule \\ rpt (disch_then drule) \\ TRY drule_strip_tac;
+val drule_last = last_x_assum drule \\ rpt (disch_then drule) \\ TRY drule_strip_tac;
+
+fun strip_disch_tac (g as (tms, tm)) =
+ if not (is_neg tm) andalso is_imp tm then
+   strip_tac g
+ else
+   FAIL_TAC "strip_disch_tac" g;
+
+val strip_tac' = gen_tac ORELSE strip_disch_tac;
+
+val f_equals_tac = rpt (AP_THM_TAC ORELSE AP_TERM_TAC);
+
 fun flip f x y = f y x;
 
 fun sing x = [x];
+
+fun fst_map f = map (fn (fst, snd) => (f fst, snd));
+
+fun snd_map f = map (fn (fst, snd) => (fst, f snd));
 
 (* Filters list l by the list of bools in filterl, if true, keep element, otherwise, drop it *)
 (* TODO: Should maybe raise something better *)
@@ -43,8 +76,8 @@ fun can f x = (f x; true) handle HOL_ERR _ => false;
 
 fun ASM_CONV_RULE c = (CONV_RULE c) o (HYP_CONV_RULE (K true) c);
 
-fun drule th =
-  first_assum(mp_tac o MATCH_MP (ONCE_REWRITE_RULE[GSYM AND_IMP_INTRO] th));
+(*fun drule th =
+  first_assum(mp_tac o MATCH_MP (ONCE_REWRITE_RULE[GSYM AND_IMP_INTRO] th));*)
 
 fun is_bool_type ty =
   is_type ty andalso (ty |> dest_type |> fst) = "bool";

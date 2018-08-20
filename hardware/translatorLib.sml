@@ -3,21 +3,19 @@ struct
 
 open preamble;
 
-open bitstringSyntax boolSyntax combinSyntax numSyntax stringSyntax;
 open arithmeticTheory bitstringTheory indexedListsTheory optionTheory wordsTheory wordsSyntax;
+open dep_rewrite wordsLib;
+open bitstringSyntax boolSyntax combinSyntax fcpSyntax numSyntax stringSyntax sumSyntax;
 
-open dep_rewrite;
-open Abbrev;
-
-open wordsLib;
-
-open verilogTheory verilogMetaTheory verilogSyntax;
-open translatorCoreTheory translatorCoreLib translatorTheory;
-open tinyConfigLib tinyMachineTheory tinyImplTheory;
+open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory translatorTheory tinyMachineTheory;
+open tinyConfigLib translatorCoreLib;
+open verilogSyntax;
 
 (** Various declarations **)
 
 val env_tm = ``env : envT``;
+(* fext must be named fext, simplifies  *)
+val fext_tm = mk_var ("fext", fext_ty);
 
 (** Syntax for translatorTheory **)
 
@@ -25,14 +23,17 @@ local val s = HolKernel.syntax_fns1 "translator" in
   val (state_var_tm, mk_state_var, dest_state_var, is_state_var) = s "state_var"
 end;
 
-local val s = HolKernel.syntax_fns3 "translator" in
+local val s = HolKernel.syntax_fns3 "verilogType" in
   val (var_has_value_tm, mk_var_has_value, dest_var_has_value, is_var_has_value) = s "var_has_value"
-  val (var_has_type_tm, mk_var_has_type, dest_var_has_type, is_var_has_type) = s "var_has_type"
+  val (_, _, dest_var_has_type, _) = s "var_has_type"
+  val (_, _, _, is_var_has_type_old) = s "var_has_type_old"
 end;
 
-local val s = HolKernel.syntax_fns4 "translator" in
+(*
+local val s = HolKernel.syntax_fns5 "translator" in
   val (Eval_tm, mk_Eval, dest_Eval, is_Eval) = s "Eval"
 end;
+*)
 
 (** Implementation **)
 
@@ -48,14 +49,17 @@ in
   (var, th)
 end;
 
-val relS_singles =
-    relS_def |> SPEC_ALL |> concl |> dest_eq
-             |> (fn (ltm, rtm) => map (build_relS_var_thm ltm) (strip_conj rtm));
+val relS_singles = relS_def
+ |> SPEC_ALL |> concl |> dest_eq
+ |> (fn (ltm, rtm) => map (build_relS_var_thm ltm) (strip_conj rtm))
+ |> Redblackmap.fromList String.compare;
 
-fun relSs var = lookup var relS_singles;
+fun relSs var = Redblackmap.find (relS_singles, var);
+
+(*``Eval fext s env P expression`` |> (RATOR_CONV o RAND_CONV) (ONCE_REWRITE_CONV [mk_thm ([], ``expression = ARB``)])*)
 
 (*Eval_env_CONV *)
-val Eval_exp_CONV = RATOR_CONV o RAND_CONV;
+val Eval_exp_CONV = RATOR_CONV o RAND_CONV; (* maybe incorrect *)
 (*Eval_pred_CONV *)
 
 val Eval_get_pred_exp = rand o rand o rator;
@@ -138,16 +142,28 @@ fun build_Eval_Var (name, accessf) = let
   val nameHOL = fromMLstring name
   val typepred = accessf |> dest_const |> snd |> dom_rng |> snd |> predicate_for_type_ty
 in
-  Q.prove(`!s. Eval s env (^typepred (^accessf s)) (Var ^nameHOL)`,
-          rw [Eval_def, relS_def, relS_var_def, erun_def])
+  Q.prove(`!s. Eval fext s env (^typepred (^accessf s)) (Var ^nameHOL)`,
+          rw [Eval_def, relSs name, erun_def, erun_get_var_def])
 end;
 
 val Eval_Vars = map (fn (name, accessf) => (accessf, build_Eval_Var (name, accessf))) accessors;
 
+fun build_Eval_InputVar (name, accessf) = let
+  val nameHOL = fromMLstring name
+  val typepred = accessf |> dest_const |> snd |> dom_rng |> snd |> predicate_for_type_ty
+in
+  Q.prove(`!s. Eval fext s env (^typepred (^accessf fext)) (InputVar ^nameHOL)`,
+          rw [Eval_def, relS_fextv_def, erun_def, erun_get_var_def, BOOL_def, WORD_def])
+end;
+
+val Eval_InputVars = map (fn (name, accessf) => (accessf, build_Eval_InputVar (name, accessf)))
+                         fext_accessors;
+
+(*val foo = Eval_InputVars |> hd |> snd |> Q.SPEC `s`*)
+
 val Eval_T = SPEC ``T`` Eval_bool;
 val Eval_F = SPEC ``F`` Eval_bool;
 
-(* TODO: Need special handling of this: Eval_BOOL_NotEqual, Eval_WORD_NotEqual *)
 val builtin_binops = [
   Eval_BOOL_And, Eval_BOOL_Equal, Eval_BOOL_Or,
 
@@ -161,7 +177,7 @@ val builtin_binops = [
   Eval_WORD_LessThanOrEqual, Eval_WORD_LowerThanOrEqual
   ]
   |> map (fn th => (th |> SPEC_ALL |> UNDISCH |> concl
-                       |> Eval_get_pred_exp |> rator |> rator, th));
+                       |> Eval_get_pred_exp |> strip_comb |> fst, th));
 
 fun dest_builtin_binop tm = let
   val (px, r) = dest_comb tm
@@ -170,6 +186,13 @@ fun dest_builtin_binop tm = let
   val (ss, ii) = match_term x p
   val th = INST ss (INST_TYPE ii th)
   in (p, l, r, th) end handle HOL_ERR _ => failwith "Not a builtin operator";
+
+(* TODO: Move? *)
+fun EVAL_MP th = let
+  val ant = th |> concl |> dest_imp |> fst |> EVAL_PROVE
+in
+  MP th ant
+end;
 
 (* Translator for pure expressions (exp) *)
 fun hol2hardware_exp s tm =
@@ -200,12 +223,25 @@ fun hol2hardware_exp s tm =
     check_inv_Eval "binop" tm result
   end
 
-  (* CASE: Neg? TODO: Should translate to proper NotEqual and ArrayNotEqual! *)
+  (* CASE: Neg? *)
   else if is_neg tm then let
     val arg = dest_neg tm
-    val arg' = hol2hardware_exp s arg
   in
-    MATCH_MP Eval_neg arg'
+    (* Special case for ArrayNotEqual *)
+    if is_eq arg then let
+      val (argl, argr) = dest_eq arg
+      val thl = hol2hardware_exp s argl
+      val thr = hol2hardware_exp s argr
+      (* TODO: Somewhat hacky: *)
+      val eval_thm = if (type_of argl) = bool then Eval_BOOL_NotEqual else Eval_WORD_NotEqual
+      val result = MATCH_MP eval_thm (CONJ thl thr)
+    in
+      check_inv_Eval "neg" tm result
+    end else let
+      val th = hol2hardware_exp s arg
+    in
+      MATCH_MP Eval_neg th
+    end
   end
 
   (* CASE: Inline if *)
@@ -227,10 +263,12 @@ fun hol2hardware_exp s tm =
   (* TODO: Could add better error message for when indexing outside the array (EVAL will just fail currently) *)
   else if is_word_bit tm then let
     val (i, var) = dest_word_bit tm
-    val var_Eval = hol2hardware_exp s var
-    val precond = mk_less (i, mk_dimindex (dim_of var)) |> EVAL_PROVE
+    val precond = hol2hardware_exp s var
+    val ret = MATCH_MP Eval_word_bit precond
+    val ret = SPEC i ret
+    val precond = ret |> concl |> dest_imp |> fst |> EVAL_PROVE
   in
-    MATCH_MP Eval_word_bit (CONJ precond var_Eval)
+    MATCH_MP ret precond
   end
 
   (* CASE: word_extract *)
@@ -255,11 +293,11 @@ fun hol2hardware_exp s tm =
     arg' |> MATCH_MP Eval_w2w |> INST_TYPE [ beta |-> out_dim ] |> (CONV_RULE o RAND_CONV o RAND_CONV) EVAL
   end
 
-  (* CASE: zero extend? (Almost identical to w2w.), TODO: Eval dimindex... *)
+  (* CASE: zero extend? (Almost identical to w2w.) *)
   else if is_sw2sw tm then let
     val (arg, out_dim) = dest_sw2sw tm
     val in_dim = dim_of arg
-    val precond = mk_less (mk_dimindex in_dim, mk_dimindex out_dim) |> EVAL_PROVE
+    val precond = mk_leq (mk_dimindex in_dim, mk_dimindex out_dim) |> EVAL_PROVE
     val arg' = hol2hardware_exp s arg
   in
     MATCH_MP Eval_sw2sw (CONJ precond arg')
@@ -275,6 +313,19 @@ fun hol2hardware_exp s tm =
     check_inv_Eval "v2w" tm result
   end
 
+  else if is_word_concat tm then let
+    val (tml, tmr) = dest_word_concat tm
+    val evall = hol2hardware_exp s tml
+    val evalr = hol2hardware_exp s tmr
+    val result = MATCH_MP Eval_word_concat (CONJ evall evalr)
+    (* TODO: Could add length check here ... *)
+    val gammasum = Arbnum.+ (tml |> size_of, tmr |> size_of) |> mk_numeric_type
+    val result = INST_TYPE [ gamma |-> gammasum ] result
+    val result = EVAL_MP result
+  in
+    check_inv_Eval "word_concat" tm result
+  end
+
   (* CASE: Other compound expression, e.g. state projection ("state var")? *)
   else if is_comb tm then let
     val (f, arg) = dest_comb tm
@@ -284,6 +335,12 @@ fun hol2hardware_exp s tm =
       case lookup_same f Eval_Vars of
           SOME result => SPEC s result
         | NONE => raise UnableToTranslate (tm, "Unknown state projection")
+
+    (* SUBCASE: External read? *)
+    else if arg = fext_tm then
+      case lookup_same f Eval_InputVars of
+          SOME result => SPEC s result
+        | NONE => raise UnableToTranslate (tm, "Unknown fext projection")
 
     (* SUBCASE: Array indexing? Just assume it is for now... TODO *)
     else let
@@ -302,6 +359,12 @@ fun hol2hardware_exp s tm =
 (*
 Testing:
 val tm = ``(3 >< 1) s.instruction * ((2 >< 0) s.instruction):word3``;
+val tm = ``s.PC - fext.data_rdata + r + Tr``;
+val tm = ``(3 >< 1) fext.data_rdata + r + Tr``;
+val tm = ``(5w:10 word) @@ (b:15 word)``
+
+val s = ``s:state_circuit``;
+
 hol2hardware_exp s tm
 *)
 
@@ -316,29 +379,31 @@ fun build_update_base_stmt field fupd pred =
     val field_str = fromMLstring field
   in
    ``!s env w exp.
-      Eval s env (^pred w) exp ==>
-      EvalS s env (^fupd (K w) s) (BlockingAssign (Var ^field_str) exp)``
+      Eval fext s env (^pred w) exp ==>
+      EvalS fext s env (^fupd (K w) s) (BlockingAssign (Var ^field_str) exp)``
   end;
 
-val update_base_tac =
- rw [Eval_def, EvalS_def, prun_def] \\ res_tac \\
- fs [sum_bind_def,
-     prun_bassn_def, assn_def, set_var_def,
-     relS_def, relS_var_def] \\
- REVERSE TOP_CASE_TAC
- >- (imp_res_tac same_shape_BOOL \\ imp_res_tac same_shape_WORD \\ imp_res_tac same_shape_WORD_ARRAY)
- \\ fs [sum_for_def, sum_map_def, get_var_def];
+fun update_base_tac field =
+ rw [Eval_def, EvalS_def, prun_def] \\ drule_first \\ drule_strip (relSs field) \\
+
+ imp_res_tac same_shape_BOOL \\
+ imp_res_tac same_shape_WORD \\
+ imp_res_tac same_shape_WORD_ARRAY \\
+
+ simp [sum_bind_def, prun_bassn_def, assn_def, sum_for_def, sum_map_def] \\
+ fs [relS_def, relS_var_def, get_var_cleanup];
 
 fun build_slice_update_base_stmt field fupd facc =
   let
     val field_str = fromMLstring field
   in
-   ``!s env w exp hb lb.
-      Eval s env (WORD w) exp ==>
-      EvalS s env (^fupd (K (bit_field_insert hb lb w (^facc s))) s)
-                  (BlockingAssign (ArraySlice ^field_str [] hb lb) exp)``
+   ``!s env (w:'a word) exp hb lb.
+      Eval fext s env (WORD w) exp ==>
+      EvalS fext s env (^fupd (K (bit_field_insert hb lb w (^facc s))) s)
+                       (BlockingAssign (ArraySlice (Var ^field_str) [] hb lb) exp)``
   end;
 
+(* TODO: *)
 val slice_update_base_tac = cheat;
 
 val update_base_thms =
@@ -347,8 +412,8 @@ val update_base_thms =
             let
               val pred = fupd |> type_of |> dom_rng |> fst |> dom_rng |> fst |> predicate_for_type_ty
               val base_thm = [prove (build_update_base_stmt field fupd pred,
-                                     update_base_tac)]
-              val slice_thm = if same_const pred WORD_tm andalso field = "mem_data_in"
+                                     update_base_tac field)]
+              val slice_thm = if same_const pred WORD_tm
                               then [prove (build_slice_update_base_stmt field fupd facc,
                                            slice_update_base_tac)]
                               else []
@@ -362,21 +427,19 @@ fun build_WORD_ARRAY_update_base_stmt vname projf updatef = let
   val vnameHOL = fromMLstring vname
 in
   ``!s env i ie v ve.
-     Eval s env (WORD i) ie /\
-     Eval s env (WORD v) ve ==>
-     EvalS s env (^updatef (K ((i =+ v) (^projf s))) s)
-                 (BlockingAssign (ArrayIndex ^vnameHOL [ie]) ve)``
+     Eval fext s env (WORD i) ie /\
+     Eval fext s env (WORD v) ve ==>
+     EvalS fext s env (^updatef (K ((i =+ v) (^projf s))) s)
+                      (BlockingAssign (ArrayIndex (Var ^vnameHOL) [ie]) ve)``
 end;
 
 fun WORD_ARRAY_update_base_tac name =
  rw [Eval_def, EvalS_def, prun_def] \\
- first_x_assum drule \\ first_x_assum drule \\ rpt strip_tac \\
+ drule_first \\ drule_first \\
  simp [sum_bind_def, prun_def] \\
- imp_res_tac (relSs name) \\ Cases_on `v'` >- fs [WORD_ARRAY_def] \\
- drule prun_bassn_correct \\
- qpat_x_assum `_ = INR res` assume_tac \\
+ drule_strip (relSs name) \\ Cases_on `v'` >- fs [WORD_ARRAY_def] \\
  imp_res_tac WORD_ver2n \\
- rpt (disch_then drule) \\ strip_tac \\
+ drule_strip prun_bassn_correct \\
  asm_exists_tac \\ fs [relS_def, relS_var_def, WORD_ARRAY_def, WORD_def] \\
  rw [combinTheory.UPDATE_def];
 
@@ -384,44 +447,24 @@ fun build_WORD_ARRAY_slice_update_base_stmt vname projf updatef = let
   val vnameHOL = fromMLstring vname
 in
   ``!s env i ie v ve hb lb.
-     Eval s env (WORD i) ie /\
-     Eval s env (WORD v) ve ==>
-     EvalS s env (^updatef (K ((i =+ bit_field_insert hb lb v (^projf s i)) (^projf s))) s)
-                 (BlockingAssign (ArraySlice ^vnameHOL [ie] hb lb) ve)``
+     Eval fext s env (WORD i) ie /\
+     Eval fext s env (WORD v) ve ==>
+     EvalS fext s env (^updatef (K ((i =+ bit_field_insert hb lb v (^projf s i)) (^projf s))) s)
+                      (BlockingAssign (ArraySlice (Var ^vnameHOL) [ie] hb lb) ve)``
 end;
 
 fun WORD_ARRAY_slice_update_base_tac name = cheat;
 
 (* Note that we do not have step thms for WORD_ARRAYs *)
 val WORD_ARRAY_update_base_thms =
- [("R", ``R_fupd``, ``tinyImpl_state_R``),
-  ("mem_fun", ``mem_fun_fupd``, ``tinyImpl_state_mem_fun``)]
- |> map (fn (name, updf, projf) => (updf,
-                                    [prove (build_WORD_ARRAY_slice_update_base_stmt name projf updf,
-                                            WORD_ARRAY_slice_update_base_tac name),
-                                     prove (build_WORD_ARRAY_update_base_stmt name projf updf,
-                                            WORD_ARRAY_update_base_tac name)]));
-
-(*
-Test, for update base thm for WORD_ARRAY:
-
-val EvalS_ass_R_base = Q.store_thm("EvalS_ass_R_base",
- `!s env i ie v ve.
-  Eval s env (WORD i) ie /\
-  Eval s env (WORD v) ve ==>
-  EvalS s env (s with R := (i =+ v) s.R)
-              (BlockingAssign (ArrayIndex "R" [ie]) ve)`,
- rw [Eval_def, EvalS_def, prun_def] \\
- first_x_assum drule \\ first_x_assum drule \\ rpt strip_tac \\
- simp [sum_bind_def, prun_def] \\
- imp_res_tac (relSs "R") \\ Cases_on `v'` >- fs [WORD_ARRAY_def] \\
- drule prun_bassn_correct \\
- qpat_x_assum `_ = INR res` assume_tac \\
- imp_res_tac WORD_ver2n \\
- rpt (disch_then drule) \\ strip_tac \\
- asm_exists_tac \\ fs [relS_def, relS_var_def, WORD_ARRAY_def, WORD_def] \\
- rw [combinTheory.UPDATE_def]);
-*)
+ zip updates accessors
+ |> filter (fn (_, (_, facc)) => (facc |> type_of |> dom_rng |> snd |> dest_type |> fst) = "fun")
+ |> map (fn ((name, updf), (_, projf)) =>
+         (updf,
+          [prove (build_WORD_ARRAY_slice_update_base_stmt name projf updf,
+                  WORD_ARRAY_slice_update_base_tac name),
+           prove (build_WORD_ARRAY_update_base_stmt name projf updf,
+                  WORD_ARRAY_update_base_tac name)]));
 
 (* A note about the order of writing to fields:
 
@@ -443,44 +486,27 @@ fun build_update_step_stmt var fupd = let
  val pred = fupd |> type_of |> dom_rng |> fst |> dom_rng |> fst |> predicate_for_type_ty
 in
  ``!s f fv env w exp.
-    Eval s env (^pred w) exp /\
-    EvalS s env f fv ==>
+    Eval fext s env (^pred w) exp /\
+    EvalS fext s env f fv ==>
     EVERY (\var. ~MEM var (vwrites fv)) (evreads exp) ==>
-    EvalS s env (^fupd (K w) f) (Seq fv (BlockingAssign (Var ^var_str) exp))``
+    EvalS fext s env (^fupd (K w) f) (Seq fv (BlockingAssign (Var ^var_str) exp))``
 end;
 
 fun update_step_tac var =
  rw [EVERY_MEM, Eval_def, EvalS_def, prun_def] \\
- first_x_assum drule \\ first_x_assum drule \\ rpt strip_tac \\ simp [sum_bind_def] \\
- qspecl_then [`ver_s'`, `exp'`, `ver_s with vars := env`] mp_tac erun_cong \\
- impl_tac >- metis_tac [prun_same_after] \\ rw [sum_bind_def] \\
- drule (prun_bassn_works_for var) \\
- drule (relSs var) \\ strip_tac \\
- rpt (disch_then drule) \\ rw [] \\ fs [relS_def, relS_var_def, get_var_set_var];
+ drule_first \\ drule_first \\ simp [sum_bind_def] \\
+ qspecl_then [`fextv`, `ver_s'`, `exp`, `ver_s with vars := env`] mp_tac erun_cong \\
+ impl_tac >- (drule_strip prun_same_after \\ simp []) \\ rw [sum_bind_def] \\
+ drule_strip (prun_bassn_works_for var) \\
+ drule_strip (relSs var) \\
+ rpt (disch_then drule) \\
+ simp [] \\ fs [relS_def, relS_var_def, get_var_set_var];
 
 val update_step_thms =
- updates
- (* TODO: Do this in a less ad-hoc way: *)
- |> filter (fn (field, fupd) => field <> "R" andalso field <> "mem_fun")
- |> map (fn (field, fupd) => (fupd, prove (build_update_step_stmt field fupd,
-                                           update_step_tac field)));
-
-(*
-(* Example with PC to find what tactic to use ... *)
-val update_step_tac_example = Q.store_thm("update_step_tac_example",
- `!s f fv env w exp.
-   Eval s env (WORD w) exp /\
-   EvalS s env f fv /\
-   EVERY (\var. ~MEM var (vwrites fv)) (evreads exp) ==>
-   EvalS s env (f with PC := w) (Seq fv (BlockingAssign (Var "PC") exp))`,
- rw [EVERY_MEM, Eval_def, EvalS_def, prun_def] \\
- first_x_assum drule \\ first_x_assum drule \\ rpt strip_tac \\ simp [sum_bind_def] \\
- qspecl_then [`ver_s'`, `exp'`, `ver_s with vars := env`] mp_tac erun_cong \\
- impl_tac >- metis_tac [prun_same_after] \\ rw [sum_bind_def] \\
- drule (prun_bassn_works_for "PC") \\
- drule (relSs "PC") \\ strip_tac \\
- rpt (disch_then drule) \\ rw [] \\ fs [relS_def, relS_var_def, get_var_set_var]);
-*)
+ zip updates accessors
+ |> filter (fn (_, (_, facc)) => (facc |> type_of |> dom_rng |> snd |> dest_type |> fst) <> "fun")
+ |> map (fn ((field, fupd), _) => (fupd, prove (build_update_step_stmt field fupd,
+                                                update_step_tac field)));
 
 (* E.g., s with PC := 0w is a update.
    We know that everything is in this list, but these are not always the thm we want to use! *)
@@ -528,11 +554,12 @@ in
 end;
 
 (* newstateprog is a vprog, often a sequence of state updates (but not always) *)
+(* val (th, inners, newstateprog) = (body', v, arg'_prog) *)
 fun trans_to_state_body_form th inners newstateprog =
   th |> CONV_RULE (Eval_exp_CONV (UNBETA_CONV inners))
      |> DISCH_ALL
      |> Q.INST [`env` |-> `env'`]
-     |> Q.DISCH (`prun (vs with vars := env) ^newstateprog = INR (fvv, vs')`)
+     |> Q.DISCH (`relS_fextv fextv fext /\ prun fextv (vs with vars := env) ^newstateprog = INR vs'`)
      |> Q.INST [`env'` |-> `vs'.vars`];
 
 fun get_var_bubble_thm th = let
@@ -543,7 +570,7 @@ in
   in
     if is_var_has_value precond then
       SOME bubble_var_has_value
-    else if is_var_has_type precond then
+    else if is_var_has_type_old precond then
       SOME bubble_var_has_type
     else
       raise UnableToTranslate (th |> concl, "Unknown precondition")
@@ -576,7 +603,8 @@ fun first_PART_MATCH proj ths tm =
                  handle HOL_ERR _ => first_PART_MATCH proj ths tm;
 
 
-(* For debugging *)
+(* For debugging: val tm = (!tm_trace) |> hd *)
+(* val s = ``s:state_circuit`` *)
 val tm_trace = ref ([]:term list);
 
 (* This is just a wrapper function with tracing, calling hol2hardware_body_impl *)
@@ -619,6 +647,7 @@ and hol2hardware_body_impl s tm =
     val (fupd, Kval) = dest_comb fupd_arg
     val (Kfun, newval) = dest_comb Kval
   in
+    (* val SOME base_thms = lookup_same fupd WORD_ARRAY_update_base_thms *)
     case lookup_same fupd WORD_ARRAY_update_base_thms of
         (* TODO: assumes everything is base here... also assumes structure... probably ok for Tiny *)
         (* TODO: do we check that we are using the correct state variable here? no? *)
@@ -669,8 +698,8 @@ and hol2hardware_body_impl s tm =
       val body' = hol2hardware_body v body
       val arg'_prog = arg' |> concl |> EvalS_get_prog
       val body' = trans_to_state_body_form body' v arg'_prog |> bubble_vars
-      val body' = body' |> Q.GENL [`vs`, `vs'`, `fvv`] |> GEN v
-      (* TODO: Why do we need HO_ here? Fails without, captures bound variable.
+      val body' = body' |> Q.GENL [`vs`, `vs'`, `fextv`] |> GEN v
+      (* TODO: Why do we need HO_ here? Fails without, "captures bound variable".
                Might interact with other bugs? *)
       (*val () = (thm1_fail := arg'; thm2_fail := body')*)
       val result = HO_MATCH_MP EvalS_EvalS (CONJ arg' body')
@@ -725,7 +754,7 @@ and hol2hardware_case_body_itr s v_Eval tm = let
   val (condl, condr) = dest_eq cond
   val ft_Eval = hol2hardware_body s tb
 in
-  (* might have to look deeper than this, because default case might start with an unrelated if stmt *)
+  (* TODO: might have to look deeper than this, because default case might start with an unrelated if stmt *)
   if is_cond fb then let (* step base *)
     val (itr_type, fb_Eval) = hol2hardware_case_body_itr s v_Eval fb
   in
@@ -760,25 +789,75 @@ in
   in
     if same_const is_max T then
       (FullMatch, MATCH_MP EvalS_Case_ARB (LIST_CONJ [word_t_val, v_Eval, ft_Eval]))
-    else if same_const is_max F then let
-      (* Assume the case ends with a match all *)
-      val fb_Eval = hol2hardware_body s fb
-      val result = MATCH_MP EvalS_Case_catch_all' (LIST_CONJ [v_Eval, ft_Eval, fb_Eval])
-      val result = ISPEC condr result
-    in
-      (CatchAllMatch, result)
-    end
+    else if same_const is_max F then (* <-- assume the case ends with a match all *)
+      if fb = s then let
+        val result = MATCH_MP EvalS_Case_catch_all_NONE (LIST_CONJ [v_Eval, ft_Eval])
+        val result = ISPEC condr result
+      in
+        (CatchAllMatch, result)
+      end else let
+        val fb_Eval = hol2hardware_body s fb
+        val result = MATCH_MP EvalS_Case_catch_all_SOME (LIST_CONJ [v_Eval, ft_Eval, fb_Eval])
+        val result = ISPEC condr result
+      in
+        (CatchAllMatch, result)
+      end
     else
       raise UnableToTranslate (tm, "Failed to evaluate bound, something is wrong")
   end
 end;
 
-(* Top-level function *)
-(* Translator for state functions, previously named translate_state_fun *)
-(* Always returns something of the form:
+(*
+Testing:
+
+val tm = ``s with PC := 5w``;
+val tm = ``let t = 10w; r = T in s with <| PC := 5w + t + fext.data_rdata;
+                                           ALU_res := s.acc_arg;
+                                           acc_arg_ready := r |>``;
+val tm = ``let s' = s with PC := 5w in s' with ALU_res := s.PC``;
+
+val res = hol2hardware_body s tm;
+*)
+
+(* Translates a step function to hardware ... assumes thms of form: !s. [...] OR !fext s. [...] *)
+fun hol2hardware_step_function th = let
+  val (vars, funth) = th |> concl |> strip_forall
+  val s = case length vars of
+              1 => (* s *) vars |> hd
+            | 2 => (* fext s *) vars |> tl |> hd
+            | _ => failwith "Unknown form"
+  val ret = hol2hardware_trace s (rhs funth)
+in
+  (* TODO: No error handling here if no match... *)
+  REWRITE_RULE [GSYM th] ret
+end;
+
+(* TODO: WORD_ARRAY *)
+fun vars_has_type_cleanup th = let
+  val th = th
+   |> DISCH_ALL
+   (* Might do too much: *)
+   |> SIMP_RULE (srw_ss()) [var_has_type_old_var_has_type_BOOL, var_has_type_old_var_has_type_WORD]
+   |> UNDISCH_ALL
+  val newhyp = th
+   |> hyp
+   |> map ((fn (_, var, ty) => pairSyntax.mk_pair (var, ty)) o dest_var_has_type)
+   |> flip (curry listSyntax.mk_list) ``:string # vertype``
+   |> (fn tm => ``vars_has_type env ^tm``)
+in
+ prove (mk_imp (newhyp, th |> concl), simp [vars_has_type_def, DISCH_ALL th]) |> UNDISCH_ALL
+end;
 
 (*
-     [P0, P1, ...] ==> C *)
+Testing:
+
+vars_has_type_cleanup res
+
+*)
+
+(* Top-level function, translator for state functions *)
+
+(*
 fun hol2hardware tm =
     let
       val (s, f) = dest_abs tm

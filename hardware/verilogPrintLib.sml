@@ -6,7 +6,6 @@ open preamble;
 open wordsSyntax stringSyntax listSyntax numSyntax pairSyntax optionSyntax;
 
 open verilogTheory verilogSyntax;
-open translatorCoreLib;
 
 open verilogPrintTheory;
 
@@ -24,6 +23,7 @@ end;
 
 val dest_numeral_to_string = Arbnumcore.toString o dest_numeral;
 fun op_to_string print_tm op_tm = mk_comb (print_tm, op_tm) |> EVAL |> concl |> rhs |> fromHOLstring;
+fun op_to_string_space print_tm op_tm = " " ^ (op_to_string print_tm op_tm) ^ " ";
 
 fun exp_print tm =
   if is_Const tm then let
@@ -49,86 +49,96 @@ fun exp_print tm =
   else if is_Var tm then
     tm |> dest_Var |> fromHOLstring
 
+  else if is_InputVar tm then
+    tm |> dest_InputVar |> fromHOLstring
+
   else if is_ArrayIndex tm then let
     val (var, is) = dest_ArrayIndex tm
+    val var = dest_Var_generic var
   in
     (fromHOLstring var) ^ (exp_print_list is)
   end
 
   else if is_ArraySlice tm then let
     val (var, is, high_bound, low_bound) = dest_ArraySlice tm
+    val var = dest_Var_generic var
   in
     (fromHOLstring var) ^ (exp_print_list is) ^ "[" ^ (dest_numeral_to_string high_bound) ^ ":" ^ (dest_numeral_to_string low_bound) ^ "]"
+  end
+
+  else if is_ArrayConcat tm then let
+    val (ltm, rtm) = dest_ArrayConcat tm
+  in
+    "{" ^ (exp_print ltm) ^ ", " ^ (exp_print rtm) ^ "}"
   end
 
   else if is_InlineIf tm then let
     val (ctm, ltm, rtm) = dest_InlineIf tm
   in
-    "(" ^ (exp_print ctm) ^ ") ? (" ^ (exp_print ltm) ^ ") : (" ^(exp_print rtm) ^ ")"
+    (exp_print_paren ctm) ^ " ? " ^ (exp_print_paren ltm) ^ " : " ^ (exp_print_paren rtm)
   end
 
   else if is_BUOp tm then let
     val (uop, exp) = dest_BUOp tm
     val uop = op_to_string buop_print_tm uop
   in
-    uop ^ "(" ^ exp_print exp ^ ")"
+    uop ^ (exp_print_paren exp)
   end
 
   else if is_BBOp tm then let
     val (exp1, bop, exp2) = dest_BBOp tm
-    val bop = op_to_string bbop_print_tm bop
+    val bop = op_to_string_space bbop_print_tm bop
   in
-    "((" ^ exp_print exp1 ^ ") " ^ bop ^ " (" ^ exp_print exp2 ^ "))"
+    (exp_print_paren exp1) ^ bop ^ (exp_print_paren exp2)
   end
 
   else if is_ABOp tm then let
     val (exp1, bop, exp2) = dest_ABOp tm
-    val bop = op_to_string abop_print_tm bop
+    val bop = op_to_string_space abop_print_tm bop
   in
-    "(" ^ exp_print exp1 ^ ") " ^ bop ^ " (" ^ exp_print exp2 ^ ")"
+    (exp_print_paren exp1) ^ bop ^ (exp_print_paren exp2)
   end
 
   (* LIMITATION: *)
   else if is_Shift tm then let
     val (exp1, shift, exp2) = dest_Shift tm
-    val exp1 = exp_print exp1
-    val exp2 = exp_print exp2
   in
     if is_ShiftArithR shift then
-      "(" ^ exp1 ^ ") >> (" ^ exp2 ^ ")"
+      (exp_print_paren exp1) ^ " >> " ^ (exp_print_paren exp2)
     else if is_ShiftLogicalL shift then
-      "(" ^ exp1 ^ ") << (" ^ exp2 ^ ")"
+      (exp_print_paren exp1) ^ " << " ^ (exp_print_paren exp2)
     else if is_ShiftLogicalR shift then
-      "$unsigned($signed(" ^ exp1 ^ ") >>> (" ^ exp2 ^ "))"
+      (* TODO: Check this *)
+      "$unsigned($signed(" ^ (exp_print exp1) ^ ") >>> (" ^ (exp_print exp2) ^ "))"
     else
       failwith "Unknown shift operator"
   end
 
   else if is_Arith tm then let
     val (exp1, bop, exp2) = dest_Arith tm
-    val bop = op_to_string arith_print_tm bop
+    val bop = op_to_string_space arith_print_tm bop
   in
-    "(" ^ exp_print exp1 ^ ") " ^ bop ^ " (" ^ exp_print exp2 ^ ")"
+    (exp_print_paren exp1) ^ bop ^ (exp_print_paren exp2)
   end
 
   (* LIMITATION: *)
   else if is_Cmp tm then let
     val (exp1, cmp, exp2) = dest_Cmp tm
-    val exp1 = exp_print exp1
-    val exp2 = exp_print exp2
+    val exp1' = exp_print_paren exp1
+    val exp2' = exp_print_paren exp2
   in
     if is_ArrayEqual cmp then
-      "(" ^ exp1 ^ ") == (" ^ exp2 ^ ")"
+      exp1' ^ " == " ^ exp2'
     else if is_ArrayNotEqual cmp then
-      "(" ^ exp1 ^ ") != (" ^ exp2 ^ ")"
+      exp1' ^ " != " ^ exp2'
     else if is_LessThan cmp then
-      "$signed(" ^ exp1 ^ ") < $signed(" ^ exp2 ^ ")"
+      "$signed(" ^ (exp_print exp1) ^ ") < $signed(" ^ (exp_print exp2) ^ ")"
     else if is_LowerThan cmp then
-      "(" ^ exp1 ^ ") < (" ^ exp2 ^ ")"
+      exp1' ^ " < " ^ exp2'
     else if is_LessThanOrEqual cmp then
-      "$signed(" ^ exp1 ^ ") <= $signed(" ^ exp2 ^ ")"
+      "$signed(" ^ (exp_print exp1) ^ ") <= $signed(" ^ (exp_print exp2) ^ ")"
     else if is_LowerThanOrEqual cmp then
-      "(" ^ exp1 ^ ") <= (" ^ exp2 ^ ")"
+      exp1' ^ " <= " ^ exp2'
     else
       failwith "Unknown shift operator"
   end
@@ -147,14 +157,31 @@ fun exp_print tm =
   else
     failwith ("Unknown exp ctor.: " ^ term_to_string tm)
 
+(* Just a hack currently *)
+and exp_print_paren tm = let
+  fun is_tm_skip_paren tm =
+      (is_Const tm orelse is_Var tm orelse is_InputVar tm orelse is_ArrayIndex tm orelse
+       is_ArraySlice tm orelse is_ArrayConcat tm)
+  val skip_paren =
+      if is_Resize tm then let
+        val (tm, resize, _) = dest_Resize tm
+      in
+        is_SignExtend resize orelse is_tm_skip_paren tm
+      end else
+        is_tm_skip_paren tm
+in
+  if skip_paren then
+    exp_print tm
+  else
+    "(" ^ (exp_print tm) ^ ")"
+end
+
 and exp_print_list tm =
     tm |> dest_list |> fst |> map (fn tm => "[" ^ exp_print tm ^ "]") |> String.concat;
 
 fun vprog_print tm =
-  if is_Skip tm then (* TODO: This must be removed *)
-    (*failwith "Cannot translate Skip"*)
-    (*"SKIP;\n"*)
-    "nothing = 0;\n"
+  if is_Skip tm then
+    failwith "Cannot translate Skip"
 
   else if is_Seq tm then let
     val (tm1, tm2) = dest_Seq tm
@@ -162,13 +189,19 @@ fun vprog_print tm =
     (vprog_print tm1) ^ (vprog_print tm2)
   end
 
+  (* NOTE: If false-branch is Skip, then we do not output anything for that branch *)
   else if is_IfElse tm then let
     val (ctm, ltm, rtm) = dest_IfElse tm
     val ctm = exp_print ctm
     val ltm = vprog_print ltm
-    val rtm = vprog_print rtm
   in
-    "if (" ^ ctm ^ ") begin\n" ^ ltm ^ "end else begin\n" ^ rtm ^ "end\n"
+    if is_Skip rtm then
+      "if (" ^ ctm ^ ") begin\n" ^ ltm ^ "end\n"
+    else let
+      val rtm = vprog_print rtm
+    in
+      "if (" ^ ctm ^ ") begin\n" ^ ltm ^ "end else begin\n" ^ rtm ^ "end\n"
+    end
   end
 
   else if is_Case tm then let
@@ -178,7 +211,7 @@ fun vprog_print tm =
     val def = if is_some def then let
                 val def = dest_some def
               in
-                "default : begin\n" ^ vprog_print def ^ "end\n"
+                "default : " ^ (vprog_print_paren def)
               end else if is_none def then
                 ""
               else
@@ -206,13 +239,19 @@ fun vprog_print tm =
   else
     failwith ("Unknown ctor: " ^ (term_to_string tm))
 
+and vprog_print_paren tm =
+ if is_Seq tm then
+   "begin\n" ^ (vprog_print tm) ^ "end\n"
+ else
+   vprog_print tm
+
 (* NOTE: Here we assume that the "lhs" will just be constants, as is the case for Tiny, so we do not add parens for lhs *)
 and vprog_cases_print tm = let
   val (exp, prg) = dest_pair tm
   val exp = exp_print exp
-  val prg = vprog_print prg
+  val prg = vprog_print_paren prg
 in
-  exp ^ " : begin\n" ^ prg ^ "end\n"
+  exp ^ " : " ^ prg
 end;
 
 fun type2vertype tm =
@@ -235,11 +274,21 @@ fun type2vertype tm =
   end else
     failwith "Unknown type";
 
+fun newtype2vertype tm =
+  if is_VBool_t tm then
+    "logic"
+  else if is_VArray_t tm then let
+    val dims = dest_VArray_t tm |> map (Arbnumcore.less1 o dest_numeral)
+  in
+    (* TODO: Check printing order... *)
+    "logic" ^ ((map (fn n => "[" ^ (Arbnumcore.toString n) ^ ":0]") dims) |> concat)
+  end else
+    failwith "Unknown type: " ^ (term_to_string tm);
+
 fun print_var var ty = let
-  val var = fromHOLstring var
   val ty = type2vertype ty
 in
-  ty ^ " " ^ var ^ ";\n"
+  ty ^ " " ^ var
 end;
 
 end
