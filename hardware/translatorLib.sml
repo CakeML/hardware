@@ -7,8 +7,8 @@ open arithmeticTheory bitstringTheory indexedListsTheory optionTheory wordsTheor
 open dep_rewrite wordsLib;
 open bitstringSyntax boolSyntax combinSyntax fcpSyntax numSyntax stringSyntax sumSyntax;
 
-open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory translatorTheory tinyMachineTheory;
-open tinyConfigLib translatorCoreLib;
+open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory translatorTheory ag32MachineTheory;
+open ag32ConfigLib translatorCoreLib;
 open verilogSyntax;
 
 (** Various declarations **)
@@ -259,7 +259,7 @@ fun hol2hardware_exp s tm =
     SPECL [s, rand tm] (INST_TYPE [alpha |-> dim] Eval_word_const) end
 
   (* CASE: word_bit *)
-  (* NOTE: This only translates array indexing, as this is what's needed for Tiny *)
+  (* NOTE: This only translates array indexing, as this is what's needed for Ag32 *)
   (* TODO: Could add better error message for when indexing outside the array (EVAL will just fail currently) *)
   else if is_word_bit tm then let
     val (i, var) = dest_word_bit tm
@@ -649,7 +649,7 @@ and hol2hardware_body_impl s tm =
   in
     (* val SOME base_thms = lookup_same fupd WORD_ARRAY_update_base_thms *)
     case lookup_same fupd WORD_ARRAY_update_base_thms of
-        (* TODO: assumes everything is base here... also assumes structure... probably ok for Tiny *)
+        (* TODO: assumes everything is base here... also assumes structure... probably ok for Ag32 *)
         (* TODO: do we check that we are using the correct state variable here? no? *)
         SOME base_thms =>
         let
