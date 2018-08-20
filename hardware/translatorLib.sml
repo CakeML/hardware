@@ -171,7 +171,7 @@ val builtin_binops = [
 
   Eval_WORD_ShiftArithR, Eval_WORD_ShiftLogicalL, Eval_WORD_ShiftLogicalR,
 
-  Eval_WORD_Minus, Eval_WORD_Plus, Eval_WORD_Times,
+  Eval_WORD_Minus, Eval_WORD_Plus, Eval_WORD_Times, Eval_WORD_Mod,
 
   Eval_WORD_Equal, Eval_WORD_LessThan, Eval_WORD_LowerThan,
   Eval_WORD_LessThanOrEqual, Eval_WORD_LowerThanOrEqual

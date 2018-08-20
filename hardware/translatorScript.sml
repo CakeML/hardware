@@ -328,13 +328,16 @@ val Eval_WORD_arith = Q.store_thm("Eval_WORD_arith",
    Eval fext s env (WORD w2) v2 ==>
    Eval fext s env (WORD (w1 - w2)) (Arith v1 Minus v2) /\
    Eval fext s env (WORD (w1 + w2)) (Arith v1 Plus v2) /\
-   Eval fext s env (WORD (w1 * w2)) (Arith v1 Times v2)`,
+   Eval fext s env (WORD (w1 * w2)) (Arith v1 Times v2) /\
+   Eval fext s env (WORD (word_mod w1 w2)) (Arith v1 Mod v2)`,
  rw [Eval_def, erun_def, WORD_def] \\ res_tac \\ PURE_REWRITE_TAC [GSYM WORD_NEG_MUL] \\
  rw [sum_bind_def, sum_map_def,
      w2ver_def, ver2n_def, n2ver_def, v2ver_def, ver2v_def, v2n_w2v,
      same_shape_w2ver, ver_mapVArray_def, sum_mapM_VBool, ver_liftVArray_def, erun_arith_def,
 
      (* new thms: *) w2v_n2w, ver_fixwidth_fixwidth_MAP,
+
+     word_mod_def,
 
      (* specific for add *) word_add_def, word_mul_def, word_2comp_def, dimword_def]);
 
@@ -357,6 +360,13 @@ val Eval_WORD_Times = Q.store_thm("Eval_WORD_Times",
    Eval fext s env (WORD w1) v1 /\
    Eval fext s env (WORD w2) v2 ==>
    Eval fext s env (WORD (w1 * w2)) (Arith v1 Times v2)`,
+ rw [Eval_WORD_arith]);
+
+val Eval_WORD_Mod = Q.store_thm("Eval_WORD_Mod",
+ `!s w1 v1 w2 v2.
+   Eval fext s env (WORD w1) v1 /\
+   Eval fext s env (WORD w2) v2 ==>
+   Eval fext s env (WORD (word_mod w1 w2)) (Arith v1 Mod v2)`,
  rw [Eval_WORD_arith]);
 
 (* UGLY: Everything with this proof is ugly *)

@@ -43,7 +43,7 @@ fun intro_cvars_for_prog prog =
 
 val cpu_step_def = cpu_Next_def
  |> REWRITE_RULE [cpu_Next_0w_def, cpu_Next_1w_def, cpu_Next_2w_def, cpu_Next_3w_def, cpu_Next_4w_def,
-                  (* 0w: *) align_addr_def, decode_instruction_def, DecodeReg_imm_def, ALU_def, execute_instruction_def,
+                  (* 0w: *) align_addr_def, decode_instruction_def, DecodeReg_imm_def, ALU_def, shift_def, execute_instruction_def,
                   (* 1w: *) delay_write_Next_def];
 (*
  |> CONV_RULE instruction_let_CONV

@@ -158,7 +158,8 @@ val _ = Datatype `
 val _ = Datatype `
   arith = Minus
         | Plus
-        | Times`;
+        | Times
+        | Mod`;
 
 (* Array comparisons *)
 val _ = Datatype `
@@ -350,7 +351,8 @@ val erun_shift_def = Define `
 val erun_arith_def = Define `
  (erun_arith Plus (l:num) r _ = l + r) /\
  (erun_arith Minus l r max = l + ((max - r) MOD max)) /\ (* max - r term is 2comp, see e.g. word_2comp *)
- (erun_arith Times l r _ = l * r)`;
+ (erun_arith Times l r _ = l * r) /\
+ (erun_arith Mod l r _ = l MOD r)`;
 
 (* Compare operations for arrays *)
 val erun_cmp_def = Define `
