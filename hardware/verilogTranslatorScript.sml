@@ -1,14 +1,14 @@
-open preamble;
+open hardwarePreamble;
 
 open arithmeticTheory bitstringTheory fcpTheory indexedListsTheory optionTheory wordsTheory wordsSyntax;
 open bitstringLib dep_rewrite wordsLib;
 open bitstringSyntax boolSyntax combinSyntax numSyntax stringSyntax;
 
 open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory ag32MachineTheory;
-open ag32ConfigLib translatorCoreLib;
+open verilogTranslatorConfigLib verilogTranslatorCoreLib;
 open verilogSyntax;
 
-val _ = new_theory "translator";
+val _ = new_theory "verilogTranslator";
 
 (** State vars **)
 

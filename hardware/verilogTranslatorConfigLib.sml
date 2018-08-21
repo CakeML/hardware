@@ -1,7 +1,7 @@
-structure ag32ConfigLib =
+structure verilogTranslatorConfigLib =
 struct
 
-open preamble;
+open hardwarePreamble;
 
 (** Config **)
 

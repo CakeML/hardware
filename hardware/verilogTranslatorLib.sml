@@ -1,14 +1,14 @@
-structure translatorLib =
+structure verilogTranslatorLib =
 struct
 
-open preamble;
+open hardwarePreamble;
 
 open arithmeticTheory bitstringTheory indexedListsTheory optionTheory wordsTheory wordsSyntax;
 open dep_rewrite wordsLib;
 open bitstringSyntax boolSyntax combinSyntax fcpSyntax numSyntax stringSyntax sumSyntax;
 
-open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory translatorTheory ag32MachineTheory;
-open ag32ConfigLib translatorCoreLib;
+open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory verilogTranslatorTheory ag32MachineTheory;
+open verilogTranslatorConfigLib verilogTranslatorCoreLib;
 open verilogSyntax;
 
 (** Various declarations **)
@@ -17,9 +17,9 @@ val env_tm = ``env : envT``;
 (* fext must be named fext, simplifies  *)
 val fext_tm = mk_var ("fext", fext_ty);
 
-(** Syntax for translatorTheory **)
+(** Syntax for verilogTranslatorTheory **)
 
-local val s = HolKernel.syntax_fns1 "translator" in
+local val s = HolKernel.syntax_fns1 "verilogTranslator" in
   val (state_var_tm, mk_state_var, dest_state_var, is_state_var) = s "state_var"
 end;
 

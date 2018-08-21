@@ -1,7 +1,7 @@
 structure verilogPrintLib =
 struct
 
-open preamble;
+open hardwarePreamble;
 
 open wordsSyntax stringSyntax listSyntax numSyntax pairSyntax optionSyntax;
 

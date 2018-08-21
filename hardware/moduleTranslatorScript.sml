@@ -1,11 +1,11 @@
-open preamble;
+open hardwarePreamble;
 
 open stringSyntax;
 
 open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory;
-open translatorTheory;
+open verilogTranslatorTheory;
 
-open ag32ConfigLib translatorCoreLib;
+open verilogTranslatorConfigLib verilogTranslatorCoreLib;
 
 val _ = new_theory "moduleTranslator";
 

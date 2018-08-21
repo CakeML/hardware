@@ -1,4 +1,4 @@
-open preamble;
+open hardwarePreamble;
 
 val _ = new_theory "ag32Machine";
 

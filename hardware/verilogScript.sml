@@ -1,4 +1,4 @@
-open preamble;
+open hardwarePreamble;
 
 open alistTheory wordsTheory stringTheory bitstringTheory sptreeTheory;
 open wordsLib;

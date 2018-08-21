@@ -1,7 +1,7 @@
-structure translatorCoreLib =
+structure verilogTranslatorCoreLib =
 struct
 
-open preamble;
+open hardwarePreamble;
 
 open wordsSyntax;
 

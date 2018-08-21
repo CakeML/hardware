@@ -1,4 +1,4 @@
-structure preamble = struct
+structure hardwarePreamble = struct
 
 (* Basic *)
 open HolKernel Parse boolLib bossLib BasicProvers;
@@ -8,7 +8,7 @@ open listTheory wordsTheory;
 open numLib wordsLib;
 
 (* Project libraries *)
-open miscTheory;
+open hardwareMiscTheory;
 
 (*
 Setup:

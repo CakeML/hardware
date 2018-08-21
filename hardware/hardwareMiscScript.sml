@@ -3,7 +3,7 @@ open HolKernel Parse boolLib bossLib BasicProvers;
 
 open bitstringTheory rich_listTheory wordsTheory;
 
-val _ = new_theory "misc";
+val _ = new_theory "hardwareMisc";
 
 val _ = ParseExtras.tight_equality ();
 

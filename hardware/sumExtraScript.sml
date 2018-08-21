@@ -1,4 +1,4 @@
-open preamble;
+open hardwarePreamble;
 
 (* Could maybe be renamed to "verilogSum" or similar, because e.g. error_def is specific to Verilog. *)
 

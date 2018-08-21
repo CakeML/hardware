@@ -1,9 +1,9 @@
-open preamble;
+open hardwarePreamble;
 
 open alistTheory;
 
-open translatorLib moduleTranslatorTheory;
-open ag32ConfigLib ag32MachineTheory ag32AddAcceleratorTheory ag32EqTheory;
+open verilogTranslatorLib moduleTranslatorTheory;
+open verilogTranslatorConfigLib ag32MachineTheory ag32AddAcceleratorTheory ag32EqTheory;
 
 val _ = new_theory "ag32Verilog";
 
