@@ -54,6 +54,8 @@ declare {
 
    data_out :: bits(10) -- Output Data (Output)
    data_in  :: bits(2) -- Output Data (Input)
+
+   io_events :: memT list
 }
 
 ---------------------------------------------
@@ -232,8 +234,20 @@ define JumpIfNotZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) =
    else
      incPC ()
 
-define Interrupt =
+define Interrupt = {
+  io_events <- MEM @ io_events;
+
   incPC ()
+}
+
+string get_print_string (string_start::wordT, max_length::nat, mem::memT) = {
+ chr = mem(string_start);
+
+ if chr == 0 or max_length == 0 then
+  ""
+ else
+  [chr] @ get_print_string (string_start + 1, max_length - 1, mem)
+}
 
 define ReservedInstr =
   nothing

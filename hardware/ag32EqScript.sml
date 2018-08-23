@@ -27,15 +27,23 @@ val mem_no_errors_def = Define `
 (** Correspondence relation **)
 
 val word_at_addr_def = Define `
-  word_at_addr s addr =
-  (s.MEM (addr + 3w) @@ (s.MEM (addr + 2w) @@ (s.MEM (addr + 1w) @@ s.MEM addr):word16):word24):word32`;
+  word_at_addr (mem : word32 -> word8) addr =
+  (mem (addr + 3w) @@ (mem (addr + 2w) @@ (mem (addr + 1w) @@ mem addr):word16):word24):word32`;
+
+val mem_eq_def = Define `
+ mem_eq fextmem smem = !addr. fextmem (align_addr addr) = word_at_addr smem (align_addr addr)`;
 
 val REL_def = Define `
  REL fext (t:state_circuit) (s:ag32_state) = (
   (* Memory state *)
   (t.i = fext.mem (align_addr s.PC)) /\
-  (!addr. fext.mem (align_addr addr) = word_at_addr s (align_addr addr)) /\
+  mem_eq fext.mem s.MEM /\
   fext.ready /\
+
+  (* Interrupt state *)
+  LIST_REL mem_eq fext.io_events s.io_events /\
+  (fext.interrupt_state = InterruptReady) /\
+  ~fext.interrupt_ack /\
 
   (* Needs to be in the state = 0 invariant because we need to know which instruction to run *)
   (t.state = 0w) /\
@@ -59,8 +67,13 @@ val REL_def = Define `
 val INIT_def = Define `
  INIT fext (t:state_circuit) (s:ag32_state) = (
   (* Memory state *)
-  (!addr. fext.mem (align_addr addr) = word_at_addr s (align_addr addr)) /\
+  mem_eq fext.mem s.MEM /\
   fext.ready /\
+
+  (* Interrupt state, in practice both should be empty initially *)
+  LIST_REL mem_eq fext.io_events s.io_events /\
+  (fext.interrupt_state = InterruptReady) /\
+  ~fext.interrupt_ack /\
 
   (t.state = 3w) /\
 
@@ -246,40 +259,62 @@ val DecodeReg_imm_Imm = Q.store_thm("DecodeReg_imm_Imm",
 (* Can be optimized ... *)
 val no_mem_error_tac = reverse IF_CASES_TAC >- rfs [mem_no_errors_def] \\ pop_assum kall_tac;
 
+val no_interrupt_req = Q.store_thm("no_interrupt_req",
+ `!n c fext.
+  is_interrupt_interface c fext /\
+  (fext n).interrupt_state = InterruptReady /\
+  ~(c n).interrupt_req ==>
+  (fext (SUC n)).interrupt_state = InterruptReady /\
+  (fext (SUC n)).io_events = (fext n).io_events /\
+  ~(fext (SUC n)).interrupt_ack`,
+ rewrite_tac [is_interrupt_interface_def] \\ rpt strip_tac' \\
+ first_x_assum (qspec_then `n` mp_tac) \\ simp []);
+
 val circuit_read_wait = Q.store_thm("circuit_read_wait",
  `!m facc init fext n.
+   is_interrupt_interface (circuit facc init fext) fext /\
    mem_no_errors fext /\
    (* from previous inst. of is_mem: *)
    (!p. p < m ==> (fext (SUC (n + p))).mem = (fext n).mem /\ ~(fext (SUC (n + p))).ready) /\
 
    (fext n).ready /\
+   (fext n).interrupt_state = InterruptReady /\
 
    (circuit facc init fext n).state = 1w /\
 
-   (circuit facc init fext n).command <> 0w
+   (circuit facc init fext n).command <> 0w /\
+   ~(circuit facc init fext n).interrupt_req
    ==>
    cpu_eq (circuit facc init fext (SUC (m + n)))
-          ((circuit facc init fext n) with command := 0w)`,
+          ((circuit facc init fext n) with command := 0w) /\
+   (fext (SUC (m + n))).io_events = (fext n).io_events /\
+   (fext (SUC (m + n))).interrupt_state = InterruptReady /\
+   ~(fext (SUC (m + n))).interrupt_ack`,
  rpt gen_tac \\ strip_tac \\ Induct_on `m`
- >- (strip_tac \\ simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
+ >- (strip_tac \\ drule_strip no_interrupt_req \\
+    simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
     simp [cpu_Next_1w_def, delay_write_Next_def, cpu_eq_def]) \\
  strip_tac \\ qpat_x_assum `_ ==> _` mp_tac \\ impl_tac >- simp [] \\ strip_tac \\
  once_rewrite_tac [circuit_def] \\
  simp [cpu_Next_def] \\ no_mem_error_tac \\
- pop_assum (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
- fs [ADD1, cpu_Next_1w_def] \\
- first_x_assum (qspec_then `m` assume_tac) \\ fs [] \\
+ qpat_x_assum `cpu_eq _ _` (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
+ rfs [ADD1, cpu_Next_1w_def] \\
+ drule_strip no_interrupt_req \\
+ first_x_assum (qspec_then `m` assume_tac) \\ fs [ADD1] \\
  simp [cpu_eq_def]);
 
 val circuit_acc_wait_help = Q.store_thm("circuit_acc_wait_help",
  `!l k n facc init fext.
    is_mem (circuit facc init fext) fext /\
+   is_interrupt_interface (circuit facc init fext) fext /\
    mem_no_errors fext /\
 
    (circuit facc init fext n).state = 2w /\
    (circuit facc init fext n).acc_arg_ready /\
+   ~(circuit facc init fext n).interrupt_req /\
 
    (fext n).ready /\
+   (fext n).interrupt_state = InterruptReady /\
    (circuit facc init fext n).command = 0w /\
    l < k /\
 
@@ -292,10 +327,14 @@ val circuit_acc_wait_help = Q.store_thm("circuit_acc_wait_help",
                           ((circuit facc init fext n) with acc_arg_ready := F) /\
                    ~(circuit facc init fext (SUC (n + m))).acc_res_ready /\
                    (fext (SUC (n + m))).ready /\
-                   (fext (SUC (n + m))).mem = (fext n).mem)`,
+                   (fext (SUC (n + m))).mem = (fext n).mem /\
+                   (fext (SUC (n + m))).io_events = (fext n).io_events /\
+                   (fext (SUC (n + m))).interrupt_state = InterruptReady /\
+                   ~(fext (SUC (n + m))).interrupt_ack)`,
  (* TODO: This is a mess... but works for now *)
  rpt gen_tac \\ strip_tac \\ Induct_on `l`
- >- (simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
+ >- (drule_strip no_interrupt_req \\
+     simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
      last_x_assum (assume_tac o is_mem_do_nothing o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\
      fs []) \\
  rpt strip_tac' \\ reverse (Cases_on `m = SUC l`) >- (`m <= l` by DECIDE_TAC \\ fs []) \\
@@ -309,17 +348,20 @@ val circuit_acc_wait_help = Q.store_thm("circuit_acc_wait_help",
  strip_tac \\ fs [] \\ first_x_assum (qspec_then `l` mp_tac) \\ simp [] \\ strip_tac \\
  simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ fs [cpu_Next_2w_def, cpu_eq_def, GSYM ADD_SUC] \\
  last_x_assum (assume_tac o is_mem_do_nothing o Q.SPEC `SUC (l + n)` o REWRITE_RULE [is_mem_def]) \\
- rfs []);
+ rfs [] \\ drule_strip no_interrupt_req \\ simp []);
 
 val circuit_acc_wait = Q.store_thm("circuit_acc_wait",
  `!k n facc init fext.
    is_mem (circuit facc init fext) fext /\
+   is_interrupt_interface (circuit facc init fext) fext /\
    mem_no_errors fext /\
 
    (circuit facc init fext n).state = 2w /\
    (circuit facc init fext n).acc_arg_ready /\
+   ~(circuit facc init fext n).interrupt_req /\
 
    (fext n).ready /\
+   (fext n).interrupt_state = InterruptReady /\
    (circuit facc init fext n).command = 0w /\
 
    (* from previous inst. of is_acc, somewhat ugly: *)
@@ -330,20 +372,27 @@ val circuit_acc_wait = Q.store_thm("circuit_acc_wait",
    !m. m <= k ==> cpu_eq (circuit facc init fext (SUC (n + m)))
                          ((circuit facc init fext n) with acc_arg_ready := F) /\
                   (fext (SUC (n + m))).ready /\
-                  (fext (SUC (n + m))).mem = (fext n).mem`,
+                  (fext (SUC (n + m))).mem = (fext n).mem /\
+                  (fext (SUC (n + m))).io_events = (fext n).io_events /\
+                  (fext (SUC (n + m))).interrupt_state = InterruptReady /\
+                  ~(fext (SUC (n + m))).interrupt_ack`,
  (* TODO: As the above proof, this is also a mess. *)
  rpt strip_tac' \\ Cases_on `m`
- >- (* duplication: *) (simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
-     last_x_assum (assume_tac o is_mem_do_nothing o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\
-     fs []) \\
+ >- (* duplication: *)
+ (drule_strip no_interrupt_req \\
+ simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
+ last_x_assum (assume_tac o is_mem_do_nothing o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\
+ fs []) \\
+
  `n' < k` by DECIDE_TAC \\ drule_strip circuit_acc_wait_help \\ disch_then (qspec_then `n'` mp_tac) \\ simp [] \\ strip_tac \\
 
  qpat_x_assum `cpu_eq _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
 
  simp [circuit_def] \\ simp [GSYM ADD_SUC] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
  last_x_assum (assume_tac o is_mem_do_nothing o Q.SPEC `SUC (n + n')` o REWRITE_RULE [is_mem_def]) \\
- fs []);
+ rfs [] \\ drule_strip no_interrupt_req \\ simp []);
 
+(*
 val f_all_F_or_at_least_one_T = Q.store_thm("f_all_F_or_at_least_one_T",
  `!f t1 t2.
    (!t3. t3 < t2 ==> ~(f (t1 + t3))) \/
@@ -364,6 +413,7 @@ val is_interrupt_interface_alt = Q.store_thm("is_interrupt_interface_alt",
  qspecl_then [`ext_interrupt_ack o fext`, `SUC t1`, `m`] strip_assume_tac f_all_F_or_at_least_one_T
  >- (qexists_tac `m` \\ fs [ADD1])
  \\ qexists_tac `t3` \\ fs [ADD1]);
+*)
 
 val circuit_interrupt_wait = Q.store_thm("circuit_interrupt_wait",
  `!m n facc init fext.
@@ -397,24 +447,32 @@ val circuit_interrupt_wait = Q.store_thm("circuit_interrupt_wait",
 val circuit_mem_start_ready_wait = Q.store_thm("circuit_mem_start_ready_wait",
  `!m facc init fext.
    is_mem (circuit facc init fext) fext /\
+   is_interrupt_interface (circuit facc init fext) fext /\
    mem_no_errors fext /\
 
    (circuit facc init fext 0).state = 3w /\
    (circuit facc init fext 0).command = 0w /\
+   ~(circuit facc init fext 0).interrupt_req /\
 
    (fext 0).ready /\
+   (fext 0).interrupt_state = InterruptReady /\
+   ~(fext 0).interrupt_ack /\
 
    (!l. l < m ==> ~(fext l).mem_start_ready)
    ==>
    cpu_eq (circuit facc init fext m)
           (circuit facc init fext 0) /\
    (fext m).ready /\
-   (fext m).mem = (fext 0).mem`,
+   (fext m).mem = (fext 0).mem /\
+   (fext m).io_events = (fext 0).io_events /\
+   (fext m).interrupt_state = InterruptReady /\
+   ~(fext m).interrupt_ack`,
  Induct \\ rpt strip_tac' >- simp [cpu_eq_def] \\
  drule_last \\ impl_tac >- simp [] \\
  disch_then (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
  last_x_assum (mp_tac o is_mem_do_nothing o Q.SPEC `m` o REWRITE_RULE [is_mem_def]) \\ simp [] \\ disch_then kall_tac \\
- fs [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
+ rfs [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
+ drule_strip no_interrupt_req \\
  simp [cpu_Next_3w_def, cpu_eq_def]);
 
 (* Impl variant of ri2word... *)
@@ -447,7 +505,8 @@ val ALU_cleanup_instruction = Q.store_thm("ALU_cleanup_instruction",
 val ALU_state_eq_after = Q.store_thm("ALU_state_eq_after",
  `!func a b res s s'.
    ag32$ALU (func, a, b) s = (res, s') ==>
-   s'.PC = s.PC /\ s'.MEM = s.MEM /\ s'.PC = s.PC /\ s'.R = s.R /\ s'.data_in = s.data_in /\ s'.data_out = s.data_out`,
+   s'.PC = s.PC /\ s'.MEM = s.MEM /\ s'.PC = s.PC /\ s'.R = s.R /\ s'.data_in = s.data_in /\
+   s'.data_out = s.data_out /\ s'.io_events = s.io_events`,
  rw [ag32Theory.ALU_def] \\ Cases_on `func` \\ fs [] \\ rw []);
 
 (* "Variable slice", TODO: Move... *)
@@ -464,11 +523,16 @@ val circuit_next = Q.store_thm("circuit_next",
    !n. case (c n).state of
          0w =>
            !s.
-           (c n).R = s.R /\ (c n).PC = s.PC /\ (c n).CarryFlag = s.CarryFlag /\ (c n).OverflowFlag = s.OverflowFlag /\
-           ((fext n).mem (align_addr (c n).PC) = (c n).i) /\
-           (c n).command = 0w /\ (fext n).ready
+            (c n).R = s.R /\ (c n).PC = s.PC /\ (c n).CarryFlag = s.CarryFlag /\ (c n).OverflowFlag = s.OverflowFlag /\
+
+            ((fext n).mem (align_addr (c n).PC) = (c n).i) /\ (c n).command = 0w /\ (fext n).ready /\
+
+            ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady
             ==>
             state_0w_fext_post fext n /\
+            ((fext (n + 1)).io_events = (fext n).io_events /\
+             (fext (n + 1)).interrupt_state = InterruptReady /\
+             ~(fext (n + 1)).interrupt_ack) /\
             (case Decode (c n).i of
                Accelerator (w, a) =>
                cpu_eq (c (n + 1)) (c n with <| delay_write := w;
@@ -580,13 +644,18 @@ val circuit_next = Q.store_thm("circuit_next",
                                                command := 3w |>))
        | 1w =>
          (case (c n).command of
-            1w => (c n).do_delay_write = 5w /\ ~(c n).do_interrupt /\ (fext n).ready ==>
+            1w => (c n).do_delay_write = 5w /\ ~(c n).do_interrupt /\ (fext n).ready /\
+                  ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady ==>
                   ?m. cpu_eq (c (n + m)) (c n with <| command := 0w;
                                                       state := 0w;
                                                       i := (fext n).mem (align_addr (c n).PC) |>) /\
                       (fext (n + m)).ready /\
-                      (fext (n + m)).mem = (fext n).mem
-          | 2w => (c n).do_delay_write <+ 5w /\ ~(c n).do_interrupt /\ (fext n).ready ==>
+                      (fext (n + m)).mem = (fext n).mem /\
+                      (fext (n + m)).interrupt_state = InterruptReady /\
+                      (fext (n + m)).io_events = (fext n).io_events /\
+                      ~(fext (n + m)).interrupt_ack
+          | 2w => (c n).do_delay_write <+ 5w /\ ~(c n).do_interrupt /\ (fext n).ready /\
+                  ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady ==>
                   ?m. cpu_eq
                        (c (n + m))
                        (c n with <| command := 0w;
@@ -600,8 +669,12 @@ val circuit_next = Q.store_thm("circuit_next",
                                                                                          ((fext (n + m)).mem (c n).data_addr)):word8))
                                           (c n).R |>) /\
                       (fext (n + m)).ready /\
-                      (fext (n + m)).mem = (fext n).mem
-          | 3w => (c n).do_delay_write = 5w /\ ~(c n).do_interrupt /\ (fext n).ready ==>
+                      (fext (n + m)).mem = (fext n).mem /\
+                      (fext (n + m)).interrupt_state = InterruptReady /\
+                      (fext (n + m)).io_events = (fext n).io_events /\
+                      ~(fext (n + m)).interrupt_ack
+          | 3w => (c n).do_delay_write = 5w /\ ~(c n).do_interrupt /\ (fext n).ready /\
+                  ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady ==>
                   (let newmem = mem_update (fext n).mem (c n).data_addr (c n).data_wdata (c n).data_wstrb in
                   ?m. cpu_eq
                        (c (n + m))
@@ -609,17 +682,25 @@ val circuit_next = Q.store_thm("circuit_next",
                                     state := 0w;
                                     i := newmem (align_addr (c n).PC) |>) /\
                       (fext (n + m)).ready /\
-                      (fext (n + m)).mem = newmem)
-          | 4w => (c n).do_delay_write = 5w /\ (c n).do_interrupt /\ (fext n).ready ==>
+                      (fext (n + m)).mem = newmem /\
+                      (fext (n + m)).interrupt_state = InterruptReady /\
+                      (fext (n + m)).io_events = (fext n).io_events /\
+                      ~(fext (n + m)).interrupt_ack)
+          | 4w => (c n).do_delay_write = 5w /\ (c n).do_interrupt /\ (fext n).ready /\
+                  ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady ==>
                   ?m. cpu_eq (c (n + m)) (c n with <| command := 0w;
                                                       state := 4w;
                                                       interrupt_req := T;
                                                       do_interrupt := F;
                                                       i := (fext n).mem (align_addr (c n).PC) |>) /\
                       (fext (n + m)).ready /\
-                      (fext (n + m)).mem = (fext n).mem
+                      (fext (n + m)).mem = (fext n).mem /\
+                      (fext (n + m)).interrupt_state = InterruptReady /\
+                      (fext (n + m)).io_events = (fext n).io_events /\
+                      ~(fext (n + m)).interrupt_ack
           | _ => T)
-       | 2w => (c n).acc_arg_ready /\ (c n).command = 0w /\ (fext n).ready ==>
+       | 2w => (c n).acc_arg_ready /\ (c n).command = 0w /\ (fext n).ready /\
+               ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady ==>
                ?m. cpu_eq
                     (c (n + m))
                     (c n with <| command := 1w;
@@ -627,25 +708,36 @@ val circuit_next = Q.store_thm("circuit_next",
                                  acc_arg_ready := F;
                                  R := ((c n).delay_write =+ f (c n).acc_arg) (c n).R |>) /\
                     (fext (n + m)).ready /\
-                    (fext (n + m)).mem = (fext n).mem
-       | 4w => (c n).interrupt_req /\ (c n).command = 0w /\ (fext n).ready ==>
+                    (fext (n + m)).mem = (fext n).mem /\
+                    (fext (n + m)).interrupt_state = InterruptReady /\
+                    (fext (n + m)).io_events = (fext n).io_events /\
+                    ~(fext (n + m)).interrupt_ack
+       | 4w => (c n).command = 0w /\ (fext n).ready /\
+               (c n).interrupt_req /\ ~(fext n).interrupt_ack /\ (fext n).interrupt_state = InterruptReady ==>
                ?m. cpu_eq
                     (c (n + m))
                     (c n with <| state := 0w;
                                  interrupt_req := F |>) /\
                     (fext (n + m)).ready /\
-                    (fext (n + m)).mem = (fext n).mem
+                    (fext (n + m)).mem = (fext n).mem /\
+                    (fext (n + m)).interrupt_state = InterruptReady /\
+                    (fext (n + m)).io_events = (fext n).mem :: (fext n).io_events /\
+                    ~(fext (n + m)).interrupt_ack
        | _ => T`,
  rpt strip_tac \\ rveq \\ TOP_CASE_TAC \\ simp [] \\
 
  IF_CASES_TAC >-
 
  (* state = 0w *)
- (rveq \\ rpt strip_tac
+ (rveq \\ rpt strip_tac' \\ conj_tac
 
  >- (* memory part *)
  (last_x_assum (assume_tac o is_mem_do_nothing o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\
  simp [state_0w_fext_post_def, GSYM ADD1])
+
+ \\ conj_tac
+ >- (* interrupt part *)
+ (drule_strip no_interrupt_req \\ fs [ADD1])
 
  \\ simp [Decode_def, boolify32_def] \\ CONV_TAC v2w_word_bit_list_cleanup
 
@@ -853,11 +945,11 @@ val circuit_next = Q.store_thm("circuit_next",
  qexists_tac `m + 2` \\ once_rewrite_tac [DECIDE ``m + 2 + n = SUC (SUC (m + n))``] \\
 
  once_rewrite_tac [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
- pop_assum (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
+ qpat_x_assum `cpu_eq _ _` (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
  last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (m + n)` o REWRITE_RULE [is_mem_def]) \\
  impl_tac >- simp [] \\ strip_tac \\
  simp [cpu_Next_1w_def, delay_write_Next_def] \\
- simp [cpu_eq_def])
+ rfs [cpu_eq_def] \\ drule_strip no_interrupt_req \\ simp [])
 
  \\ IF_CASES_TAC >-
  (* command = 2w *)
@@ -867,10 +959,11 @@ val circuit_next = Q.store_thm("circuit_next",
  qexists_tac `m + 2` \\ once_rewrite_tac [DECIDE ``m + 2 + n = SUC (SUC (m + n))``] \\
 
  once_rewrite_tac [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
- pop_assum (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
+ qpat_x_assum `cpu_eq _ _` (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
  last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (m + n)` o REWRITE_RULE [is_mem_def]) \\
  impl_tac >- simp [] \\ strip_tac \\
- simp [cpu_Next_1w_def, delay_write_Next_def] \\
+ rfs [cpu_Next_1w_def, delay_write_Next_def] \\
+ drule_strip no_interrupt_req \\
 
  fs [WORD_DECIDE ``!(w:word3). w <+ 5w <=> (w = 0w \/ w = 1w \/ w = 2w \/ w = 3w \/ w = 4w)``] \\
  simp [cpu_eq_def] \\
@@ -879,31 +972,33 @@ val circuit_next = Q.store_thm("circuit_next",
  \\ IF_CASES_TAC >-
  (* command = 3w *)
  (rpt strip_tac \\ last_assum (mp_tac o is_mem_data_write o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\
- (* Copied from command = 1w for now: *)
-   (simp [] \\ strip_tac \\
-   drule_strip circuit_read_wait \\ simp [] \\ strip_tac \\
-   qexists_tac `m + 2` \\ once_rewrite_tac [DECIDE ``m + 2 + n = SUC (SUC (m + n))``] \\
 
-   once_rewrite_tac [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
-   pop_assum (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
-   last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (m + n)` o REWRITE_RULE [is_mem_def]) \\
-   impl_tac >- simp [] \\ strip_tac \\
-   simp [cpu_Next_1w_def, delay_write_Next_def] \\
-   simp [cpu_eq_def]))
+  (* Copied from command = 1w for now: *)
+  (simp [] \\ strip_tac \\
+  drule_strip circuit_read_wait \\ simp [] \\ strip_tac \\
+  qexists_tac `m + 2` \\ once_rewrite_tac [DECIDE ``m + 2 + n = SUC (SUC (m + n))``] \\
+
+  once_rewrite_tac [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
+  qpat_x_assum `cpu_eq _ _` (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
+  last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (m + n)` o REWRITE_RULE [is_mem_def]) \\
+  impl_tac >- simp [] \\ strip_tac \\
+  simp [cpu_Next_1w_def, delay_write_Next_def] \\
+  rfs [cpu_eq_def] \\ drule_strip no_interrupt_req \\ simp []))
 
  (* command = 4w *)
  \\ rpt strip_tac \\ last_assum (mp_tac o is_mem_data_flush o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\
- (* Copied from command = 1w for now: *)
-   (simp [] \\ strip_tac \\
-   drule_strip circuit_read_wait \\ simp [] \\ strip_tac \\
-   qexists_tac `m + 2` \\ once_rewrite_tac [DECIDE ``m + 2 + n = SUC (SUC (m + n))``] \\
 
-   once_rewrite_tac [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
-   pop_assum (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
-   last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (m + n)` o REWRITE_RULE [is_mem_def]) \\
-   impl_tac >- simp [] \\ strip_tac \\
-   simp [cpu_Next_1w_def, delay_write_Next_def] \\
-   simp [cpu_eq_def]))
+  (* Copied from command = 1w for now: *)
+  (simp [] \\ strip_tac \\
+  drule_strip circuit_read_wait \\ simp [] \\ strip_tac \\
+  qexists_tac `m + 2` \\ once_rewrite_tac [DECIDE ``m + 2 + n = SUC (SUC (m + n))``] \\
+
+  once_rewrite_tac [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
+  qpat_x_assum `cpu_eq _ _` (strip_assume_tac o REWRITE_RULE [cpu_eq_def]) \\
+  last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (m + n)` o REWRITE_RULE [is_mem_def]) \\
+  impl_tac >- simp [] \\ strip_tac \\
+  simp [cpu_Next_1w_def, delay_write_Next_def] \\
+  rfs [cpu_eq_def] \\ drule_strip no_interrupt_req \\ simp []))
 
  \\ IF_CASES_TAC >-
 
@@ -918,25 +1013,22 @@ val circuit_next = Q.store_thm("circuit_next",
  qexists_tac `SUC (SUC k)` \\ once_rewrite_tac [DECIDE ``SUC (SUC k) + n = SUC (SUC (k + n))``] \\
  once_rewrite_tac [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
  last_assum (assume_tac o is_mem_do_nothing o Q.SPEC `SUC (k + n)` o REWRITE_RULE [is_mem_def]) \\
- fs [cpu_Next_2w_def, cpu_eq_def])
+ rfs [cpu_Next_2w_def, cpu_eq_def] \\ drule_strip no_interrupt_req \\ simp [])
 
  (* state = 4w *)
  \\ rpt strip_tac \\ rveq \\
- (* Case split because the interrupt specification do not rule out spurious acks *)
- Cases_on `(fext n).interrupt_ack`
- >- (* Case that should never happen in "reality" *)
- (qexists_tac `1` \\ simp [GSYM ADD1, circuit_def] \\
- last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\ simp [] \\ disch_then kall_tac \\
- simp [cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_4w_def, cpu_eq_def]) \\
 
- fs [is_interrupt_interface_alt] \\ drule_first \\
+ qpat_assum `is_interrupt_interface _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [is_interrupt_interface_def]) \\
+ pop_assum (qspec_then `n` assume_tac) \\ rfs [] \\
  drule_strip circuit_interrupt_wait \\
  qpat_x_assum `cpu_eq _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
- qexists_tac `SUC (SUC t2)` \\ simp [GSYM ADD_SUC] \\
- last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (n + t2)` o REWRITE_RULE [is_mem_def]) \\ simp [] \\ disch_then kall_tac \\
+ qexists_tac `SUC (SUC m)` \\ rfs [GSYM ADD_SUC] \\
+ last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `SUC (m + n)` o REWRITE_RULE [is_mem_def]) \\ simp [] \\ disch_then kall_tac \\
  once_rewrite_tac [circuit_def] \\
  simp [cpu_Next_def] \\ no_mem_error_tac \\
- simp [cpu_Next_4w_def, cpu_eq_def]);
+ simp [cpu_Next_4w_def, cpu_eq_def] \\
+
+ fs [is_interrupt_interface_def] \\ last_x_assum (qspec_then `SUC (m + n)` mp_tac) \\ simp []);
 
 val circuit_0 = Q.store_thm("circuit_0",
  `!facc init fext.
@@ -948,11 +1040,15 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
    c = circuit facc init fext /\
    is_mem c fext /\
    is_mem_start_interface fext mem_start /\
+   is_interrupt_interface c fext /\
    mem_no_errors fext /\
 
    (c 0).state = 3w /\
    (c 0).command = 0w /\
-   (fext 0).ready ==>
+   ~(c 0).interrupt_req /\
+   (fext 0).ready /\
+   (fext 0).interrupt_state = InterruptReady /\
+   ~(fext 0).interrupt_ack ==>
    ?m. cpu_eq (c (SUC m))
               (c 0 with <| command := 1w;
                            state := 1w;
@@ -960,7 +1056,10 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
                            mem_start := mem_start;
                            PC := mem_start + 64w |>) /\
        (fext (SUC m)).ready /\
-       (fext (SUC m)).mem = (fext 0).mem`,
+       (fext (SUC m)).mem = (fext 0).mem /\
+       (fext (SUC m)).interrupt_state = InterruptReady /\
+       (fext (SUC m)).io_events = (fext 0).io_events /\
+       ~(fext (SUC m)).interrupt_ack`,
  rewrite_tac [is_mem_start_interface_def] \\ rpt strip_tac \\ rveq \\
  drule_strip circuit_mem_start_ready_wait \\
  qpat_x_assum `cpu_eq _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
@@ -969,7 +1068,8 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
  qexists_tac `n` \\
  last_assum (mp_tac o is_mem_do_nothing o Q.SPEC `n` o REWRITE_RULE [is_mem_def]) \\ simp [] \\ disch_then kall_tac \\
 
- simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_3w_def, cpu_eq_def]);
+ rfs [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ drule_strip no_interrupt_req \\
+ simp [cpu_Next_3w_def, cpu_eq_def]);
 
 val addr_add = Q.prove(
  `!(w:word32).
@@ -999,14 +1099,15 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
    ?m. m <> 0 /\ REL (fext (n + m)) (c (n + m)) (Next s)`,
  rpt strip_tac \\
  pop_assum (STRIP_ASSUME_TAC o REWRITE_RULE [REL_def]) \\
- rveq \\
- drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
- qpat_abbrev_tac `c = circuit _ _ _` \\
+
  simp [Next_def, GSYM word_at_addr_def, GSYM align_addr_def] \\
 
- qpat_x_assum `!addr. _ = word_at_addr _ _` (fn th => GSYM th |> ASSUME_TAC) \\
  qpat_x_assum `t.i = _` (fn th => GSYM th |> ASSUME_TAC) \\
- simp [] \\
+ `(word_at_addr s.MEM (align_addr s.PC)) = (circuit facc init fext n).i` by (fs [mem_eq_def] \\ metis_tac []) \\
+
+ simp [] \\ rveq \\
+ drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
+ qpat_abbrev_tac `c = circuit _ _ _` \\
 
  Cases_on `Decode (c n).i`
 
@@ -1023,7 +1124,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `m + (n + 1)` mp_tac) \\
  simp [cpu_eq_def] \\ strip_tac \\
 
- qexists_tac `m + m' + 1` \\ fs [REL_def, word_at_addr_def] \\
+ qexists_tac `m + m' + 1` \\ fs [REL_def] \\
  f_equals_tac \\ Cases_on `p1` \\ simp [EncodeReg_imm_def, ri2word_def])
 
  >- (* In *)
@@ -1032,7 +1133,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def])
+ qexists_tac `m + 1` \\ fs [REL_def])
 
  >- (* Interrupt *)
  (simp [Run_def, dfn'Interrupt_def, incPC_def] \\
@@ -1049,7 +1150,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `m + (n + 1)` mp_tac) \\
  simp [cpu_eq_def] \\ strip_tac \\
 
- qexists_tac `m + m' + 1` \\ fs [REL_def, word_at_addr_def])
+ qexists_tac `m + m' + 1` \\ fs [REL_def])
 
  >- (* Jump *)
  (PairCases_on `p` \\ simp [Run_def, dfn'Jump_def] \\
@@ -1061,7 +1162,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
 
  drule_strip ALU_state_eq_after \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def])
+ qexists_tac `m + 1` \\ fs [REL_def])
 
  >- (* JumpIfNotZero *)
  (PairCases_on `p` \\ simp [Run_def, dfn'JumpIfNotZero_def, incPC_def] \\
@@ -1075,7 +1176,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
 
  drule_strip ALU_state_eq_after \\
- qexists_tac `m + 1` \\ IF_CASES_TAC \\ fs [REL_def, word_at_addr_def] \\ simp [ri2word_def])
+ qexists_tac `m + 1` \\ IF_CASES_TAC \\ fs [REL_def] \\ simp [ri2word_def])
 
  >- (* JumpIfZero *)
  (PairCases_on `p` \\ simp [Run_def, dfn'JumpIfZero_def, incPC_def] \\
@@ -1089,7 +1190,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
 
  drule_strip ALU_state_eq_after \\
- qexists_tac `m + 1` \\ IF_CASES_TAC \\ fs [REL_def, word_at_addr_def] \\ simp [ri2word_def])
+ qexists_tac `m + 1` \\ IF_CASES_TAC \\ fs [REL_def] \\ simp [ri2word_def])
 
  >- (* LoadConstant *)
  (PairCases_on `p` \\ simp [Run_def, dfn'LoadConstant_def, incPC_def] \\
@@ -1097,7 +1198,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def])
+ qexists_tac `m + 1` \\ fs [REL_def])
 
  >- (* LoadMEM *)
  (PairCases_on `p` \\ simp [Run_def, dfn'LoadMEM_def, incPC_def] \\
@@ -1105,7 +1206,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def] \\
+ qexists_tac `m + 1` \\ fs [REL_def, mem_eq_def, word_at_addr_def] \\
  Cases_on `p1` \\ fs [align_addr_def, EncodeReg_imm_def, ri2word_def])
 
  >- (* LoadMEMByte *)
@@ -1115,15 +1216,14 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
  fs [BBLAST_PROVE ``!(w:word32). (1 >< 0) w <₊ (5w:word3)``, BBLAST_PROVE ``!(w:word32). (1 >< 0) w <> (4w:word3)``] \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def] \\
+ qexists_tac `m + 1` \\ fs [REL_def] \\
 
  f_equals_tac \\
 
  simp [word_ver_var_slice_def] \\
  (* Ugly and inefficient: *)
  `(1 >< 0) (EncodeReg_imm p1 (c n)) <=+ (3w:word3)` by BBLAST_TAC \\
- Cases_on `p1` \\ rfs [align_addr_def, EncodeReg_imm_def, ri2word_def] \\
- qpat_x_assum `!addr. _ = (fext n).mem _` (fn th => rewrite_tac [GSYM th]) \\
+ Cases_on `p1` \\ rfs [mem_eq_def, word_at_addr_def, align_addr_def, EncodeReg_imm_def, ri2word_def] \\
  fs [WORD_DECIDE ``!(w:word3). w <=+ 3w <=> (w = 0w \/ w = 1w \/ w = 2w \/ w = 3w)``] \\
 
  rpt (DEP_ONCE_REWRITE_TAC [word_extract_concat_right] \\ (conj_tac >- simp [])) \\
@@ -1136,7 +1236,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def])
+ qexists_tac `m + 1` \\ fs [REL_def])
 
  >- (* Normal *)
  (PairCases_on `p` \\ simp [Run_def, dfn'Normal_def, norm_def, incPC_def] \\
@@ -1148,7 +1248,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  pairarg_tac \\ simp [] \\ rpt strip_tac \\
  qexists_tac `m + 1` \\ drule_strip ALU_state_eq_after \\
  drule_strip ALU_state_eq_after \\
- fs [REL_def, word_at_addr_def])
+ fs [REL_def])
 
  >- (* Out *)
  (PairCases_on `p` \\ simp [Run_def, dfn'Out_def, norm_def, incPC_def] \\
@@ -1160,7 +1260,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  pairarg_tac \\ simp [] \\ rpt strip_tac \\
  qexists_tac `m + 1` \\
  drule_strip ALU_state_eq_after \\
- fs [REL_def, word_at_addr_def] \\ (* lazy: *) BBLAST_TAC)
+ fs [REL_def] \\ (* lazy: *) BBLAST_TAC)
 
  >- (* ReservedInstr *)
  (simp [Run_def, dfn'ReservedInstr_def] \\
@@ -1175,7 +1275,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def])
+ qexists_tac `m + 1` \\ fs [REL_def])
 
  >- (* StoreMEM *)
  (PairCases_on `p` \\ simp [Run_def, dfn'StoreMEM_def, incPC_def] \\
@@ -1183,9 +1283,9 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def] \\
+ qexists_tac `m + 1` \\ fs [REL_def] \\
 
- rw [mem_update_def] \\ fs [align_addr_def, APPLY_UPDATE_THM] \\
+ rw [mem_update_def] \\ fs [mem_eq_def, word_at_addr_def, align_addr_def, APPLY_UPDATE_THM] \\
  simp [addr_add, addr_concat] \\ rw []
  >- BBLAST_TAC
  \\ qpat_x_assum `!addr. _ = (fext n).mem _` (fn th => rewrite_tac [GSYM th]) \\ simp [addr_add])
@@ -1196,16 +1296,15 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def] \\
+ qexists_tac `m + 1` \\ fs [REL_def] \\
 
- gen_tac \\ fs [align_addr_def] \\
+ fs [mem_eq_def, word_at_addr_def, align_addr_def] \\ gen_tac \\
  qspec_then `ri2word p1 s` assume_tac addr_split \\
  pop_assum (fn th => CONV_TAC ((RHS_CONV o ONCE_REWRITE_CONV) [th])) \\
 
  Cases_on `(1 >< 0) (ri2word p1 s)` \\ fs [LT4_cases] \\ rveq \\
 
  simp [mem_update_def, APPLY_UPDATE_THM, addr_add, addr_concat] \\
- qpat_x_assum `!addr. _ = (fext n).mem _` (fn th => rewrite_tac [GSYM th]) \\
  rw [addr_add] \\ BBLAST_PROVE_TAC);
 
 val REL_circuit = Q.store_thm("REL_circuit",
@@ -1266,30 +1365,5 @@ val INIT_REL_circuit = Q.store_thm("INIT_REL_circuit",
  drule_strip (SIMP_RULE (srw_ss()) [] REL_circuit) \\
  pop_assum (qspec_then `n` strip_assume_tac) \\
  qexists_tac `m + mi` \\ fs []);
-
-(*
-(* Tries to bubble as many SUCs to the top as possible *)
-local
-  val plus_lhs_thm = CONJUNCT2 ADD
-  val plus_rhs_thm = GSYM ADD_SUC
-  val op4 = HolKernel.syntax_fns4 (current_theory())
-  val (_, _, _, is_circuit) = op4 "circuit"
-in
-fun SUC_CONV tm =
- if tm = numSyntax.zero_tm then raise UNCHANGED
- else if numSyntax.is_numeral tm then (numLib.num_CONV THENC (RAND_CONV SUC_CONV)) tm
- else if numSyntax.is_suc tm then RAND_CONV SUC_CONV tm
- else if numSyntax.is_plus tm then
-   (* Might need more filters here, only doing SUC lifting if actually numeral *)
-   ((BINOP_CONV SUC_CONV) THENC
-    (REDEPTH_CONV (REWR_CONV plus_lhs_thm)) THENC
-    (REDEPTH_CONV (REWR_CONV plus_rhs_thm))) tm
- else raise UNCHANGED;
-
-fun circuit_step_CONV tm =
- if is_circuit tm then RAND_CONV SUC_CONV tm
- else raise UNCHANGED
-end;
-*)
 
 val _ = export_theory ();

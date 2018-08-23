@@ -15,8 +15,7 @@ in
 end;
 
 (* For filtering out modeling variables *)
-fun is_fext_var (var, _) =
- var <> "mem";
+fun is_fext_var (var, _) = not (mem var model_fext_vars);
 
 (* Internal vars *)
 

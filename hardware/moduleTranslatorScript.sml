@@ -31,7 +31,7 @@ val relM_def =
 val relM_fextv_def =
  zip (TypeBase.fields_of fext_ty)
      (TypeBase.accessors_of fext_ty |> map (rator o lhs o concl o SPEC_ALL))
- |> filter (not o equal "fun" o fst o dest_type o snd o fst)
+ |> filter (fn ((name, _), _) => not (mem name model_fext_vars))
  |> map (fn ((f, ty), accessor) => (fromMLstring f, hol2ver_for_type ty, accessor))
  |> map (fn (f, ty, accessor) => ``fextv (n:num) ^f = INR (^ty (^accessor (fext n)))``)
  |> list_mk_conj

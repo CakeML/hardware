@@ -31,7 +31,8 @@ val updates = TypeBase.updates_of state_ty
 
 (** Fext info **)
 
-val model_fext_vars = ["mem"]; (* variables only used for modeling, never read directly *)
+(* Variables only used for modeling, never read directly *)
+val model_fext_vars = ["mem", "io_events", "interrupt_state"];
 
 local
   val raw = zip (TypeBase.fields_of fext_ty) (TypeBase.accessors_of fext_ty)
