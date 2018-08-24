@@ -529,8 +529,8 @@ val HD_GENLIST_alt = Q.store_thm("HD_GENLIST_alt",
 
 val GENLIST_APPEND_alt = Q.store_thm("GENLIST_APPEND_alt",
  `!m n f g.
-   m < n ==> GENLIST f (n - m) ++ GENLIST g m =
-             GENLIST (\i. if i < (n - m) then f i else g (i - (n - m))) n`,
+   m <= n ==> GENLIST f (n - m) ++ GENLIST g m =
+              GENLIST (\i. if i < (n - m) then f i else g (i - (n - m))) n`,
  rpt strip_tac \\ `n = m + (n - m)` by DECIDE_TAC \\
  pop_assum (fn th => CONV_TAC (RHS_CONV (ONCE_REWRITE_CONV [th]))) \\
  rewrite_tac [GENLIST_APPEND] \\ match_mp_tac f_equals2 \\ rw [GENLIST_CONG]);

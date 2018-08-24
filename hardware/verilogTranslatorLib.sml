@@ -492,11 +492,17 @@ in
     EvalS fext s env (^fupd (K w) f) (Seq fv (BlockingAssign (Var ^var_str) exp))``
 end;
 
+val update_step_lem = Q.prove(
+ `!exp p fextv ver_s ver_s'.
+   (!var. MEM var (evreads exp) ==> ~MEM var (vwrites p)) /\
+   prun fextv ver_s p = INR ver_s' ==>
+   erun fextv ver_s' exp = erun fextv ver_s exp`,
+ rpt strip_tac \\ match_mp_tac erun_cong \\ metis_tac [prun_same_after]);
+
 fun update_step_tac var =
  rw [EVERY_MEM, Eval_def, EvalS_def, prun_def] \\
- drule_first \\ drule_first \\ simp [sum_bind_def] \\
- qspecl_then [`fextv`, `ver_s'`, `exp`, `ver_s with vars := env`] mp_tac erun_cong \\
- impl_tac >- (drule_strip prun_same_after \\ simp []) \\ rw [sum_bind_def] \\
+ drule_first \\ drule_first \\ drule_strip update_step_lem \\
+ simp [sum_bind_def] \\
  drule_strip (prun_bassn_works_for var) \\
  drule_strip (relSs var) \\
  rpt (disch_then drule) \\
