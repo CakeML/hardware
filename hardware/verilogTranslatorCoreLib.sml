@@ -3,7 +3,7 @@ struct
 
 open hardwarePreamble;
 
-open wordsSyntax;
+open fcpSyntax wordsSyntax;
 
 open verilogSyntax;
 
@@ -43,5 +43,27 @@ fun hol2ver_for_type ty =
     inst [ alpha |-> alpha' ] w2ver_tm
   end else
     raise UnableToTranslateTy (ty, "unknown type");
+
+(* I think this is a duplicate of a function available elsewhere? *)
+fun verty_for_type ty =
+  if is_type ty then let
+    val (tname, tl) = dest_type ty
+  in
+    if tname = "bool" then
+      VBool_t_tm
+    else if tname = "fun" then let
+      val (alpha', beta') = dom_rng ty
+      val alpha' = alpha' |> dest_word_type |> dest_numeric_type
+      val beta' = beta' |> dest_word_type |> dest_numeric_type
+    in
+      mk_VArray_t [Arbnumcore.pow (Arbnumcore.two, alpha'), beta']
+    end else if is_word_type ty then let
+      val n = ty |> dest_word_type |> dest_numeric_type
+    in
+      mk_VArray_t [n]
+    end else
+    raise UnableToTranslateTy (ty, "unknown type")
+  end
+  else raise UnableToTranslateTy (ty, "just a type variable");
 
 end

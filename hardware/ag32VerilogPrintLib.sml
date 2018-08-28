@@ -1,6 +1,8 @@
-open ag32VerilogTheory;
+open ag32VerilogTheory ag32EqTheory;
 
-open verilogPrintLib;
+open verilogTranslatorConfigLib verilogTranslatorCoreLib verilogTranslatorLib verilogPrintLib;
+
+open verilogSyntax;
 
 val input_vars = ["data_in"];
 val output_vars = ["data_out", "command", "data_addr", "PC" (* for inst_addr *), "data_wdata", "data_wstrb", "interrupt_req"];

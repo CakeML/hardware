@@ -85,6 +85,10 @@ val nbq_vars_has_type_def = Define `
 
 (** Various lemmas **)
 
+val vars_has_type_append = Q.store_thm("vars_has_type_append",
+ `!vs tys1 tys2. vars_has_type vs (tys1 ++ tys2) <=> vars_has_type vs tys1 /\ vars_has_type vs tys2`,
+ Induct_on `tys1` >- rw [vars_has_type_def] \\ Cases_on `h` \\ rw [vars_has_type_def] \\ eq_tac \\ simp []);
+
 val same_shape_refl_help = Q.prove(
  `!v1 v2. v1 = v2 ==> same_shape v1 v2`,
  recInduct same_shape_ind \\ rw [same_shape_def]);
@@ -222,6 +226,12 @@ val var_has_type_old_var_has_type_WORD = Q.store_thm("var_has_type_old_var_has_t
  \\ rw [var_has_type_def, Once has_type_cases, var_has_value_def, WORD_def] \\ rw [w2ver_def] \\
     drule_strip var_has_type_old_var_has_type_WORD_help \\ 
     qexists_tac `v2w bs` \\ match_mp_tac MAP_CONG \\ simp [w2v_v2w]);
+
+val var_has_type_old_var_has_type_WORD_ARRAY = Q.store_thm("var_has_type_old_var_has_type_WORD_ARRAY",
+ `!var env.
+   var_has_type_old env var (WORD_ARRAY:('a word -> 'b word) -> value -> bool) <=>
+   var_has_type env var (VArray_t [dimword (:'a); dimindex (:'b)])`,
+ cheat);
 
 val var_has_value_var_has_type_WORD_ARRAY_help = Q.prove(
  `!l (w:'a word -> 'b word) v.

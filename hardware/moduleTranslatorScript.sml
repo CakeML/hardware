@@ -28,6 +28,19 @@ val relM_def =
  |> list_mk_conj
  |> (fn tm => Define `relM hol_s vs = ^tm`);
 
+fun build_relM_type (name, accessf) = let
+  val nameHOL = fromMLstring name
+  val ty = accessf |> dest_const |> snd |> dom_rng |> snd |> verty_for_type
+in
+  ``(^nameHOL, ^ty)``
+end;
+
+val relMtypes_def =
+ accessors
+ |> map build_relM_type
+ |> (fn tms => listSyntax.mk_list (tms, ``:string # vertype``))
+ |> (fn tm => Define `relMtypes = ^tm`);
+
 val relM_fextv_def =
  zip (TypeBase.fields_of fext_ty)
      (TypeBase.accessors_of fext_ty |> map (rator o lhs o concl o SPEC_ALL))

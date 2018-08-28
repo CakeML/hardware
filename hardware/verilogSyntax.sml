@@ -120,5 +120,7 @@ fun is_VBool_t tm = tm = VBool_t_tm;
 val VArray_t_tm = ``VArray_t``;
 fun is_VArray_t tm = is_comb tm andalso (rator tm) = VArray_t_tm;
 fun dest_VArray_t tm = tm |> rand |> dest_list |> fst;
+val num_ty = ``:num``;
+fun mk_VArray_t is = mk_comb (VArray_t_tm, listSyntax.mk_list (map numSyntax.mk_numeral is, num_ty));
 
 end

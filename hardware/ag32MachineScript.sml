@@ -94,46 +94,68 @@ val mem_update_def = Define `
 val align_addr_def = Define `
  align_addr (addr:word32) = ((31 >< 2) addr @@ (0w:word2)):word32`;
 
+(* TODO: Move up to separate theory? *)
+val _ = Datatype `
+ fext_accessor = <|
+  get_command : 'a -> word3;
+  get_PC : 'a -> word32;
+  get_data_addr : 'a -> word32;
+  get_data_wdata : 'a -> word32;
+  get_data_wstrb : 'a -> word4;
+
+  get_interrupt_req : 'a -> bool
+  |>`;
+
+val fext_accessor_circuit_def = Define `
+ fext_accessor_circuit =
+  <| get_command := state_circuit_command;
+     get_PC := state_circuit_PC;
+     get_data_addr := state_circuit_data_addr;
+     get_data_wdata := state_circuit_data_wdata;
+     get_data_wstrb := state_circuit_data_wstrb;
+
+     get_interrupt_req := state_circuit_interrupt_req |>`;
+
 (* TODO: Should maybe add that errors are not allowed to occur, i.e. non-error implies this ... *)
 val is_mem_def = Define `
- is_mem circuit fext =
+ is_mem accessors step fext =
   !n.
   (* Mem data semantics *)
 
   (* Nothing *)
-  ((circuit n).command = 0w /\ (fext n).ready ==>
+  (accessors.get_command (step n) = 0w /\ (fext n).ready ==>
    (fext (SUC n)).mem = (fext n).mem /\
    (fext (SUC n)).ready = (fext n).ready) /\
 
   (* Read instruction *)
-  ((circuit n).command = 1w /\ (fext n).ready ==>
+  (accessors.get_command (step n) = 1w /\ (fext n).ready ==>
    ?m. (!p. p < m ==> (fext (SUC (n + p))).mem = (fext n).mem /\ ~(fext (SUC (n + p))).ready) /\
        (fext (SUC (n + m))).mem = (fext n).mem /\
-       (fext (SUC (n + m))).inst_rdata = (fext n).mem (align_addr (circuit n).PC) /\
+       (fext (SUC (n + m))).inst_rdata = (fext n).mem (align_addr (accessors.get_PC (step n))) /\
        (fext (SUC (n + m))).ready) /\
 
   (* Read instruction + read data *)
-  ((circuit n).command = 2w /\ (fext n).ready ==>
+  (accessors.get_command (step n) = 2w /\ (fext n).ready ==>
     ?m. (!p. p < m ==> (fext (SUC (n + p))).mem = (fext n).mem /\ ~(fext (SUC (n + p))).ready) /\
         (fext (SUC (n + m))).mem = (fext n).mem /\
-        (fext (SUC (n + m))).data_rdata = (fext n).mem (circuit n).data_addr /\
-        (fext (SUC (n + m))).inst_rdata = (fext n).mem (align_addr (circuit n).PC) /\
+        (fext (SUC (n + m))).data_rdata = (fext n).mem (accessors.get_data_addr (step n)) /\
+        (fext (SUC (n + m))).inst_rdata = (fext n).mem (align_addr (accessors.get_PC (step n))) /\
         (fext (SUC (n + m))).ready) /\
 
   (* Read instruction + write data, note that the current unverified cache layer do not allow inst read addr and
                                     data write addr to be the same... *)
-  ((circuit n).command = 3w /\ (fext n).ready ==>
+  (accessors.get_command (step n) = 3w /\ (fext n).ready ==>
     ?m. (!p. p < m ==> (fext (SUC (n + p))).mem = (fext n).mem /\ ~(fext (SUC (n + p))).ready) /\
-        (let newmem = mem_update (fext n).mem (circuit n).data_addr (circuit n).data_wdata (circuit n).data_wstrb in
+        (let newmem = mem_update (fext n).mem (accessors.get_data_addr (step n)) (accessors.get_data_wdata (step n)) (accessors.get_data_wstrb (step n)) in
          (fext (SUC (n + m))).mem = newmem /\
-         (fext (SUC (n + m))).inst_rdata = newmem (align_addr (circuit n).PC) /\
+         (fext (SUC (n + m))).inst_rdata = newmem (align_addr (accessors.get_PC (step n))) /\
          (fext (SUC (n + m))).ready)) /\
 
  (* Clear cache block used for printing ... exactly the same semantics as "read instruction" *)
- ((circuit n).command = 4w /\ (fext n).ready ==>
+ (accessors.get_command (step n) = 4w /\ (fext n).ready ==>
    ?m. (!p. p < m ==> (fext (SUC (n + p))).mem = (fext n).mem /\ ~(fext (SUC (n + p))).ready) /\
        (fext (SUC (n + m))).mem = (fext n).mem /\
-       (fext (SUC (n + m))).inst_rdata = (fext n).mem (align_addr (circuit n).PC) /\
+       (fext (SUC (n + m))).inst_rdata = (fext n).mem (align_addr (accessors.get_PC (step n))) /\
        (fext (SUC (n + m))).ready)`;
 
 (** Accelerator specification **)
@@ -160,12 +182,12 @@ val is_mem_start_interface_def = Define `
 
 (* This is a little difficult to model properly because the interrupt interface is async. *)
 val is_interrupt_interface_def = Define `
- is_interrupt_interface circuit fext =
+ is_interrupt_interface accessors step fext =
   ((fext 0).io_events = [] /\
   (fext 0).interrupt_state = InterruptReady /\
   !n. case (fext n).interrupt_state of
          InterruptReady =>
-          if (circuit n).interrupt_req then
+          if accessors.get_interrupt_req (step n) then
            ?m. (!p. p < m ==> ~(fext (SUC (n + p))).interrupt_ack) /\
                (fext (SUC (n + m))).interrupt_state = InterruptAck /\
                (* This assumes that memory is not changed during interrupts,

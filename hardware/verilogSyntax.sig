@@ -132,8 +132,10 @@ sig
 
   (* New types *)
 
+  val VBool_t_tm : term
   val is_VBool_t : term -> bool
 
   val is_VArray_t : term -> bool
   val dest_VArray_t : term -> term list
+  val mk_VArray_t : Arbnum.num list -> term
 end
