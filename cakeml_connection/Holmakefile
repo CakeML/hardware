@@ -1,0 +1,1 @@
+INCLUDES = $(CAKEMLDIR)/examples/ag32/compilation/proofs ../hardware

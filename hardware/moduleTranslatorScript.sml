@@ -47,7 +47,7 @@ val relM_fextv_def =
  |> filter (fn ((name, _), _) => not (mem name model_fext_vars))
  |> map (fn ((f, ty), accessor) => (fromMLstring f, hol2ver_for_type ty, accessor))
  |> map (fn (f, ty, accessor) => ``fextv (n:num) ^f = INR (^ty (^accessor (fext n)))``)
- |> list_mk_conj
+ |> list_mk_conj |> inst [ alpha |-> ``:error`` ]
  |> (fn tm => Define `relM_fextv fextv fext = !n. ^tm`);
 
 val relM_fextv_fext_relS_fextv_fext = Q.store_thm("relM_fextv_fext_relS_fextv_fext",

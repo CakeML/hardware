@@ -167,7 +167,9 @@ val INIT_verilog_def = Define `
   WORD (0w:word3) (THE (ALOOKUP env "command")) /\
   WORD (5w:word3) (THE (ALOOKUP env "do_delay_write")) /\
   BOOL F (THE (ALOOKUP env "do_interrupt")) /\
-  BOOL F (THE (ALOOKUP env "interrupt_req"))`;
+  BOOL F (THE (ALOOKUP env "interrupt_req")) /\
+
+  WORD_ARRAY (\(i:word6). (0w:word32)) (THE (ALOOKUP env "R"))`;
 
 val INIT_fext_def = Define `
  INIT_fext fext <=>
@@ -234,10 +236,7 @@ val relM_backwards = Q.store_thm("relM_backwards",
 
  simp []);
 
-val INIT_backwards_mem_def = Define `
- INIT_backwards_mem (mem : word32 -> word32) (i : word32) = (7 >< 0) (mem (align 2 i) >>>~ (8w * (1 >< 0) i))`;
-
-val align_addr_align = Q.prove(
+val align_addr_align = Q.store_thm("align_addr_align",
  `!w. align_addr w = align 2 w`,
  rw [align_addr_def, align_def] \\ blastLib.BBLAST_TAC);
 
@@ -256,12 +255,6 @@ val align_align_2_4_add = Q.prove(
 
 val align_align_2_4_add_0 = align_align_2_4_add |> Q.SPEC `0w` |> SIMP_RULE (srw_ss()) [];
 
-val mem_eq_INIT_backwards_mem = Q.store_thm("mem_eq_INIT_backwards_mem",
- `!memw. ∃memb. mem_eq memw memb`,
- gen_tac \\ qexists_tac `INIT_backwards_mem memw` \\
- rw [mem_eq_def, word_at_addr_def, INIT_backwards_mem_def, align_addr_align, align_align_2_4, align_align, align_align_2_4_add, align_align_2_4_add_0] \\
- simp [align_def] \\ blastLib.BBLAST_PROVE_TAC);
-
 val INIT_backwards = Q.store_thm("INIT_backwards",
  `!t fext env mem_start.
    relM t env /\ INIT_verilog env /\ INIT_fext fext ==>
@@ -275,8 +268,6 @@ val INIT_backwards = Q.store_thm("INIT_backwards",
  qexists_tac `<| R := t.R; CarryFlag := t.CarryFlag; OverflowFlag := t.OverflowFlag;
                  data_in := t.data_in; data_out := t.data_out |>` \\
  simp [INIT_R_def, combinTheory.UPDATE_APPLY] \\
-
- qspec_then `fext.mem` strip_assume_tac mem_eq_INIT_backwards_mem \\ asm_exists_tac \\
 
  rfs [relM_var_def, WORD_def, BOOL_def, mget_var_ALOOKUP, w2ver_bij]);
 
@@ -335,7 +326,7 @@ val is_mem_verilog = Q.store_thm("is_mem_verilog",
  fs [relM_def, relM_var_def, mget_var_ALOOKUP, WORD_def, ver2w_w2ver]);
 
 val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
-  `!n init mem_start fext fextv vstep.
+  `!n init mem_start fext fextv vstep s hol_s.
    vstep = mrun fextv computer init /\
 
    relM_fextv fextv fext /\
@@ -349,41 +340,31 @@ val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
    INIT_verilog init /\
    INIT_fext (fext 0) /\
 
-   (!s.
-    mem_eq (fext 0).mem s.MEM /\
-    s.io_events = [] /\
-    s.R 0w = mem_start /\
-    s.PC = mem_start + 64w ==>
-    (FUNPOW Next n s).io_events = [] (* <-- just an example property *))
+   s.R 0w = mem_start /\
+   s.PC = mem_start + 64w /\
+   relM hol_s init /\
+   INIT (fext 0) hol_s s
    ==>
-   ?m vs'.
+   ?m vs' hol_s'.
     vstep m = INR vs' /\
-    (fext m).io_events = []
-    (*LIST_REL mem_eq (fext m).io_events s'.io_events*)`,
+    relM hol_s' vs' /\
+    REL (fext m) hol_s' (FUNPOW Next n s)`,
+ (* todo: append not needed here? *)
  simp [vars_has_type_append] \\ rpt strip_tac \\
-
- drule_strip relM_backwards \\
- drule_strip INIT_backwards \\
- pop_assum (qspec_then `mem_start` strip_assume_tac) \\
 
  drule_strip is_interrupt_interface_verilog \\
  qspecl_then [`hol_s`, `fext`] assume_tac is_acc_addacc \\
  drule_strip is_mem_verilog \\
 
  drule_strip (SIMP_RULE (srw_ss()) [] INIT_REL_circuit) \\ simp [combinTheory.UPDATE_APPLY] \\
- disch_then (qspec_then `n` strip_assume_tac) \\
+ pop_assum (qspec_then `n` strip_assume_tac) \\
 
  (* Step to REL-valid state *)
  drule_strip (SIMP_RULE (srw_ss()) [circuit_0] circuit_0_next) \\
  impl_tac >- fs [INIT_def] \\ strip_tac \\
 
- drule_strip computer_Next_relM_run \\ pop_assum (qspec_then `m'` strip_assume_tac) \\
- asm_exists_tac \\
+ drule_strip computer_Next_relM_run \\ pop_assum (qspec_then `m` strip_assume_tac) \\
 
- qmatch_asmsub_abbrev_tac `INIT _ _ s'` \\
- first_x_assum (qspec_then `s'` mp_tac) \\
- qunabbrev_tac `s'` \\ simp [combinTheory.UPDATE_APPLY] \\
-
- fs [REL_def, INIT_def] \\ metis_tac [LIST_REL_NIL]);
+ asm_exists_tac \\ simp [] \\ asm_exists_tac \\ simp []);
 
 val _ = export_theory ();

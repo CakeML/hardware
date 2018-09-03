@@ -33,22 +33,15 @@ val mem_no_errors_def = Define `
 
 (** Correspondence relation **)
 
-val word_at_addr_def = Define `
-  word_at_addr (mem : word32 -> word8) addr =
-  (mem (addr + 3w) @@ (mem (addr + 2w) @@ (mem (addr + 1w) @@ mem addr):word16):word24):word32`;
-
-val mem_eq_def = Define `
- mem_eq fextmem smem = !addr. fextmem (align_addr addr) = word_at_addr smem (align_addr addr)`;
-
 val REL_def = Define `
- REL fext (t:state_circuit) (s:ag32_state) = (
+ REL fext (t:state_circuit) (s:ag32_state) <=>
   (* Memory state *)
-  (t.i = fext.mem (align_addr s.PC)) /\
-  mem_eq fext.mem s.MEM /\
+  (t.i = word_at_addr fext.mem (align_addr s.PC)) /\
+  (fext.mem = s.MEM) /\
   fext.ready /\
 
   (* Interrupt state *)
-  LIST_REL mem_eq fext.io_events s.io_events /\
+  (fext.io_events = s.io_events) /\
   (fext.interrupt_state = InterruptReady) /\
   ~fext.interrupt_ack /\
 
@@ -68,7 +61,7 @@ val REL_def = Define `
   (t.command = 0w) /\
   (t.do_delay_write = 5w) /\
   ~t.do_interrupt /\
-  ~t.interrupt_req)`;
+  ~t.interrupt_req`;
 
 val INIT_R_def = Define `
  INIT_R (t:state_circuit) (s:ag32_state) =
@@ -76,13 +69,13 @@ val INIT_R_def = Define `
 
 (* Similar to REL, but for initial state *)
 val INIT_def = Define `
- INIT fext (t:state_circuit) (s:ag32_state) = (
+ INIT fext (t:state_circuit) (s:ag32_state) <=>
   (* Memory state *)
-  mem_eq fext.mem s.MEM /\
+  (fext.mem = s.MEM) /\
   fext.ready /\
 
   (* Interrupt state, in practice both should be empty initially *)
-  LIST_REL mem_eq fext.io_events s.io_events /\
+  (fext.io_events = s.io_events) /\
   (fext.interrupt_state = InterruptReady) /\
   ~fext.interrupt_ack /\
 
@@ -100,7 +93,7 @@ val INIT_def = Define `
   (t.command = 0w) /\
   (t.do_delay_write = 5w) /\
   ~t.do_interrupt /\
-  ~t.interrupt_req)`;
+  ~t.interrupt_req`;
 
 (* Variant of state_circuit_component_equality with only cpu-relevant fields *)
 val cpu_eq_def = Define `
@@ -402,29 +395,6 @@ val circuit_acc_wait = Q.store_thm("circuit_acc_wait",
  last_x_assum (assume_tac o is_mem_do_nothing `SUC (n + n')`) \\
  rfs [] \\ drule_strip no_interrupt_req \\ simp []);
 
-(*
-val f_all_F_or_at_least_one_T = Q.store_thm("f_all_F_or_at_least_one_T",
- `!f t1 t2.
-   (!t3. t3 < t2 ==> ~(f (t1 + t3))) \/
-   (?t3. t3 < t2 /\ (!t4. t4 < t3 ==> ~(f (t1 + t4))) /\ (f (t1 + t3)))`,
- rpt gen_tac \\ Induct_on `t2` >- simp [] \\ pop_assum strip_assume_tac
- >- (Cases_on `f (t1 + t2)`
-  >- (disj2_tac \\ qexists_tac `t2` \\ simp [])
-  \\ (disj1_tac \\ gen_tac \\ Cases_on `t3 = t2` \\ simp []))
- \\ disj2_tac \\ qexists_tac `t3` \\ simp []);
-
-val is_interrupt_interface_alt = Q.store_thm("is_interrupt_interface_alt",
- `!c fext.
-   is_interrupt_interface c fext =
-   !t1. (c t1).interrupt_req ==>
-    ?t2. (!t3. t3 < t2 ==> ~(fext (SUC (t1 + t3))).interrupt_ack) /\ (fext (SUC (t1 + t2))).interrupt_ack`,
- rw [is_interrupt_interface_def] \\ reverse eq_tac \\ rpt strip_tac \\ drule_first
- >- (qexists_tac `t2` \\ simp []) \\
- qspecl_then [`ext_interrupt_ack o fext`, `SUC t1`, `m`] strip_assume_tac f_all_F_or_at_least_one_T
- >- (qexists_tac `m` \\ fs [ADD1])
- \\ qexists_tac `t3` \\ fs [ADD1]);
-*)
-
 val circuit_interrupt_wait = Q.store_thm("circuit_interrupt_wait",
  `!m n facc init fext.
    is_mem fext_accessor_circuit (circuit facc init fext) fext /\
@@ -535,7 +505,7 @@ val circuit_next = Q.store_thm("circuit_next",
            !s.
             (c n).R = s.R /\ (c n).PC = s.PC /\ (c n).CarryFlag = s.CarryFlag /\ (c n).OverflowFlag = s.OverflowFlag /\
 
-            ((fext n).mem (align_addr (c n).PC) = (c n).i) /\ (c n).command = 0w /\ (fext n).ready /\
+            (word_at_addr (fext n).mem (align_addr (c n).PC) = (c n).i) /\ (c n).command = 0w /\ (fext n).ready /\
 
             ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady
             ==>
@@ -591,7 +561,7 @@ val circuit_next = Q.store_thm("circuit_next",
              | LoadMEM (w, a) =>
                cpu_eq (c (n + 1)) (c n with <| delay_write := w;
                                                do_delay_write := 4w;
-                                               data_addr := align_addr (EncodeReg_imm a (c n));
+                                               data_addr := EncodeReg_imm a (c n);
                                                PC := (c n).PC + 4w;
                                                state := 1w;
                                                command := 2w |>)
@@ -599,7 +569,7 @@ val circuit_next = Q.store_thm("circuit_next",
                let addr = (EncodeReg_imm a (c n)) in
                cpu_eq (c (n + 1)) (c n with <| delay_write := w;
                                                do_delay_write := (1 >< 0) addr;
-                                               data_addr := align_addr addr;
+                                               data_addr := addr;
                                                PC := (c n).PC + 4w;
                                                state := 1w;
                                                command := 2w |>)
@@ -634,21 +604,21 @@ val circuit_next = Q.store_thm("circuit_next",
                                                state := 1w;
                                                command := 1w |>)
              | StoreMEM (a, b) =>
-               cpu_eq (c (n + 1)) (c n with <| data_addr := align_addr (ri2word b s);
+               cpu_eq (c (n + 1)) (c n with <| data_addr := ri2word b s;
                                                data_wdata := ri2word a s;
                                                data_wstrb := 15w;
                                                PC := (c n).PC + 4w;
                                                state := 1w;
                                                command := 3w |>)
              | StoreMEMByte (a, b) =>
-               cpu_eq (c (n + 1)) (c n with <| data_addr := align_addr (ri2word b s);
+               cpu_eq (c (n + 1)) (c n with <| data_addr := ri2word b s;
                                                data_wstrb := 1w <<~ w2w ((1 >< 0) (ri2word b s));
                                                data_wdata := (case (1 >< 0) (ri2word b s) of
                                                                   0w => bit_field_insert 7 0 ((7 >< 0) (ri2word a s)) (c n).data_wdata
                                                                 | 1w => bit_field_insert 15 8 ((7 >< 0) (ri2word a s)) (c n).data_wdata
                                                                 | 2w => bit_field_insert 23 16 ((7 >< 0) (ri2word a s)) (c n).data_wdata
                                                                 | 3w => bit_field_insert 31 24 ((7 >< 0) (ri2word a s)) (c n).data_wdata
-                                                                | v => ARB (* <-- just to silent warning *));
+                                                                | v => ARB (* <-- just to silence warning *));
                                                PC := (c n).PC + 4w;
                                                state := 1w;
                                                command := 3w |>))
@@ -658,7 +628,7 @@ val circuit_next = Q.store_thm("circuit_next",
                   ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady ==>
                   ?m. cpu_eq (c (n + m)) (c n with <| command := 0w;
                                                       state := 0w;
-                                                      i := (fext n).mem (align_addr (c n).PC) |>) /\
+                                                      i := word_at_addr (fext n).mem (align_addr (c n).PC) |>) /\
                       (fext (n + m)).ready /\
                       (fext (n + m)).mem = (fext n).mem /\
                       (fext (n + m)).interrupt_state = InterruptReady /\
@@ -670,13 +640,13 @@ val circuit_next = Q.store_thm("circuit_next",
                        (c (n + m))
                        (c n with <| command := 0w;
                                     state := 0w;
-                                    i := (fext n).mem (align_addr (c n).PC);
+                                    i := word_at_addr (fext n).mem (align_addr (c n).PC);
                                     do_delay_write := 5w;
                                     R := if (c n).do_delay_write = 4w then
-                                          ((c n).delay_write =+ (fext (n + m)).mem (c n).data_addr) (c n).R
+                                          ((c n).delay_write =+ (word_at_addr (fext (n + m)).mem (align_addr (c n).data_addr))) (c n).R
                                          else
                                           ((c n).delay_write =+ w2w ((word_ver_var_slice ((8w:word6) * w2w (c n).do_delay_write) 8
-                                                                                         ((fext (n + m)).mem (c n).data_addr)):word8))
+                                                                                         (word_at_addr (fext (n + m)).mem (align_addr (c n).data_addr))):word8))
                                           (c n).R |>) /\
                       (fext (n + m)).ready /\
                       (fext (n + m)).mem = (fext n).mem /\
@@ -685,12 +655,12 @@ val circuit_next = Q.store_thm("circuit_next",
                       ~(fext (n + m)).interrupt_ack
           | 3w => (c n).do_delay_write = 5w /\ ~(c n).do_interrupt /\ (fext n).ready /\
                   ~(c n).interrupt_req /\ (fext n).interrupt_state = InterruptReady ==>
-                  (let newmem = mem_update (fext n).mem (c n).data_addr (c n).data_wdata (c n).data_wstrb in
+                  (let newmem = mem_update (fext n).mem (align_addr (c n).data_addr) (c n).data_wdata (c n).data_wstrb in
                   ?m. cpu_eq
                        (c (n + m))
                        (c n with <| command := 0w;
                                     state := 0w;
-                                    i := newmem (align_addr (c n).PC) |>) /\
+                                    i := word_at_addr newmem (align_addr (c n).PC) |>) /\
                       (fext (n + m)).ready /\
                       (fext (n + m)).mem = newmem /\
                       (fext (n + m)).interrupt_state = InterruptReady /\
@@ -702,7 +672,7 @@ val circuit_next = Q.store_thm("circuit_next",
                                                       state := 4w;
                                                       interrupt_req := T;
                                                       do_interrupt := F;
-                                                      i := (fext n).mem (align_addr (c n).PC) |>) /\
+                                                      i := word_at_addr (fext n).mem (align_addr (c n).PC) |>) /\
                       (fext (n + m)).ready /\
                       (fext (n + m)).mem = (fext n).mem /\
                       (fext (n + m)).interrupt_state = InterruptReady /\
@@ -1114,7 +1084,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  simp [Next_def, GSYM word_at_addr_def, GSYM align_addr_def] \\
 
  qpat_x_assum `t.i = _` (fn th => GSYM th |> ASSUME_TAC) \\
- `(word_at_addr s.MEM (align_addr s.PC)) = (circuit facc init fext n).i` by (fs [mem_eq_def] \\ metis_tac []) \\
+ `(word_at_addr s.MEM (align_addr s.PC)) = (circuit facc init fext n).i` by metis_tac [] \\
 
  simp [] \\ rveq \\
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
@@ -1217,7 +1187,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
- qexists_tac `m + 1` \\ fs [REL_def, mem_eq_def, word_at_addr_def] \\
+ qexists_tac `m + 1` \\ fs [REL_def, word_at_addr_def] \\
  Cases_on `p1` \\ fs [align_addr_def, EncodeReg_imm_def, ri2word_def])
 
  >- (* LoadMEMByte *)
@@ -1234,7 +1204,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  simp [word_ver_var_slice_def] \\
  (* Ugly and inefficient: *)
  `(1 >< 0) (EncodeReg_imm p1 (c n)) <=+ (3w:word3)` by BBLAST_TAC \\
- Cases_on `p1` \\ rfs [mem_eq_def, word_at_addr_def, align_addr_def, EncodeReg_imm_def, ri2word_def] \\
+ Cases_on `p1` \\ rfs [word_at_addr_def, align_addr_def, EncodeReg_imm_def, ri2word_def] \\
  fs [WORD_DECIDE ``!(w:word3). w <=+ 3w <=> (w = 0w \/ w = 1w \/ w = 2w \/ w = 3w)``] \\
 
  rpt (DEP_ONCE_REWRITE_TAC [word_extract_concat_right] \\ (conj_tac >- simp [])) \\
@@ -1296,10 +1266,8 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
  qexists_tac `m + 1` \\ fs [REL_def] \\
 
- rw [mem_update_def] \\ fs [mem_eq_def, word_at_addr_def, align_addr_def, APPLY_UPDATE_THM] \\
- simp [addr_add, addr_concat] \\ rw []
- >- BBLAST_TAC
- \\ qpat_x_assum `!addr. _ = (fext n).mem _` (fn th => rewrite_tac [GSYM th]) \\ simp [addr_add])
+ rw [mem_update_def] \\ fs [word_at_addr_def, align_addr_def, APPLY_UPDATE_THM] \\
+ simp [addr_add, addr_concat])
 
  \\ (* StoreMEMByte *)
  PairCases_on `p` \\ simp [Run_def, dfn'StoreMEMByte_def, incPC_def] \\
@@ -1309,14 +1277,15 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
  qexists_tac `m + 1` \\ fs [REL_def] \\
 
- fs [mem_eq_def, word_at_addr_def, align_addr_def] \\ gen_tac \\
+ fs [word_at_addr_def, align_addr_def] \\
  qspec_then `ri2word p1 s` assume_tac addr_split \\
  pop_assum (fn th => CONV_TAC ((RHS_CONV o ONCE_REWRITE_CONV) [th])) \\
 
  Cases_on `(1 >< 0) (ri2word p1 s)` \\ fs [LT4_cases] \\ rveq \\
 
- simp [mem_update_def, APPLY_UPDATE_THM, addr_add, addr_concat] \\
- rw [addr_add] \\ BBLAST_PROVE_TAC);
+ simp [mem_update_def, addr_add, addr_concat] \\
+ match_mp_tac EQ_EXT \\ rw [APPLY_UPDATE_THM] \\
+ BBLAST_PROVE_TAC);
 
 val REL_circuit = Q.store_thm("REL_circuit",
  `!m n ni c s facc init fext.
