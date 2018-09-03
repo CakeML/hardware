@@ -249,6 +249,10 @@ string get_print_string (string_start::wordT, max_length::nat, mem::memT) = {
   [chr] @ get_print_string (string_start + 1, max_length - 1, mem)
 }
 
+-- Arguably, as the accelerator function, this should be an ISA parameter, but
+-- we inline this as well
+nat print_string_max_length = 64
+
 define ReservedInstr =
   nothing
 
