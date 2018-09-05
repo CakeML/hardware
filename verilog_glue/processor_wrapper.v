@@ -18,13 +18,14 @@ module processor_wrapper(
   input [31:0] inst_rdata);
 
 wire[31:0] PC;
+wire[31:0] data_addr_wire;
 
 processor processor(.clk(clk),
           .data_in(data_in),
           .PC(PC),
           .data_out(data_out),
           .command(command),
-          .data_addr(data_addr),
+          .data_addr(data_addr_wire),
           .data_wdata(data_wdata),
           .data_wstrb(data_wstrb),
           .mem_start_ready(mem_start_ready),
@@ -37,5 +38,6 @@ processor processor(.clk(clk),
 
 // Part of is_mem in formalization
 assign inst_addr = {PC[31:2], 2'b0};
+assign data_addr = {data_addr_wire[31:2], 2'b0};
 
 endmodule
