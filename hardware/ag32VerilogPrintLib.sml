@@ -1,11 +1,12 @@
-open ag32VerilogTheory ag32EqTheory;
+open ag32VerilogTheory;
 
 open verilogTranslatorConfigLib verilogTranslatorCoreLib verilogTranslatorLib verilogPrintLib;
 
 open verilogSyntax;
 
 val input_vars = ["data_in"];
-val output_vars = ["data_out", "command", "data_addr", "PC" (* for inst_addr *), "data_wdata", "data_wstrb", "interrupt_req"];
+val output_vars = ["data_out", "command", "data_addr", "PC" (* for inst_addr *),
+                   "data_wdata", "data_wstrb", "interrupt_req"];
 val external_vars = input_vars @ output_vars;
 
 (* Fext vars *)
@@ -22,22 +23,36 @@ fun is_fext_var (var, _) = not (mem var model_fext_vars);
 (* Internal vars *)
 
 local
+  val get_var = fromHOLstring o rand o rand
   val s = mk_var ("t", state_ty)
-  val data = INIT_def |> SPEC_ALL |> concl |> rhs |> strip_conj
+  fun to_ver_constant tm = hol2hardware_exp s tm |> concl |> Eval_get_prog
+  fun spec_to_init spec =
+      if is_BOOL spec then let
+        val (v, var) = dest_BOOL spec
+        val v = to_ver_constant v
+        val var = get_var var
+      in
+        (var, exp_print v)
+      end else if is_WORD spec then let
+        val (v, var) = dest_WORD spec
+        val v = to_ver_constant v
+        val var = get_var var
+      in
+        (var, exp_print v)
+      end else if is_WORD_ARRAY spec then let
+        val (v, var) = dest_WORD_ARRAY spec
+        val v = v |> dest_abs |> snd
+        val var = get_var var
+      in
+        (* TODO: Special handling for this for now *)
+        if v = ``0w:word32`` then
+          (var, "0")
+        else
+          raise UnableToTranslate (spec, "Too general WORD_ARRAY expression for current implementation")
+      end else
+      raise UnableToTranslate (spec, "Unknown case")
 in
-val init_assoc =
- foldr (fn (spec, l) => if is_neg spec then let
-                          val var = hol2hardware_exp s (dest_neg spec) |> concl |> Eval_get_prog |> dest_Var |> fromHOLstring
-                          val v = exp_print ``Const (VBool F)``
-                        in
-                          (var, v) :: l
-                        end else if is_eq spec andalso is_word_literal (rhs spec) then let
-                          val (var, _, const) = hol2hardware_exp s spec |> concl |> Eval_get_prog |> dest_Cmp
-                          val var = dest_Var var |> fromHOLstring
-                        in
-                          (var, exp_print const) :: l
-                        end else
-                          l) [] data
+val init_assoc = map spec_to_init (INIT_verilog_def |> SPEC_ALL |> concl |> rhs |> strip_conj)
 end;
 
 fun print_interface_var (var, ty) = let
@@ -67,6 +82,8 @@ val internal_let_vars =
               "automatic " ^ ty ^ " " ^ var ^ ";\n"
             end)
  |> concat;
+
+(*val [prog_comm, prog_acc_comm] = computer_def |> concl |> rhs |> EVAL |> concl |> rhs |> dest_list |> fst;*)
 
 let
   val ss =
@@ -98,11 +115,11 @@ let
    "\nalways_ff @ (posedge clk) begin\n" ^
    (* All let variables are from processor currently, so can do this in a simple way currently *)
    internal_let_vars ^ "\n" ^
-   vprog_print prog_comm ^
+   vprog_print (prog_comm_def |> concl |> rhs) ^
    "end\n" ^
 
    "\nalways_ff @ (posedge clk) begin\n" ^
-   vprog_print prog_acc_comm ^
+   vprog_print (prog_acc_comm_def |> concl |> rhs) ^
    "end\n" ^
 
    "\n" ^ "endmodule\n"

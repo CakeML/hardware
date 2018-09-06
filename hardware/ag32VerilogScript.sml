@@ -62,6 +62,7 @@ val prog_def = EvalS_get_prog (trans |> concl);
 val prog_def = Define `prog = ^prog_def`;
 val trans = REWRITE_RULE [GSYM prog_def] trans;
 val prog_comm = intro_cvars_for_prog (prog_def |> concl |> lhs);
+(* temp, export: *) val prog_comm_def = Define `prog_comm = ^prog_comm`;
 
 (* Acc *)
 val trans_acc = hol2hardware_step_function addacc_next_def;
@@ -69,6 +70,7 @@ val prog_acc_def = EvalS_get_prog (trans_acc |> concl);
 val prog_acc_def = Define `prog_acc = ^prog_acc_def`;
 val trans_acc = REWRITE_RULE [GSYM prog_acc_def] trans_acc;
 val prog_acc_comm = intro_cvars_for_prog (prog_acc_def |> concl |> lhs);
+(* temp, export: *) val prog_acc_comm_def = Define `prog_acc_comm = ^prog_acc_comm`;
 
 (* Normalize for extraction *)
 (* This can be simplified for now because only the processor has preconds *)
