@@ -1,1 +1,1 @@
-INCLUDES = $(CAKEMLDIR)/examples/ag32/compilation/proofs ../hardware
+INCLUDES = $(CAKEMLDIR)/examples/ag32/compilation/proofs $(CAKEMLDIR)/compiler/encoders/ag32 ../hardware
