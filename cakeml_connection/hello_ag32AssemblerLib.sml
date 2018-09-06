@@ -84,11 +84,7 @@ val word_of_bytes_rw = Q.prove(
   \\ blastLib.BBLAST_TAC);
 
 local
-(* No GENLIST for SML-level? *)
-fun ints_up_to n =
- if n = 0 then [] else ints_up_to (n - 1) @ [n - 1];
-
-val all_8bits_ints = Math.pow (2.0, 8.0) |> trunc |> ints_up_to;
+val all_8bits_ints = Math.pow (2.0, 8.0) |> trunc |> flip (curry List.tabulate) I;
 
 val ty8 = fcpSyntax.mk_int_numeric_type 8
 val ty32 = fcpSyntax.mk_int_numeric_type 32
