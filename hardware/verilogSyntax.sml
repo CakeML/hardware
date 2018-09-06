@@ -110,9 +110,11 @@ end;
 
 (** Syntax for verilogTypeTheory **)
 
-val BOOL_tm = ``BOOL``;
-val WORD_tm = ``WORD``;
-val WORD_ARRAY_tm = ``WORD_ARRAY``;
+val op2 = HolKernel.syntax_fns2 "verilogType";
+
+val (BOOL_tm, mk_BOOL, dest_BOOL, is_BOOL) = op2 "BOOL"
+val (WORD_tm, mk_WORD, dest_WORD, is_WORD) = op2 "WORD"
+val (WORD_ARRAY_tm, mk_WORD_ARRAY, dest_WORD_ARRAY, is_WORD_ARRAY) = op2 "WORD_ARRAY"
 
 val VBool_t_tm = ``VBool_t``;
 fun is_VBool_t tm = tm = VBool_t_tm;

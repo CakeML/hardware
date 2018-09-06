@@ -47,15 +47,15 @@ val has_type_cases_array_base = Q.store_thm("has_type_cases_array_base",
 val has_type_cases_imp = has_type_cases |> SPEC_ALL |> EQ_IMP_RULE |> fst |> GEN_ALL;
 
 val BOOL_def = Define `
-  BOOL (b:bool) = \v. v = VBool b`;
+  BOOL (b:bool) v <=> v = VBool b`;
 
 val WORD_def = Define `
-  WORD (w:'a word) = \v. v = w2ver w`;
+  WORD (w:'a word) v <=> v = w2ver w`;
 
 (* Arrays are in reverse order as we only have packed arrays in "reverse order"
    in this formalization *)
 val WORD_ARRAY_def = Define `
-  WORD_ARRAY (a:'a word -> 'b word) v =
+  WORD_ARRAY (a:'a word -> 'b word) v <=>
    case v of
        VBool _ => F
      | VArray vs => LENGTH vs = dimword(:'a) /\
