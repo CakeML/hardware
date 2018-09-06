@@ -21,6 +21,7 @@ val abop_print = Define `
 val arith_print = Define `
  (arith_print Minus = "-") /\
  (arith_print Plus = "+") /\
- (arith_print Times = "*")`;
+ (arith_print Times = "*") /\
+ (arith_print Mod = "%")`;
 
 val _ = export_theory ();

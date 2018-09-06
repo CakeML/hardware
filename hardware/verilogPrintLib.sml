@@ -104,12 +104,12 @@ fun exp_print tm =
     val (exp1, shift, exp2) = dest_Shift tm
   in
     if is_ShiftArithR shift then
-      (exp_print_paren exp1) ^ " >> " ^ (exp_print_paren exp2)
+      (* TODO: Check this, should be wrapped in $unsigned? *)
+      "$signed(" ^ (exp_print exp1) ^ ") >>> (" ^ (exp_print exp2) ^ ")"
     else if is_ShiftLogicalL shift then
       (exp_print_paren exp1) ^ " << " ^ (exp_print_paren exp2)
     else if is_ShiftLogicalR shift then
-      (* TODO: Check this *)
-      "$unsigned($signed(" ^ (exp_print exp1) ^ ") >>> (" ^ (exp_print exp2) ^ "))"
+      (exp_print_paren exp1) ^ " >> " ^ (exp_print_paren exp2)
     else
       failwith "Unknown shift operator"
   end
