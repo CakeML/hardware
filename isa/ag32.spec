@@ -235,23 +235,27 @@ define JumpIfNotZero (func::funcT, w::reg_immT, a::reg_immT, b::reg_immT) =
      incPC ()
 
 define Interrupt = {
-  io_events <- MEM @ io_events;
+-- Ugly but generates the correct HOL code...
+  io_events <- io_events : (MEM @ Nil);
 
   incPC ()
 }
 
-string get_print_string (string_start::wordT, max_length::nat, mem::memT) = {
- chr = mem(string_start);
-
- if chr == 0 or max_length == 0 then
-  ""
- else
-  [chr] @ get_print_string (string_start + 1, max_length - 1, mem)
-}
-
 -- Arguably, as the accelerator function, this should be an ISA parameter, but
 -- we inline this as well
-nat print_string_max_length = 64
+nat print_string_max_length = 63
+
+string get_print_string_length (string_start::wordT, length::nat, mem::memT) = {
+ if length == 0 then
+  ""
+ else
+  [mem(string_start)] @ get_print_string_length (string_start + 1, length - 1, mem)
+}
+
+string get_print_string (string_start::wordT, mem::memT) = {
+ length = Min ([mem(string_start)], print_string_max_length);
+ get_print_string_length (string_start + 1, length, mem)
+}
 
 define ReservedInstr =
   nothing
