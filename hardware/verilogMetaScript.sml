@@ -362,6 +362,10 @@ val get_var_mget_var = Q.store_thm("get_var_mget_var",
  `!vs nbq var. get_var <|vars := vs; nbq := nbq|> var = mget_var vs var`,
  rw [get_var_def, mget_var_def]);
 
+val mget_var_ALOOKUP = Q.store_thm("mget_var_ALOOKUP",
+ `!s name v. mget_var s name = INR v <=> ALOOKUP s name = SOME v`,
+ rw [mget_var_def] \\ CASE_TAC);
+
 (*
 val WORD_get_1dim_VArray_data = Q.store_thm("WORD_get_1dim_VArray_data",
  `!w v. WORD w v ==> ?v'. get_1dim_VArray_data v = INR v' /\ VArray v' = w2ver w`,

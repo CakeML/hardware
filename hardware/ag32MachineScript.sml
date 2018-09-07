@@ -191,7 +191,7 @@ val is_interrupt_interface_def = Define `
                (fext (SUC (n + m))).interrupt_state = InterruptAck /\
                (* This assumes that memory is not changed during interrupts,
                   this assumption could be added as a precondition. *)
-               (fext (SUC (n + m))).io_events = (fext n).mem :: (fext n).io_events /\
+               (fext (SUC (n + m))).io_events = SNOC (fext n).mem (fext n).io_events /\
                (fext (SUC (n + m))).interrupt_ack
           else
            (fext (SUC n)).interrupt_state = InterruptReady /\

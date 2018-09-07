@@ -701,7 +701,7 @@ val circuit_next = Q.store_thm("circuit_next",
                     (fext (n + m)).ready /\
                     (fext (n + m)).mem = (fext n).mem /\
                     (fext (n + m)).interrupt_state = InterruptReady /\
-                    (fext (n + m)).io_events = (fext n).mem :: (fext n).io_events /\
+                    (fext (n + m)).io_events = (fext n).io_events ++ [(fext n).mem] /\
                     ~(fext (n + m)).interrupt_ack
        | _ => T`,
  rpt strip_tac \\ rveq \\ TOP_CASE_TAC \\ simp [] \\

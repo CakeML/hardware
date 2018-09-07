@@ -3,7 +3,9 @@ open hardwarePreamble;
 open alignmentTheory alistTheory;
 
 open verilogTranslatorLib moduleTranslatorTheory;
-open verilogTranslatorConfigLib ag32MachineTheory ag32AddAcceleratorTheory ag32EqTheory;
+open verilogTranslatorConfigLib verilogLiftLib;
+
+open ag32MachineTheory ag32AddAcceleratorTheory ag32EqTheory;
 
 val _ = new_theory "ag32Verilog";
 
@@ -147,19 +149,6 @@ val computer_Next_relM_run = Q.store_thm("computer_Next_relM_run",
 
 (** Lift INIT_REL_circuit to Verilog level **)
 
-(* TODO: Move *)
-
-val mget_var_ALOOKUP = Q.store_thm("mget_var_ALOOKUP",
- `!s name v. mget_var s name = INR v <=> ALOOKUP s name = SOME v`,
- rw [mget_var_def] \\ CASE_TAC);
-
-val ver2w_def = Define `
- ver2w v = sum_map v2w (ver2v v)`;
-
-val ver2w_w2ver = Q.store_thm("ver2w_w2ver",
- `!v. ver2w (w2ver v) = INR v`,
- simp [ver2w_def, w2ver_def, ver2v_def, sum_mapM_VBool, sum_map_def]);
-
 (* Similar to REL, but for initial state *)
 val INIT_verilog_def = Define `
  INIT_verilog env <=>
@@ -174,69 +163,18 @@ val INIT_verilog_def = Define `
   WORD_ARRAY (\(i:word6). (0w:word32)) (THE (ALOOKUP env "R"))`;
 
 val INIT_fext_def = Define `
- INIT_fext fext <=>
+ INIT_fext fext mem <=>
  fext.io_events = [] /\
  fext.ready /\
  fext.interrupt_state = InterruptReady /\
- ~fext.interrupt_ack`;
-
-val (var_has_type_tm, mk_var_has_type, dest_var_has_type, is_var_has_type) = syntax_fns3 "verilogType" "var_has_type";
-
-fun var_has_type_to_old_CONV tm =
- if is_abs tm then
-   ABS_CONV var_has_type_to_old_CONV tm
- else if is_var_has_type tm then let
-   val (_, _, ty) = dest_var_has_type tm
- in
-   if is_VBool_t ty then (* BOOL *)
-     PURE_REWRITE_CONV [GSYM var_has_type_old_var_has_type_BOOL] tm
-   else if is_VArray_t ty then let
-     val is = dest_VArray_t ty
-     val len = length is
-   in
-     if len = 1 then (* WORD, TODO: assumes numerals in index position *) let
-       val dimindex_rw = is |> hd |> dest_numeral |> mk_numeric_type |> mk_dimindex |> EVAL |> SYM
-     in
-       PURE_REWRITE_CONV [dimindex_rw, GSYM var_has_type_old_var_has_type_WORD] tm
-     end else if len = 2 then (* WORD_ARRAY, TODO: does not work if index same... *) let
-       val dimword_rw = is |> hd |> dest_numeral |> Arbnumcore.log2 |> mk_numeric_type |> mk_dimword |> EVAL |> SYM
-       val dimindex_rw = is |> tl |> hd |> dest_numeral |> mk_numeric_type |> mk_dimindex |> EVAL |> SYM
-     in
-       PURE_REWRITE_CONV [dimword_rw, dimindex_rw, GSYM var_has_type_old_var_has_type_WORD_ARRAY] tm
-     end else
-       ALL_CONV tm
-   end else
-     ALL_CONV tm
- end else if is_comb tm then
-   COMB_CONV var_has_type_to_old_CONV tm
- else ALL_CONV tm;
+ ~fext.interrupt_ack /\
+ fext.mem = mem`;
 
 val relM_backwards = Q.store_thm("relM_backwards",
  `!vs. vars_has_type vs relMtypes ==> ?hol_s. relM hol_s vs`,
  simp [vars_has_type_def, relMtypes_def, relM_def, relM_var_def, mget_var_ALOOKUP] \\ rpt gen_tac \\
 
- CONV_TAC var_has_type_to_old_CONV \\
-
- simp [var_has_type_old_def, var_has_value_def] \\
-
- disch_then (MAP_EVERY (REPEAT_TCL CHOOSE_THEN ASSUME_TAC) o CONJUNCTS) \\
-
- (fn g as (asl, _) => let
-     val hol_s = foldr (fn (assm, acc) => let
-                          val (lconj, rconj) = dest_conj assm
-                          val name = lconj |> lhs |> rand |> fromHOLstring
-                          val update = lookup name updates
-                          val rep = rconj |> rator |> rand
-                        in
-                          mk_comb(mk_comb (update, (mk_K_1 (rep, type_of rep))), acc)
-                        end)
-                       ``ARB:state_circuit``
-                       asl
-  in
-    EXISTS_TAC hol_s g
-  end) \\
-
- simp []);
+ relM_backwards_tac);
 
 val align_addr_align = Q.store_thm("align_addr_align",
  `!w. align_addr w = align 2 w`,
@@ -258,9 +196,9 @@ val align_align_2_4_add = Q.prove(
 val align_align_2_4_add_0 = align_align_2_4_add |> Q.SPEC `0w` |> SIMP_RULE (srw_ss()) [];
 
 val INIT_backwards = Q.store_thm("INIT_backwards",
- `!t fext env mem_start.
-   relM t env /\ INIT_verilog env /\ INIT_fext fext ==>
-   ?s mem.
+ `!t fext env mem mem_start.
+   relM t env /\ INIT_verilog env /\ INIT_fext fext mem ==>
+   ?s.
     INIT fext t (s with <| PC := mem_start + 64w;
                            R := (0w =+ mem_start) s.R;
                            MEM := mem;
@@ -328,7 +266,7 @@ val is_mem_verilog = Q.store_thm("is_mem_verilog",
  fs [relM_def, relM_var_def, mget_var_ALOOKUP, WORD_def, ver2w_w2ver]);
 
 val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
-  `!n init mem_start fext fextv vstep s hol_s.
+  `!n init initmem mem_start fext fextv vstep s hol_s.
    vstep = mrun fextv computer init /\
 
    relM_fextv fextv fext /\
@@ -340,7 +278,7 @@ val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
 
    vars_has_type init (relMtypes ++ ag32types) /\
    INIT_verilog init /\
-   INIT_fext (fext 0) /\
+   INIT_fext (fext 0) initmem /\
 
    s.R 0w = mem_start /\
    s.PC = mem_start + 64w /\

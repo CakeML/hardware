@@ -50,6 +50,9 @@ val n2ver_def = Define `
 val w2ver_def = Define `
   w2ver w = VArray (MAP VBool (w2v w))`;
 
+val ver2w_def = Define `
+ ver2w v = sum_map v2w (ver2v v)`;
+
 (* Metatheory for mapping from and to Verilog values *)
 
 val sum_mapM_VBool = Q.store_thm("sum_mapM_VBool",
@@ -74,6 +77,10 @@ val w2v_w2w = Q.store_thm("w2v_w2w",
  rw [w2w_def] \\ bitstringLib.Cases_on_v2w `w` \\
  rw [w2n_v2w, n2w_v2n, w2v_v2w, v2n_lt,
      bitTheory.MOD_2EXP_def, arithmeticTheory.LESS_MOD]);
+
+val ver2w_w2ver = Q.store_thm("ver2w_w2ver",
+ `!v. ver2w (w2ver v) = INR v`,
+ simp [ver2w_def, w2ver_def, ver2v_def, sum_mapM_VBool, sum_map_def]);
 
 (*
 val GENLIST_K_APPEND = Q.store_thm("GENLIST_K_APPEND",

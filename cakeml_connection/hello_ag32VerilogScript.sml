@@ -57,17 +57,15 @@ val hello_verilog = Q.store_thm("hello_verilog",
    mem_no_errors fext ∧
    vars_has_type init (relMtypes ⧺ ag32types) ∧
    INIT_verilog init ∧
-   INIT_fext (fext 0) ∧
+   INIT_fext (fext 0) (hello_init_memory mem_start) ∧
 
    byte_aligned mem_start ∧
-   w2n mem_start + memory_size < dimword (:32) ∧
-
-   (fext 0).mem = hello_init_memory mem_start
+   w2n mem_start + memory_size < dimword (:32)
    ==>
    ?k vs'.
     vstep k = INR vs' /\
     let
-     outs = MAP (\mem. get_print_string (mem_start, print_string_max_length, mem)) (fext k).io_events
+     outs = MAP (\mem. get_print_string (mem_start, mem)) (fext k).io_events
     in
      (mget_var vs' "PC") = INR (w2ver (halt_addr mem_start)) ∧
      outs ≼ hello_outputs ∧
