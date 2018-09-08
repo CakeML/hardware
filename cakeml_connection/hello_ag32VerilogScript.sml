@@ -98,8 +98,6 @@ val hello_verilog = Q.store_thm("hello_verilog",
 
  >- fs [relM_def, relM_var_def, WORD_def, halt_addr_def]
 
- \\ fs [extract_print_from_mem_get_print_string] \\ CONV_TAC (DEPTH_CONV ETA_CONV) \\
-    simp [] \\ strip_tac \\ drule_strip after_R_lift \\
-    drule_first);
+ \\ strip_tac \\ drule_strip after_R_lift \\ drule_first);
 
 val _ = export_theory ();
