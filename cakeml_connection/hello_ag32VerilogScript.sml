@@ -81,18 +81,17 @@ val hello_verilog = Q.store_thm("hello_verilog",
  qmatch_asmsub_abbrev_tac `INIT _ _ s'` \\
  disch_then (qspec_then `s'` mp_tac) \\ qunabbrev_tac `s'` \\
  impl_tac >-
- (rw [ag32_targetTheory.is_ag32_init_state_def, ag32Theory.print_string_max_length_def]
-  >- rfs [INIT_def]
-  \\ match_mp_tac EQ_EXT \\
-     rw [ag32_targetTheory.ag32_init_regs_def, combinTheory.UPDATE_APPLY] \\
-     drule_strip init_R_lift \\ fs [] \\ metis_tac [combinTheory.UPDATE_APPLY]) \\
+ (rw [ag32_targetTheory.is_ag32_init_state_def, ag32Theory.print_string_max_length_def] \\
+  match_mp_tac EQ_EXT \\
+  rw [ag32_targetTheory.ag32_init_regs_def, combinTheory.UPDATE_APPLY] \\
+  drule_strip init_R_lift \\ fs [] \\ metis_tac [combinTheory.UPDATE_APPLY]) \\
 
  strip_tac \\
 
  drule_strip (SIMP_RULE (srw_ss()) [] INIT_REL_circuit_verilog) \\
 
  qmatch_asmsub_abbrev_tac `FUNPOW _ _ s'` \\
- disch_then (qspecl_then [`k`, `s'`, `hol_s`] mp_tac) \\
+ disch_then (qspecl_then [`k`, `hello_init_memory mem_start`, `s'`, `hol_s`] mp_tac) \\
  impl_tac >- (qunabbrev_tac `s'` \\ simp [combinTheory.UPDATE_APPLY]) \\ strip_tac \\
 
  asm_exists_tac \\ fs [REL_def, hello_machine_config_def] \\ conj_tac
