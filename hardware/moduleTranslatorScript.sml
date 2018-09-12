@@ -1,5 +1,7 @@
 open hardwarePreamble;
 
+open pred_setTheory;
+
 open stringSyntax;
 
 open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory;
@@ -188,9 +190,29 @@ val vwrites_intro_cvars = Q.store_thm("vwrites_intro_cvars",
 
    If a module is valid, then the order processes are run in does not matter. *)
 val valid_ps_for_module_def = Define `
-  valid_ps_for_module vars ps = !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
-                                      (!x. ~MEM x vars /\ MEM x (vreads p) ==> ~MEM x (vwrites q)) /\
-                                      (!x. MEM x (vwrites p) ==> ~MEM x (vwrites q))`;
+  valid_ps_for_module vars ps =
+   !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
+            (!x. ((~MEM x vars /\ MEM x (vreads p)) ==> ~MEM x (vwrites q))) /\
+            (!x. MEM x (vwrites p) ==> ~MEM x (vwrites q))`;
+
+(* Use this or something similar as the actual definition? *)
+val valid_ps_for_module_alt = Q.store_thm("valid_ps_for_module_alt",
+ `!ps vars.
+   valid_ps_for_module vars ps <=>
+    !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
+    (DISJOINT ((set (vreads p)) DIFF (set vars)) (set (vwrites q)) /\
+    DISJOINT (set (vwrites p)) (set (vwrites q)))`,
+ rw [valid_ps_for_module_def, DISJOINT_DEF, DIFF_DEF, INTER_DEF] \\ eq_tac \\ rpt strip_tac'
+ >- (conj_tac \\ match_mp_tac EQ_EXT \\ rw [] \\ metis_tac [])
+ \\ last_x_assum (qspecl_then [`p`, `q`] assume_tac) \\ drule_first \\
+    fs [EMPTY_DEF, FUN_EQ_THM] \\ metis_tac []);
+
+(* Just for the paper, not part of the formal development. *)
+val valid_program_def = Define `
+ valid_program ps = !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
+                     (DISJOINT (set (vreads p)) (set (vwrites q))) /\
+                     (DISJOINT (set (vnwrites p) UNION set (vwrites p))
+                               (set (vwrites q) UNION set (vnwrites q)))`;
 
 val valid_ps_for_module_tl = Q.store_thm("valid_ps_for_module_tl",
  `!vars p ps. valid_ps_for_module vars (p::ps) ==>
