@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 
+import argparse
+
 def to_hex(val):
     return '{0:0{1}x}'.format(val, 8)
-
-prev = None
 
 print("memory_initialization_radix=16;")
 print("memory_initialization_vector=", end='')
 
-with open("prg.data") as f:
-    for i in range(8):
-        print(0, '', end='')
-    
+parser = argparse.ArgumentParser()
+parser.add_argument("memfile")
+args = parser.parse_args()
+
+prev = None
+
+with open(args.memfile) as f:
     for l in f:
         if prev is None:
             prev = to_hex(int(l, 16))
@@ -24,4 +27,8 @@ if not prev is None:
     print(to_hex(0), end='')
     print(prev, end='')
 
-print(';')    
+#with open(args.memfile) as f:
+#    for l in f:
+#        print(to_hex(int(l, 16)), end=' ')
+
+print(';')
