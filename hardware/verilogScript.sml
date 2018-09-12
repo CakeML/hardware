@@ -562,12 +562,12 @@ val mget_var_def = Define `
 (* Evaluation function *)
 
 val mstep_def = Define `
-  mstep fextt ps s = sum_foldM (prun fextt) s ps`;
+  mstep fext ps s = sum_foldM (prun fext) s ps`;
 
 (* mstep, then commit *)
 val mstep_commit_def = Define `
- mstep_commit fextt ps vs = let s = <| vars := vs; nbq := [] |> in
-                            sum_map (\s. s.nbq ++ s.vars) (mstep fextt ps s)`;
+ mstep_commit fext ps vs = let s = <| vars := vs; nbq := [] |> in
+                           sum_map (\s. s.nbq ++ s.vars) (mstep fext ps s)`;
 
 val mrun_def = Define `
   (mrun fext ps vs 0 = INR vs) /\
