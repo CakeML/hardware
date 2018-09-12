@@ -1,11 +1,11 @@
 #!/usr/bin/env python3.6
-
 #                    ^-- Pynq package seems to only be available for python 3.6
 
 import argparse
 from datetime import datetime
 import os
 import signal
+import sys
 
 # Workaround for pynq overriding the default SIGINT handler for some reason
 # (Hopefully no cleanup is done in custom handler?)
@@ -69,7 +69,8 @@ def print_interrupt_msg(mem):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("bit_file", metavar="bit-file")
+    parser.add_argument("bit_file", metavar="bit-file", help="FPGA bitstream to load onto the FPGA")
+    parser.add_argument("program", help="Machine code to run")
     args = parser.parse_args()
 
     # Interrupt handling
@@ -85,28 +86,29 @@ def main():
     with Xlnk().cma_array(shape=(int((1.28*10**8)/4),), dtype=np.uint32) as mem:
         mem_start = mem.physical_address
         log("Memory starts at", format(mem_start, '0x'))
-        # TODO: Check if mem_start is aligned?
 
-        # Load program:
-        mem[16 + 0] = 0x800002
-        mem[16 + 1] = 0x83000048
-        mem[16 + 2] = 0x20003
-        mem[16 + 3] = 0x820000
-        mem[16 + 4] = 0x83000045
-        mem[16 + 5] = 0x20003
-        mem[16 + 6] = 0x820000
-        mem[16 + 7] = 0x8300004C
-        mem[16 + 8] = 0x20003
-        mem[16 + 9] = 0x820000
-        mem[16 + 10] = 0x20003
-        mem[16 + 11] = 0x820000
-        mem[16 + 12] = 0x8300004F
-        mem[16 + 13] = 0x20003
-        mem[16 + 14] = 0x820000
-        mem[16 + 15] = 0x800003
-        mem[16 + 16] = 0x8081000C
-        mem[16 + 17] = 0x0
-        mem[16 + 18] = 0x890089
+        # 4-alignment required by CakeML, redundant, but just to be clear
+        if mem_start % 4 != 0:
+            log("Memory start not 4-aligned, exiting")
+            sys.exit(1)
+
+        # 64-alignment required by processor caches
+        if mem_start % 64 != 0:
+            log("Memory start not 64-aligned, exiting")
+            sys.exit(1)
+
+        # Load program from file
+        low_mem_size = 0
+        with open("low_mem_words.mem") as f:
+            for i, val in enumerate(f):
+              mem[i] = int(val, 16)
+              low_mem_size = i
+
+        high_mem_start = (low_mem_size + 1) + 31457239
+
+        with open("high_mem_words.mem") as f:
+            for i, val in enumerate(f):
+              mem[high_mem_start + i] = int(val, 16)
 
         # Setup FPGA
         ol = Overlay(args.bit_file)
