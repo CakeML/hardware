@@ -81,6 +81,7 @@ val sum_EL_def = Define `
   (sum_EL 0 (h::t) = INR h) /\
   (sum_EL (SUC i) (_::t) = sum_EL i t)`;
 
+(* Cleanup? *)
 val sum_EL_INR_EL = Q.store_thm("sum_EL_INR_EL",
  `!i l e. EL i l = e /\ i < LENGTH l ==> sum_EL i l = INR e`,
  Induct \\ rpt strip_tac
@@ -88,6 +89,10 @@ val sum_EL_INR_EL = Q.store_thm("sum_EL_INR_EL",
  \\ Cases_on `i = LENGTH l` >- fs [] \\
     `i < LENGTH l` by DECIDE_TAC \\ Cases_on `l` >- fs [] \\
      fs [sum_EL_def]);
+
+val sum_EL_INR_EL2 = Q.store_thm("sum_EL_INR_EL2",
+ `!i l. i < LENGTH l ==> sum_EL i l = INR (EL i l)`,
+ metis_tac [sum_EL_INR_EL]);
 
 (* Same as sum_EL, but in reverse *)
 val sum_revEL_def = Define `

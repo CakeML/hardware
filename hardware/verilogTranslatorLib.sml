@@ -379,6 +379,7 @@ fun build_update_base_stmt field fupd pred =
     val field_str = fromMLstring field
   in
    ``!s env w exp.
+      T /\
       Eval fext s env (^pred w) exp ==>
       EvalS fext s env (^fupd (K w) s) (BlockingAssign (Var ^field_str) exp)``
   end;
@@ -393,29 +394,53 @@ fun update_base_tac field =
  simp [sum_bind_def, prun_bassn_def, assn_def, sum_for_def, sum_map_def] \\
  fs [relS_def, relS_var_def, get_var_cleanup];
 
-fun build_slice_update_base_stmt field fupd facc =
+fun build_slice_update_base_stmt field field_type fupd facc =
   let
     val field_str = fromMLstring field
+    val beta_size = dest_word_type field_type
   in
    ``!s env (w:'a word) exp hb lb.
+      (dimindex(:'a) = hb + 1 - lb /\ lb <= hb /\ hb < dimindex(:'b)) /\
       Eval fext s env (WORD w) exp ==>
       EvalS fext s env (^fupd (K (bit_field_insert hb lb w (^facc s))) s)
-                       (BlockingAssign (ArraySlice (Var ^field_str) [] hb lb) exp)``
+                       (BlockingAssign (ArraySlice (Var ^field_str) [] hb lb) exp)`` |>
+   inst [ beta |-> beta_size ]
   end;
 
 (* TODO: *)
-val slice_update_base_tac = cheat;
+val slice_update_base_tac_lem = Q.prove(
+ `!w v. WORD w v ==> v = w2ver w`,
+ rw [WORD_def]);
+
+fun slice_update_base_tac field =
+ rw [Eval_def, EvalS_def, prun_def] \\ drule_first \\ drule_strip (relSs field) \\
+
+ simp [sum_bind_def, sum_for_def, sum_map_def, prun_bassn_def, assn_def] \\
+ imp_res_tac slice_update_base_tac_lem \\ rveq \\
+
+ fs [w2ver_def, get_VArray_data_def, sum_bind_def, sum_for_def, sum_map_def] \\
+
+ (* Cleaner solution? *)
+ qmatch_asmsub_abbrev_tac `WORD sfield _` \\
+ Q.ISPECL_THEN [`sfield`, `w`] mp_tac prun_set_slice_bit_field_insert \\
+ unabbrev_all_tac \\
+
+ disch_then (fn th => DEP_REWRITE_TAC [th]) \\
+ simp [sum_map_def] \\
+
+ fs [relS_def, relS_var_def, get_var_cleanup] \\ simp [WORD_def, w2ver_def];
 
 val update_base_thms =
  zip updates accessors
  |> map (fn ((field, fupd), (_, facc)) =>
             let
-              val pred = fupd |> type_of |> dom_rng |> fst |> dom_rng |> fst |> predicate_for_type_ty
+              val field_type = fupd |> type_of |> dom_rng |> fst |> dom_rng |> fst
+              val pred = field_type |> predicate_for_type_ty
               val base_thm = [prove (build_update_base_stmt field fupd pred,
                                      update_base_tac field)]
               val slice_thm = if same_const pred WORD_tm
-                              then [prove (build_slice_update_base_stmt field fupd facc,
-                                           slice_update_base_tac)]
+                              then [prove (build_slice_update_base_stmt field field_type fupd facc,
+                                           slice_update_base_tac field)]
                               else []
             in (fupd, append slice_thm base_thm) end);
 
@@ -427,8 +452,8 @@ fun build_WORD_ARRAY_update_base_stmt vname projf updatef = let
   val vnameHOL = fromMLstring vname
 in
   ``!s env i ie v ve.
-     Eval fext s env (WORD i) ie /\
-     Eval fext s env (WORD v) ve ==>
+     T /\
+     (Eval fext s env (WORD i) ie /\ Eval fext s env (WORD v) ve) ==>
      EvalS fext s env (^updatef (K ((i =+ v) (^projf s))) s)
                       (BlockingAssign (ArrayIndex (Var ^vnameHOL) [ie]) ve)``
 end;
@@ -444,16 +469,56 @@ fun WORD_ARRAY_update_base_tac name =
  rw [combinTheory.UPDATE_def];
 
 fun build_WORD_ARRAY_slice_update_base_stmt vname projf updatef = let
+  val el_size = projf |> type_of |> dom_rng |> snd |> dom_rng |> snd |> dest_word_type
   val vnameHOL = fromMLstring vname
 in
-  ``!s env i ie v ve hb lb.
-     Eval fext s env (WORD i) ie /\
-     Eval fext s env (WORD v) ve ==>
+  ``!s env i ie (v:'a word) ve hb lb.
+     (dimindex(:'a) = hb + 1 − lb /\ lb <= hb /\ hb < dimindex(:'b)) /\
+     (Eval fext s env (WORD i) ie /\ Eval fext s env (WORD v) ve) ==>
      EvalS fext s env (^updatef (K ((i =+ bit_field_insert hb lb v (^projf s i)) (^projf s))) s)
                       (BlockingAssign (ArraySlice (Var ^vnameHOL) [ie] hb lb) ve)``
+ |> inst [ beta |-> el_size ]
 end;
 
-fun WORD_ARRAY_slice_update_base_tac name = cheat;
+fun WORD_ARRAY_slice_update_base_tac name =
+ rw [Eval_def, EvalS_def, prun_def] \\
+ drule_first \\ drule_first \\
+
+ simp [sum_bind_def] \\
+ drule_strip (relSs name) \\ Cases_on `v'` >- fs [WORD_ARRAY_def] \\ Cases_on `res` >- fs [WORD_def, w2ver_def] \\
+ imp_res_tac WORD_ver2n \\
+ (*imp_res_tac slice_update_base_tac_lem \\ rveq \\*)
+
+ simp [prun_bassn_def, assn_def, sum_bind_def, sum_for_def, sum_map_def] \\
+ simp [get_VArray_data_def, sum_bind_def, sum_for_def, sum_map_def] \\
+
+ fs [get_VArray_data_def, WORD_ARRAY_def, w2ver_def, sum_bind_def] \\
+
+ qmatch_goalsub_abbrev_tac `bit_field_insert _ _ wnew wold` \\
+ Q.ISPECL_THEN [`wold`, `wnew`] mp_tac prun_set_slice_bit_field_insert \\
+ unabbrev_all_tac \\
+
+ disch_then (fn th => DEP_REWRITE_TAC [th]) \\ simp [WORD_def, w2ver_def] \\
+
+ simp [sum_bind_def, prun_set_var_index_def] \\
+
+ (* Probably some proof duplication here? *)
+ IF_CASES_TAC >- (Q.ISPEC_THEN `i` mp_tac w2n_lt \\ fs []) \\
+
+ `63 − w2n i = 64 - w2n i - 1` by DECIDE_TAC \\ pop_assum (fn th => REWRITE_TAC [th]) \\
+
+ qmatch_goalsub_abbrev_tac `set_index _ _ newval` \\
+ Q.ISPECL_THEN [`w2n i`, `l`, `newval`] mp_tac set_index_correct \\
+ unabbrev_all_tac \\
+
+ impl_tac
+ >- (simp [] \\ match_mp_tac EVERY_sum_revEL \\ rw [] \\ first_x_assum (qspec_then `n2w n` assume_tac) \\
+     rfs [w2n_n2w, LESS_MOD, same_shape_VArray_MAP_VBool]) \\
+
+ strip_tac \\ rev_full_simp_tac bool_ss [sum_for_def, sum_map_def] \\ simp [] \\
+
+ fs [relS_def, relS_var_def, WORD_ARRAY_def, WORD_def, get_var_cleanup] \\
+ strip_tac \\ IF_CASES_TAC \\ fs [w2ver_def, combinTheory.UPDATE_def];
 
 (* Note that we do not have step thms for WORD_ARRAYs *)
 val WORD_ARRAY_update_base_thms =
@@ -660,22 +725,27 @@ and hol2hardware_body_impl s tm =
         SOME base_thms =>
         let
           val th = first_PART_MATCH (EvalS_get_hol_prog o snd o dest_imp) base_thms tm
-          val precond = th |> concl |> dest_imp |> fst |> strip_conj
+          val (precond_eval, precond) = th |> concl |> dest_imp |> fst |> dest_conj
+          val precond_eval_th = EVAL_PROVE precond_eval
+          val precond_th = precond |> strip_conj
                            |> map (hol2hardware_exp s o Eval_get_pred_exp)
                            |> LIST_CONJ
         in
-          MATCH_MP th precond
+          MATCH_MP th (CONJ precond_eval_th precond_th)
         end
 
       | NONE =>
         if arg = s then
+          (* val base_thms = lookup_same fupd update_base_thms |> valOf *)
           case lookup_same fupd update_base_thms of
               SOME base_thms =>
               let
                 val th = first_PART_MATCH (EvalS_get_hol_prog o snd o dest_imp) base_thms tm
-                val precond = th |> concl |> dest_imp |> fst |> Eval_get_pred_exp |> hol2hardware_exp s
+                val (precond_eval, precond) = th |> concl |> dest_imp |> fst |> dest_conj
+                val precond_eval_th = EVAL_PROVE precond_eval
+                val precond_th = precond |> Eval_get_pred_exp |> hol2hardware_exp s
               in
-                MATCH_MP th precond
+                MATCH_MP th (CONJ precond_eval_th precond_th)
               end
             | NONE => failwith "Impossible: Missing base update thm?"
         else

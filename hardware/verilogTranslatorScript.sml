@@ -819,4 +819,43 @@ val EvalS_Case_catch_all_NONE = Q.store_thm("EvalS_Case_catch_all_NONE",
  rpt gen_tac \\ qspec_then `s` mp_tac EvalS_Skip \\ rw [Eval_def, EvalS_def, prun_def] \\
  rpt drule_first \\ rw [sum_bind_def, erun_def] \\ fs [WORD_def, w2ver_bij]);
 
+val bit_field_insert_lemma1 = Q.prove(
+ `!l a b c. TAKE (LENGTH a) l = a /\ DROP (LENGTH a) l = b ++ c ==> l = a ++ b ++ c`,
+ metis_tac [TAKE_DROP, APPEND_ASSOC]);
+
+val bit_field_insert_lemma2 = Q.prove(
+ `!l a b. TAKE (LENGTH a) l = a /\ DROP (LENGTH a) l = b ==> l = a ++ b`,
+ metis_tac [TAKE_DROP]);
+
+(* Probably already in listTheory or similar? *)
+val EL_all_eq = Q.store_thm("EL_all_eq",
+ `!l1 l2. LENGTH l1 = LENGTH l2 /\ (!n. n < LENGTH l1 ==> EL n l1 = EL n l2) ==> l1 = l2`,
+ Induct \\ rw [] \\ Cases_on `l2` \\ fs [] \\ conj_tac
+ >- (first_x_assum (qspec_then `0` assume_tac) \\ fs [])
+ \\ first_x_assum match_mp_tac \\ rw [] \\ first_x_assum (qspec_then `SUC n` assume_tac) \\ fs []);
+
+val same_shape_VArray_MAP_VBool = Q.store_thm("same_shape_VArray_MAP_VBool",
+`!l1 l2. LENGTH l1 = LENGTH l2 ==> same_shape (VArray (MAP VBool l1)) (VArray (MAP VBool l2))`,
+ Induct \\ rw [same_shape_def] \\ Cases_on `l2` \\ fs [same_shape_def]);
+
+val prun_set_slice_bit_field_insert = Q.store_thm("prun_set_slice_bit_field_insert",
+ `!wold wnew vold vnew hb lb.
+   WORD (wold:'a word) (VArray vold) /\
+   WORD (wnew:'b word) (VArray vnew) /\ dimindex(:'b) = hb + 1 − lb /\
+   lb <= hb /\ hb < dimindex(:'a) ==>
+   prun_set_slice hb lb vold vnew = INR (MAP VBool (w2v (bit_field_insert hb lb wnew wold)))`,
+ rpt strip_tac \\ simp [prun_set_slice_def] \\ reverse IF_CASES_TAC
+ >- (imp_res_tac WORD_verlength \\ fs [verlength_def]) \\
+ simp [bit_field_insert_def, set_slice_def] \\ conj_tac \\
+ fs [WORD_def, w2ver_def] \\ rveq \\
+ rewrite_tac [GSYM MAP_TAKE, GSYM MAP_DROP, GSYM MAP_APPEND]
+ >- (match_mp_tac same_shape_VArray_MAP_VBool \\ simp []) \\
+
+ match_mp_tac MAP_CONG \\ simp [] \\
+ match_mp_tac bit_field_insert_lemma1 \\ conj_tac >| [ all_tac , simp [] \\ match_mp_tac bit_field_insert_lemma2 ] \\
+
+ TRY conj_tac \\ match_mp_tac EL_all_eq \\ rw [] \\
+ DEP_REWRITE_TAC [rich_listTheory.EL_TAKE,rich_listTheory.EL_DROP] \\
+ simp [el_w2v, word_modify_def, fcpTheory.FCP_BETA]);
+
 val _ = export_theory();

@@ -85,6 +85,10 @@ val nbq_vars_has_type_def = Define `
 
 (** Various lemmas **)
 
+val WORD_verlength = Q.store_thm("WORD_verlength",
+ `!w v. WORD (w:'a word) v ==> verlength v = INR (dimindex(:'a))`,
+ rw [WORD_def, w2ver_def, verlength_def]);
+
 val vars_has_type_append = Q.store_thm("vars_has_type_append",
  `!vs tys1 tys2. vars_has_type vs (tys1 ++ tys2) <=> vars_has_type vs tys1 /\ vars_has_type vs tys2`,
  Induct_on `tys1` >- rw [vars_has_type_def] \\ Cases_on `h` \\ rw [vars_has_type_def] \\ eq_tac \\ simp []);
@@ -122,11 +126,17 @@ val same_shape_LENGTH = Q.store_thm("same_shape_LENGTH",
  `!xs ys. same_shape (VArray xs) (VArray ys) ==> LENGTH xs = LENGTH ys`,
  Induct \\ Cases_on `ys` \\ rw [same_shape_def]);
 
-val same_shape_APPEND = Q.store_thm("same_shape_APPEND",
+val same_shape_snoc = Q.store_thm("same_shape_snoc",
  `!xs x ys y.
    same_shape (VArray xs) (VArray ys) /\ same_shape x y ==>
    same_shape (VArray (xs ++ [x])) (VArray (ys ++ [y]))`,
  Induct \\ Cases_on `ys` \\ rw [same_shape_def]);
+
+val same_shape_append = Q.store_thm("same_shape_append",
+ `!xs1 xs2 ys1 ys2.
+   same_shape (VArray xs1) (VArray xs2) /\ same_shape (VArray ys1) (VArray ys2) ==>
+   same_shape (VArray (xs1 ++ ys1)) (VArray (xs2 ++ ys2))`,
+ cheat);
 
 val same_shape_VArray_cong = Q.store_thm("same_shape_VArray_cong",
  `!l l'.

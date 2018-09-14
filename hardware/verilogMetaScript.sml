@@ -50,40 +50,6 @@ val get_var_set_var_ALT = Q.store_thm("get_var_set_var_ALT",
  metis_tac [get_var_set_var]);
 *)
 
-(** erun **)
-
-(*
-(* probably not needed? *)
-val erun_env = Q.store_thm("erun_env",
- `!s exp s' env. erun (s with vars := env) exp = erun (s' with vars := env) exp`,
- recInduct erun_ind \\ rpt strip_tac
- >- (* Const *)
- rw [erun_def]
- >- (* Var *)
- rw [erun_def, get_var_def]
- >- (* ArrayIndex *)
- (rw [erun_def, get_var_def] \\
- (* TODO, lots of strange things going on here: *)
- pop_assum (assume_tac o
-           (Q.GEN `a`) o
-           (Q.SPECL [`a`, `s'`, `env`]) o
-           (CONV_RULE (TOP_DEPTH_CONV RIGHT_IMP_FORALL_CONV))) \\
- imp_res_tac sum_mapM_cong \\
- rewrite_tac [ETA_THM] \\ fs []) (* <-- rw [ETA_THM] does nothing here *)
- >- (* ArraySlice i *)
- rw [erun_def, get_var_def]
- >- (* ArraySlice ii *)
- rw [erun_def]
- >- (* Op *)
- (rw [erun_def] \\ metis_tac [])
- >- (* Cmp *)
- (rw [erun_def] \\ metis_tac [])
- >- (* ZeroExtend *)
- cheat
- >- (* SignExtend *)
- cheat);
-*)
-
 (** prun induction cases **)
 
 val prun_Seq = Q.store_thm("prun_Seq",
@@ -151,7 +117,7 @@ val assn_cong = Q.store_thm("assn_cong",
  Induct \\ rw [evwrites_def, evreads_def, assn_def] \\
  Cases_on `l` \\ simp [assn_def] \\
  Cases_on `lhs` \\ simp [assn_def] \\
- Cases_on `t` \\ simp [assn_def] \\
+ TRY (Cases_on `t` \\ simp [assn_def]) \\
  fs [evreads_def] \\ metis_tac [erun_cong]);
 
 val same_shape_set_index = Q.store_thm("same_shape_set_index",
@@ -162,23 +128,78 @@ val same_shape_set_index = Q.store_thm("same_shape_set_index",
     simp [same_shape_def, same_shape_refl] \\ first_x_assum match_mp_tac \\
     asm_exists_tac \\ simp []);
 
+val same_shape_set_slice = Q.store_thm("same_shape_set_slice",
+ `!il ih d d' newdata.
+   il <= ih /\ ih < LENGTH d /\ set_slice (LENGTH d − (ih + 1)) (ih + 1 − il) d newdata = INR d'
+   ==> same_shape (VArray d') (VArray d)`,
+ rw [set_slice_def] \\ fs [rich_listTheory.DROP_DROP] \\
+
+ once_rewrite_tac [same_shape_sym] \\
+ Q.ISPECL_THEN [`LENGTH d − (ih + 1)`, `d`] mp_tac (GSYM TAKE_DROP) \\
+ disch_then (fn th => PURE_REWRITE_TAC [Once th, Once (GSYM APPEND_ASSOC)]) \\
+ match_mp_tac same_shape_append \\ conj_tac
+ >- simp [same_shape_refl] \\
+
+ Q.ISPECL_THEN [`ih + 1 − il`, `DROP (LENGTH d − (ih + 1)) d`] mp_tac (GSYM TAKE_DROP) \\
+ disch_then (fn th => PURE_REWRITE_TAC [Once th]) \\
+ match_mp_tac same_shape_append \\
+ simp [rich_listTheory.DROP_DROP, same_shape_refl]);
+
+(* Move? *)
+val get_VArray_data_INR = Q.store_thm("get_VArray_data_INR",
+ `!v d. get_VArray_data v = INR d ==> ?vd. v = VArray vd`,
+ Cases \\ rw [get_VArray_data_def]);
+
 val assn_INR = Q.store_thm("assn_INR",
  `!fext s lhs v r.
    assn fext s lhs v = INR r ==>
-   (?name v'. lhs = Var name /\ r = (name, v) /\
-              get_var s name = INR v' /\ same_shape v v') \/
-   (?name i v' v''. lhs = ArrayIndex (Var name) [i] /\ r = (name, v') /\
-                    get_var s name = INR v'' /\ same_shape v' v'')`,
+   (?name v'.
+     lhs = Var name /\ r = (name, v) /\
+     get_var s name = INR v' /\ same_shape v v') \/
+
+   (?name i v' v''.
+     lhs = ArrayIndex (Var name) [i] /\ r = (name, v') /\
+     get_var s name = INR v'' /\ same_shape v' v'') \/
+
+   (?name ih il v' v''.
+     lhs = ArraySlice (Var name) [] ih il /\ r = (name, v') /\
+     get_var s name = INR v'' /\ same_shape v' v'') \/
+
+   (?name i ih il v' v''.
+     lhs = ArraySlice (Var name) [i] ih il /\ r = (name, v') /\
+     get_var s name = INR v'' /\ same_shape v' v'')`,
  rpt gen_tac \\ Cases_on `lhs` \\ simp [assn_def]
  >- (strip_tac \\ imp_res_tac sum_bind_INR \\ fs [sum_bind_def]) \\
+ TRY (qmatch_goalsub_rename_tac `ArraySlice e l ih il`) \\
  Cases_on `e` \\ simp [assn_def] \\ Cases_on `l` \\ simp [assn_def] \\
- Cases_on `t` \\ simp [assn_def] \\ strip_tac \\
+ TRY (Cases_on `t` \\ simp [assn_def]) \\ strip_tac \\
+
  rpt (CHANGED_TAC (imp_res_tac sum_bind_INR \\ fs [sum_bind_def])) \\
- fs [prun_set_var_index_def] \\ last_x_assum mp_tac \\ rw [] \\
+ fs [prun_set_var_index_def, prun_set_slice_def]
+
+ >-
+ (last_x_assum mp_tac \\ rw [] \\
  imp_res_tac sum_for_INR \\ fs [sum_for_def, sum_map_def] \\
  drule same_shape_set_index \\ strip_tac \\
  (* Horrible: *)
- qexists_tac `VArray v'''''` \\ simp [] \\ Cases_on `v'''` \\ fs [get_VArray_data_def]);
+ qexists_tac `VArray v'''''` \\ simp [] \\ Cases_on `v'''` \\ fs [get_VArray_data_def])
+
+ \\
+ every_case_tac \\ fs [sum_for_def, sum_map_def] \\
+ drule_strip sum_map_INR
+
+ >-
+ (imp_res_tac same_shape_set_slice \\
+ (* Horrible: *)
+ imp_res_tac get_VArray_data_INR \\ rveq \\ fs [get_VArray_data_def] \\ rveq \\
+ fs [sum_for_def, sum_map_def] \\ metis_tac [])
+
+ \\
+ fs [sum_map_def] \\ rveq \\ simp [] \\
+ drule_strip same_shape_set_index \\
+ imp_res_tac same_shape_set_slice \\
+ (* Horrible: *)
+ imp_res_tac get_VArray_data_INR \\ fs [get_VArray_data_def]);
 
 val prun_same_after = Q.store_thm("prun_same_after",
  `!fext ver_s p ver_s'.

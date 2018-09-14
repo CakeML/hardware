@@ -129,6 +129,10 @@ val same_shape_def = Define `
   (same_shape x y /\ same_shape (VArray xs) (VArray ys))) /\
  (same_shape _ _ = F)`;
 
+val verlength_def = Define `
+ (verlength (VArray d) = INR (LENGTH d)) /\
+ (verlength _ = INL TypeError)`;
+
 (* Verilog ASTs *)
 
 (* "Boolean" operators, i.e. logical operations that only works on booleans,
@@ -502,7 +506,26 @@ val prun_set_var_index_def = Define `
      else
        sum_for (set_index (len - i - 1) vd rhse) (\vnew. (vname, VArray vnew)))`;
 
-(* TODO: Does not need support array slice assignments (yet), which is the most ugly case *)
+val set_slice_def = Define `
+ set_slice take_n drop_n olddata newdata =
+  (* Can be done more efficiently *)
+  let first       = TAKE take_n olddata;
+      first_skip  = DROP take_n olddata;
+      middle      = TAKE drop_n first_skip;
+      middle_skip = DROP drop_n first_skip in
+   if same_shape (VArray middle) (VArray newdata) then
+    INR (first ++ newdata ++ middle_skip)
+   else
+    INL TypeError`;
+
+val prun_set_slice_def = Define `
+ prun_set_slice ih il olddata newdata =
+  let len = LENGTH olddata in
+   if il <= ih /\ ih < len then
+    set_slice (len - ih - 1) ((ih - il) + 1) olddata newdata
+   else
+    INL InvalidIndex`;
+
 val assn_def = Define `
  (assn _ s (Var vname) rhse =
   sum_bind (get_var s vname) (\v.
@@ -515,7 +538,27 @@ val assn_def = Define `
   sum_bind (get_VArray_data v) (\vd.
   prun_set_var_index vname inum vd rhse))))) /\
  (assn _ _ (ArrayIndex _ _) _ = INL NotImplemented) /\
+
+ (* Generalize this later, enough for now because we only have WORD and WORD_ARRAY: *)
+ (assn fext s (ArraySlice (Var vname) [] ih il) rhs =
+  sum_bind (get_var s vname) (\v.
+  sum_bind (get_VArray_data v) (\olddata.
+  sum_bind (get_VArray_data rhs) (\rhsdata.
+  sum_for  (prun_set_slice ih il olddata rhsdata) (\newdata.
+   (vname, VArray newdata)))))) /\
+ (assn fext s (ArraySlice (Var vname) [i] ih il) rhs =
+  sum_bind (erun fext s i) (\i.
+  sum_bind (ver2n i) (\i.
+  sum_bind (get_var s vname) (\v.
+  sum_bind (get_VArray_data v) (\olddata.
+  sum_bind (sum_revEL i olddata) (\oldinner.
+  sum_bind (get_VArray_data oldinner) (\olddatainner.
+  sum_bind (get_VArray_data rhs) (\rhsdata.
+  sum_bind (prun_set_slice ih il olddatainner rhsdata) (\newdata.
+  (* Somewhat redundant to check same shape again here: *)
+   prun_set_var_index vname i olddata (VArray newdata)))))))))) /\
  (assn _ _ (ArraySlice _ _ _ _) _ = INL NotImplemented) /\
+
  (assn _ _ _ _ = INL TypeError)`;
 
 (* Right hand side already evaluated, this also breaks writing non-blockingly to the same array in the same cycle for most cases *)
