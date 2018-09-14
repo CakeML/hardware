@@ -355,9 +355,9 @@ val erun_abop_def = Define `
  (erun_abop BitwiseXor l r = bxor l r)`;
 
 val erun_shift_def = Define `
- (erun_shift ShiftArithR l r = let len = LENGTH l in GENLIST (K (HD l)) (MIN len r) ++ TAKE (len - r) l) /\
+ (erun_shift ShiftArithR l r = TAKE (LENGTH l) (GENLIST (K (HD l)) r ++ l)) /\
  (erun_shift ShiftLogicalL l r = ver_fixwidth (LENGTH l) (PAD_RIGHT (VBool F) (LENGTH l + r) l)) /\
- (erun_shift ShiftLogicalR l r = ver_fixwidth (LENGTH l) (TAKE (LENGTH l - r) l))`;
+ (erun_shift ShiftLogicalR l r = TAKE (LENGTH l) (GENLIST (K (VBool F)) r ++ l))`;
 
 val erun_arith_def = Define `
  (erun_arith Plus (l:num) r _ = l + r) /\

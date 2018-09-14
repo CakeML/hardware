@@ -179,6 +179,13 @@ val Eval_Var_WORD = Q.store_thm("Eval_Var_WORD",
  rw [Eval_def, erun_def, erun_get_var_def, WORD_def] \\ res_tac);
 *)
 
+(* Probably already in listTheory or similar? *)
+val EL_all_eq = Q.store_thm("EL_all_eq",
+ `!l1 l2. LENGTH l1 = LENGTH l2 /\ (!n. n < LENGTH l1 ==> EL n l1 = EL n l2) ==> l1 = l2`,
+ Induct \\ rw [] \\ Cases_on `l2` \\ fs [] \\ conj_tac
+ >- (first_x_assum (qspec_then `0` assume_tac) \\ fs [])
+ \\ first_x_assum match_mp_tac \\ rw [] \\ first_x_assum (qspec_then `SUC n` assume_tac) \\ fs []);
+
 val Eval_bool = Q.store_thm("Eval_bool",
  `!b s. Eval fext s env (BOOL b) (Const (VBool b))`,
  rw [Eval_def, erun_def, BOOL_def]);
@@ -279,10 +286,48 @@ val Eval_WORD_Xor = Q.store_thm("Eval_WORD_Xor",
     Eval fext s env (WORD (w1 ⊕ w2)) (ABOp v1 BitwiseXor v2)`,
  rw [Eval_WORD_abop]);
 
-(* These thms are ugly as we are working on list of values, rather than arrays *)
-val erun_shift_ShiftArithR_word_ast_bv = Q.store_thm("erun_shift_ShiftArithR_word_ast_bv",
- `!w1 w2. erun_shift ShiftArithR (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 >>~ w2))`,
- cheat);
+val HD_MAP = Q.store_thm("HD_MAP",
+ `!l f. l <> [] ==> HD (MAP f l) = f (HD l)`,
+ Induct \\ rw []);
+
+(* Rename: *)
+val lem1 = Q.prove(
+ `!w. K (HD (MAP VBool (w2v w))) = VBool o K (HD (w2v w))`,
+ rw [w2v_not_empty, HD_MAP]);
+
+val lem2 = Q.prove(
+ `!w. HD (w2v w) <=> word_msb w`,
+ rw [word_msb_def, w2v_def] \\ Cases_on `dimindex(:'a)` >- fs [] \\ simp [HD_GENLIST]);
+
+val lem3 = Q.prove(
+ `K (VBool F) = VBool o K F`,
+ rw []);
+
+val erun_shift_ShiftArithR_ShiftLogicalR_lift = Q.store_thm("erun_shift_ShiftArithR_ShiftLogicalR_lift",
+ `!w1 w2.
+    erun_shift ShiftArithR (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 >>~ w2)) /\
+    erun_shift ShiftLogicalR (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 >>>~ w2))`,
+  rw [erun_shift_def, word_asr_bv_def, word_asr_def, word_lsr_bv_def, word_lsr_def] \\
+ rewrite_tac [lem1, lem3, GSYM MAP_GENLIST, GSYM MAP_TAKE, GSYM MAP_APPEND] \\
+
+ match_mp_tac MAP_CONG \\ rw [] \\
+
+ match_mp_tac EL_all_eq \\ rw [el_w2v, FCP_BETA] \\
+
+ rw [EL_APPEND_EQN, rich_listTheory.EL_TAKE, lem2] \\
+ Cases_on `w2n w2 < n + 1` \\ rw [el_w2v])
+
+val erun_shift_ShiftLogicalL_lift = Q.store_thm("erun_shift_ShiftLogicalL_lift",
+ `!w1 w2. erun_shift ShiftLogicalL (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 <<~ w2))`,
+ rw [erun_shift_def, word_lsl_bv_def, word_lsl_def] \\
+ rw [ver_fixwidth_def, PAD_LEFT, PAD_RIGHT] \\
+
+ rewrite_tac [lem3, GSYM MAP_GENLIST, GSYM MAP_DROP, GSYM MAP_APPEND] \\
+ match_mp_tac MAP_CONG \\ rw [] \\
+
+ match_mp_tac EL_all_eq \\
+ rw [rich_listTheory.DROP_APPEND, el_w2v, FCP_BETA, EL_APPEND_EQN] \\
+ fs [rich_listTheory.EL_DROP, el_w2v]);
 
 val Eval_WORD_shift = Q.store_thm("Eval_WORD_shift",
   `!s w1 v1 w2 v2.
@@ -291,15 +336,14 @@ val Eval_WORD_shift = Q.store_thm("Eval_WORD_shift",
     Eval fext s env (WORD (w1 >>~ w2)) (Shift v1 ShiftArithR v2) /\
     Eval fext s env (WORD (w1 <<~ w2)) (Shift v1 ShiftLogicalL v2) /\
     Eval fext s env (WORD (w1 >>>~ w2)) (Shift v1 ShiftLogicalR v2)`,
- cheat);
-(*
- rw [Eval_def, erun_def] \\ res_tac \\
+ rw [Eval_def, erun_def] \\ drule_first \\ drule_first \\
  fs [sum_bind_def, sum_for_def, sum_map_def,
-     WORD_def, get_1dim_VArray_data_def, erun_shift_def,
+     WORD_def, get_1dim_VArray_data_def,
      w2ver_def, ver2v_def, ver2n_def, v2n_w2v, sum_mapM_ver2bool_VBool,
      w2v_not_empty, EVERY_isVBool_MAP_VBool,
-     erun_shift_ShiftArithR_word_ast_bv]);
-*)
+
+     erun_shift_ShiftArithR_ShiftLogicalR_lift,
+     erun_shift_ShiftLogicalL_lift]);
 
 val Eval_WORD_ShiftArithR = Q.store_thm("Eval_WORD_ShiftArithR",
   `!s w1 v1 w2 v2.
@@ -826,13 +870,6 @@ val bit_field_insert_lemma1 = Q.prove(
 val bit_field_insert_lemma2 = Q.prove(
  `!l a b. TAKE (LENGTH a) l = a /\ DROP (LENGTH a) l = b ==> l = a ++ b`,
  metis_tac [TAKE_DROP]);
-
-(* Probably already in listTheory or similar? *)
-val EL_all_eq = Q.store_thm("EL_all_eq",
- `!l1 l2. LENGTH l1 = LENGTH l2 /\ (!n. n < LENGTH l1 ==> EL n l1 = EL n l2) ==> l1 = l2`,
- Induct \\ rw [] \\ Cases_on `l2` \\ fs [] \\ conj_tac
- >- (first_x_assum (qspec_then `0` assume_tac) \\ fs [])
- \\ first_x_assum match_mp_tac \\ rw [] \\ first_x_assum (qspec_then `SUC n` assume_tac) \\ fs []);
 
 val same_shape_VArray_MAP_VBool = Q.store_thm("same_shape_VArray_MAP_VBool",
 `!l1 l2. LENGTH l1 = LENGTH l2 ==> same_shape (VArray (MAP VBool l1)) (VArray (MAP VBool l2))`,
