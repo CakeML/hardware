@@ -247,12 +247,6 @@ val var_has_type_old_var_has_type_WORD = Q.store_thm("var_has_type_old_var_has_t
     drule_strip var_has_type_old_var_has_type_WORD_help \\ 
     qexists_tac `v2w bs` \\ match_mp_tac MAP_CONG \\ simp [w2v_v2w]);
 
-val var_has_type_old_var_has_type_WORD_ARRAY = Q.store_thm("var_has_type_old_var_has_type_WORD_ARRAY",
- `!var env.
-   var_has_type_old env var (WORD_ARRAY:('a word -> 'b word) -> value -> bool) <=>
-   var_has_type env var (VArray_t [dimword (:'a); dimindex (:'b)])`,
- cheat);
-
 val var_has_value_var_has_type_WORD_ARRAY_help = Q.prove(
  `!l (w:'a word -> 'b word) v.
    LENGTH l = dimword (:'a) /\ (!(i:'a word). sum_revEL (w2n i) l = INR (w2ver (w i))) /\ MEM v l ==>
@@ -273,6 +267,29 @@ val var_has_value_var_has_type_WORD_ARRAY = Q.store_thm("var_has_value_var_has_t
  match_mp_tac has_type_array_step \\
  simp [dimword_def] \\ rpt strip_tac \\ drule var_has_value_var_has_type_WORD_ARRAY_help \\
  rpt (disch_then drule) \\ strip_tac \\ rveq \\ simp [has_type_w2ver]);
+
+(* In need of cleanup *)
+val var_has_type_old_var_has_type_WORD_ARRAY = Q.store_thm("var_has_type_old_var_has_type_WORD_ARRAY",
+ `!var env.
+   var_has_type_old env var (WORD_ARRAY:('a word -> 'b word) -> value -> bool) <=>
+   var_has_type env var (VArray_t [dimword (:'a); dimindex (:'b)])`,
+ rw [var_has_type_old_def] \\ eq_tac
+ >- rw [var_has_value_var_has_type_WORD_ARRAY]
+ \\ rw [var_has_type_def, Once has_type_cases, var_has_value_def, WORD_ARRAY_def] \\
+    asm_exists_tac \\ simp [] \\
+    qexists_tac `(\i. OUTR (ver2w (EL (LENGTH vs − (w2n i + 1)) vs)))` \\
+    rw [sum_revEL_def]
+
+    >-
+    (simp [sum_EL_EL] \\ simp [w2ver_def, ver2w_def] \\
+
+    fs [MEM_EL] \\ first_x_assum (qspec_then `EL (LENGTH vs − (w2n i + 1)) vs` mp_tac) \\
+    impl_tac >- (qexists_tac `LENGTH vs − (w2n i + 1)` \\ simp []) \\
+    strip_tac \\ drule_strip has_type_cases_imp \\ fs [has_type_rules] \\
+    simp [ver2v_def] \\ drule_strip var_has_type_old_var_has_type_WORD_help \\
+    match_mp_tac MAP_CONG \\ rw [sum_mapM_VBool, sum_map_def, w2v_v2w])
+
+    \\ metis_tac [w2n_lt]);
 
 val var_has_type_get_var = Q.store_thm("var_has_type_get_var",
  `!s name ty. var_has_type s.vars name ty ==> ?v. get_var s name = INR v`,
