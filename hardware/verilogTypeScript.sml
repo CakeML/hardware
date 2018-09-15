@@ -132,12 +132,6 @@ val same_shape_snoc = Q.store_thm("same_shape_snoc",
    same_shape (VArray (xs ++ [x])) (VArray (ys ++ [y]))`,
  Induct \\ Cases_on `ys` \\ rw [same_shape_def]);
 
-val same_shape_append = Q.store_thm("same_shape_append",
- `!xs1 xs2 ys1 ys2.
-   same_shape (VArray xs1) (VArray xs2) /\ same_shape (VArray ys1) (VArray ys2) ==>
-   same_shape (VArray (xs1 ++ ys1)) (VArray (xs2 ++ ys2))`,
- cheat);
-
 val same_shape_VArray_cong = Q.store_thm("same_shape_VArray_cong",
  `!l l'.
    (!n. n < LENGTH l ==> ?ln l'n. sum_revEL n l = INR ln /\ sum_revEL n l' = INR l'n /\
@@ -148,6 +142,16 @@ val same_shape_VArray_cong = Q.store_thm("same_shape_VArray_cong",
  >- (first_x_assum (qspec_then `LENGTH l` mp_tac) \\ impl_tac >- DECIDE_TAC \\ fs [sum_revEL_LENGTH])
  \\ first_x_assum match_mp_tac \\ rpt strip_tac \\ fs [] \\
     first_x_assum (qspec_then `n` mp_tac) \\ impl_tac >- DECIDE_TAC \\ metis_tac [sum_revEL_INR_LENGTH]);
+
+val same_shape_VArray_cong2 = Q.store_thm("same_shape_VArray_cong2",
+ `!l l'.
+   same_shape (VArray l) (VArray l') <=>
+   (!n ln l'n. n < LENGTH l /\ EL n l = ln /\ EL n l' = l'n ==> same_shape ln l'n) /\
+   LENGTH l = LENGTH l'`,
+ Induct \\ Cases_on `l'` \\ rw [same_shape_def] \\ eq_tac \\ rw []
+ >- (Cases_on `n` \\ fs [])
+ >- (first_x_assum (qspec_then `0` mp_tac) \\ simp [])
+ \\ first_x_assum (qspec_then `SUC n` mp_tac) \\ simp []);
 
 val same_shape_VArray_sum_revEL_cong = Q.store_thm("same_shape_VArray_sum_revEL_cong",
  `!l l' n.
@@ -161,6 +165,12 @@ val same_shape_VArray_sum_revEL_cong = Q.store_thm("same_shape_VArray_sum_revEL_
  fs [w2n_n2w] \\ rpt strip_tac \\
  `n' < dimword (:'a)` by metis_tac [dimword_def, EXP_n_lt_2n, arithmeticTheory.LESS_TRANS] \\
  fs [arithmeticTheory.LESS_MOD] \\ match_mp_tac same_shape_VArray_from_v \\ fs []);
+
+val same_shape_append = Q.store_thm("same_shape_append",
+ `!xs1 xs2 ys1 ys2.
+   same_shape (VArray xs1) (VArray xs2) /\ same_shape (VArray ys1) (VArray ys2) ==>
+   same_shape (VArray (xs1 ++ ys1)) (VArray (xs2 ++ ys2))`,
+ rw [same_shape_VArray_cong2] \\ rw [EL_APPEND_EQN]);
 
 val same_shape_w2ver = Q.store_thm("same_shape_w2ver",
  `!(w1:'a word) (w2:'a word). same_shape (w2ver w1) (w2ver w2)`,
@@ -275,43 +285,44 @@ val has_type_same_shape_help = Q.store_thm("has_type_same_shape_help",
  >- (pop_assum (qspec_then `VArray l` mp_tac) \\ simp [same_shape_refl])
  \\ fs [has_type_VArray_not_VBool_t]);
 
+val same_shape_has_type' = Q.prove(
+ `!v ty. has_type v ty ==> !v'. same_shape v' v ==> has_type v' ty`,
+ ho_match_mp_tac has_type_ind \\ rw [] \\ Cases_on `v'` \\ fs [same_shape_def]
+ >- simp [has_type_bool] \\
+
+ fs [same_shape_VArray_cong2, MEM_EL] \\
+ TRY (match_mp_tac has_type_array_base) \\
+ TRY (match_mp_tac has_type_array_step) \\
+ rw [] \\
+ first_x_assum irule \\ metis_tac [MEM_EL]);
+
 val same_shape_has_type = Q.store_thm("same_shape_has_type",
  `!v v' ty. same_shape v' v /\ has_type v ty ==> has_type v' ty`,
- cheat);
+ metis_tac [same_shape_has_type']);
+
+val has_type_same_shape'_lem1 = Q.prove(
+ `!vs vs'.
+   (∀v'. MEM v' vs ⇒ ∀v. has_type v VBool_t ⇒ same_shape v' v) /\
+   LENGTH vs = LENGTH vs' /\
+   (∀v. MEM v vs' ⇒ has_type v VBool_t)
+   ==>
+   same_shape (VArray vs) (VArray vs')`,
+ Induct >- rw [same_shape_def] \\ Cases_on `vs'` \\ fs [same_shape_def]);
+
+val has_type_same_shape' = Q.prove(
+ `!v' ty. has_type v' ty ==> !v. has_type v ty ==> same_shape v' v`,
+ ho_match_mp_tac has_type_ind \\ rw []
+
+ >- (Cases_on `v'` >- simp [same_shape_def] \\ fs [has_type_VArray_not_VBool_t])
+
+ >- (drule_strip has_type_cases_imp \\ fs [has_type_rules] \\
+    simp [same_shape_def, has_type_same_shape'_lem1])
+
+ \\ drule_strip has_type_cases_imp \\ fs [has_type_rules] \\ rveq \\
+    rw [same_shape_VArray_cong2] \\ metis_tac [MEM_EL]);
 
 val has_type_same_shape = Q.store_thm("has_type_same_shape",
  `!v v' ty. has_type v' ty /\ has_type v ty ==> same_shape v' v`,
- cheat);
-
-(*
- recInduct same_shape_ind \\ rpt strip_tac
- >- (Cases_on `ty` \\ fs [has_type_rules, has_type_VBool_not_VArray_t])
- >- drule has_type_cases_imp \\ rw []
-    >- match_mp_tac has_type_array_base \\ fs [same_shape_def, same_shape_LENGTH] \\
-       rpt strip_tac
-       >- (rveq \\ first_assum (qspec_then `y` assume_tac) \\ fs [])
-       \\ drule has_type_VArray_tl \\ strip_tac \\ first_x_assum drule \\ strip_tac \\
-          once_rewrite_tac [has_type_cases] \\ rw [] \\ pop_assum mp_tac \\
-          once_rewrite_tac [has_type_cases] \\ rw [] \\ pop_assum drule \\
-          Cases_on `v` >- simp [] \\ once_rewrite_tac [has_type_cases] \\ rw []
-    \\ match_mp_tac has_type_array_step \\ fs [same_shape_def, same_shape_LENGTH] \\
-       rpt strip_tac
-       >- (rveq \\ first_assum (qspec_then `y` assume_tac) \\ fs [])
-       \\ 
- >- fs [same_shape_def]
- >- fs [same_shape_def]
- >- fs [same_shape_def]
- >- fs [same_shape_def]
-*)
-
-(*
-val has_type_same_shape = Q.store_thm("has_type_same_shape",
- `!v ty. has_type v ty ==> !v'. same_shape v' v ==> has_type v' ty`,
- ho_match_mp_tac has_type_ind \\ rpt strip_tac
- >- (Cases_on `v'` \\ fs [same_shape_def, has_type_rules])
- >- Cases_on `v'` \\ fs [same_shape_def] \\ match_mp_tac has_type_array_base \\
-    fs [same_shape_LENGTH, same_shape_def, has_type_same_shape_help] \\ rpt strip_tac \\
-    first_x_assum match_mp_tac \\ 
-*)
+ metis_tac [has_type_same_shape']);
 
 val _ = export_theory ();
