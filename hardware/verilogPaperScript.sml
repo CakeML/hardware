@@ -1,12 +1,16 @@
 open hardwarePreamble;
 
-open verilogTheory;
-
-open sumExtraTheory;
+open sumExtraTheory verilogTheory verilogTranslatorTheory;
 
 val _ = new_theory "verilogPaper";
 
-(* Simple theory providing Verilog definitions without monadic combinators *)
+(*
+Simple theory providing Verilog definitions without monadic combinators,
+so people not familiar with functional programming can follow the definitions.
+
+The theory also replaces the (currently, two-field) record type used for intermediate state
+with a pair, because a pair looks cleaner in the paper.
+*)
 
 val prun'_def = Define `
  prun' fext sp p = sum_map (\sp'. (sp'.vars, sp'.nbq))
@@ -90,5 +94,34 @@ val mrun'_mrun = Q.store_thm("mrun'_mrun",
  `!fext ps Γ n. mrun' fext ps Γ n = mrun fext ps Γ n`,
  Induct_on `n` \\
  rw [mrun'_def, mrun_def, mstep_commit'_mstep_commit, sum_bind_as_case]);
+
+(* Cleaner EvalS variant *)
+
+val relS'_def = Define `
+ relS' s Γ <=> relS s <| vars := Γ |>`;
+
+val relS_rw = Q.prove(
+ `!s ver_s Γ. relS s (ver_s with vars := Γ) = relS s <| vars := Γ |> /\
+              relS s <|vars := ver_s.vars|> = relS s ver_s`,
+ rw [relS_def, relS_var_def, get_var_def]);
+
+val pstate_rw = Q.prove(
+ `!vars ver_s. <|vars := vars; nbq := ver_s.nbq|> = ver_s with vars := vars`,
+ rw [pstate_component_equality]);
+
+val EvalS'_def = Define `
+ EvalS' fext s Γ hp vp <=>
+  !fextv Δ.
+   relS' s Γ /\ relS_fextv fextv fext ==>
+    ?Γ' Δ'. prun' fextv (Γ, Δ) vp = INR (Γ', Δ') /\ relS' hp Γ'`;
+
+val EvalS'_EvalS = Q.store_thm("EvalS'_EvalS",
+ `!fext s Γ hp vp. EvalS' fext s Γ hp vp <=> EvalS fext s Γ hp vp`,
+ rw [EvalS'_def, EvalS_def, relS'_def, relS_rw] \\ eq_tac \\ rpt strip_tac \\ drule_first
+ >- (pop_assum (qspec_then `ver_s.nbq` strip_assume_tac) \\
+    fs [prun'_def] \\ drule_strip sum_map_INR \\
+    fs [sum_map_def] \\ rveq \\ fs [pstate_rw, relS_rw])
+ \\ pop_assum (qspec_then `<| nbq := Δ |>` strip_assume_tac) \\
+    simp [prun'_def, sum_map_def, relS_rw]);
 
 val _ = export_theory ();
