@@ -1,7 +1,11 @@
 `timescale 1ns / 1ps
 
-module cache_wrapper(
-    input clk,
+module cache_wrapper #(
+    // AXI parameters
+    parameter BIT_WIDTH = 32,
+    parameter WSTRB_WIDTH = BIT_WIDTH/8)
+    
+    (input clk,
     
     input[2:0] command,
     output ready,
@@ -30,8 +34,8 @@ module cache_wrapper(
     
     output mem_d_wvalid,
     input mem_d_wready,
-    output[63:0] mem_d_wdata,
-    output[7:0] mem_d_wstrb,
+    output[BIT_WIDTH - 1:0] mem_d_wdata,
+    output[WSTRB_WIDTH - 1:0] mem_d_wstrb,
     output mem_d_wlast,
     
     input[1:0] mem_d_bresp,
@@ -44,8 +48,8 @@ module cache_wrapper(
     output[7:0] mem_d_arlen,
     output[2:0] mem_d_arsize,
     output[1:0] mem_d_arburst,
+    input[BIT_WIDTH - 1:0] mem_d_rdata,
     
-    input[63:0] mem_d_rdata,
     input[1:0] mem_d_rresp,
     input mem_d_rlast,
     input mem_d_rvalid,
@@ -64,8 +68,8 @@ module cache_wrapper(
     
     output mem_i_wvalid,
     input mem_i_wready,
-    output[63:0] mem_i_wdata,
-    output[7:0] mem_i_wstrb,
+    output[BIT_WIDTH - 1:0] mem_i_wdata,
+    output[WSTRB_WIDTH - 1:0] mem_i_wstrb,
     output mem_i_wlast,
     
     input[1:0] mem_i_bresp,
@@ -79,20 +83,14 @@ module cache_wrapper(
     output[2:0] mem_i_arsize,
     output[1:0] mem_i_arburst,
     
-    input[63:0] mem_i_rdata,
+    input[BIT_WIDTH - 1:0] mem_i_rdata,
     input[1:0] mem_i_rresp,
     input mem_i_rlast,
     input mem_i_rvalid,
     output mem_i_rready);
 
-/*
-wire[31:0] connection_mem_d_awaddr;
-wire[31:0] connection_mem_d_araddr;
-wire[31:0] connection_mem_i_awaddr;
-wire[31:0] connection_mem_i_araddr;
-*/
-
-cache cache(
+//cache cache(
+cache_none cache(
     .clk(clk),
     .command(command),
     .ready(ready),
@@ -167,12 +165,5 @@ cache cache(
     .mem_i_rlast(mem_i_rlast),
     .mem_i_rvalid(mem_i_rvalid),
     .mem_i_rready(mem_i_rready));
-
-/*
-assign mem_d_awaddr = {32'd0, connection_mem_d_awaddr};
-assign mem_d_araddr = {32'd0, connection_mem_d_araddr};
-assign mem_i_awaddr = {32'd0, connection_mem_i_awaddr};
-assign mem_i_araddr = {32'd0, connection_mem_i_araddr};
-*/
 
 endmodule
