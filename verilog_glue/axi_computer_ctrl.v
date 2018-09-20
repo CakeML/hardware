@@ -9,6 +9,7 @@ module axi_computer_ctrl
         output reg mem_start_ready = 0,
         output reg [31:0] mem_start,
 
+        input interrupt_req,
         output reg interrupt_ack = 0,
 
         //
@@ -37,6 +38,7 @@ module axi_computer_ctrl
 
 reg error = 0;
 reg reg_addr;
+reg waiting_for_req_0 = 0;
 
 localparam [31:0] REG_MEM_START_ADDR = BASE_ADDR;
 localparam [31:0] REG_INTERRUPT_ACK_ADDR = BASE_ADDR + 4;
@@ -78,6 +80,7 @@ always @ (posedge clk) begin
             if (reg_addr) begin
                 // Ignore actual data...
                 interrupt_ack <= 1;
+                waiting_for_req_0 = 1;
             end else begin
                 mem_start <= wdata;
                 mem_start_ready <= 1;
@@ -85,6 +88,19 @@ always @ (posedge clk) begin
         else
             error = 1;
 
+        if (!waiting_for_req_0) begin
+            bvalid <= 1;
+            if (error == 0)
+                bresp <= 0;
+            else
+                bresp <= 2;
+        end
+    end
+    
+    // Stage 2.5
+    if (waiting_for_req_0 && !interrupt_req) begin
+        waiting_for_req_0 = 0;
+        
         bvalid <= 1;
         if (error == 0)
             bresp <= 0;
