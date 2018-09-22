@@ -25,6 +25,7 @@ _CORE_CTRL_REG_INTERRUPT_ACK = 4
 
 _date_format = "%Y-%m-%d %H:%M:%S"
 
+
 def log(*msgs):
     print(datetime.now().strftime(_date_format), ": ", sep="", end="")
     print(*msgs)
@@ -56,6 +57,7 @@ def _get_uio_device(irq):
 
     return None
 
+
 # Super inefficient, should use string buffer instead
 def print_interrupt_msg(mem):
     num = min(mem[0] & 0xFF, 63)
@@ -84,12 +86,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true")
 
-    parser.add_argument("bit_file", metavar="bit-file", help="FPGA bitstream to load onto the FPGA")
+    parser.add_argument("bit_file", metavar="bit-file",
+                        help="FPGA bitstream to load onto the FPGA")
     parser.add_argument("--low_mem_padding", type=int, default=0)
 
     parser.add_argument('mems', nargs='+')
-    #parser.add_argument("low_mem", default="low_mem_words.mem")
-    #parser.add_argument("high_mem", default="high_mem_words.mem")
     args = parser.parse_args()
 
     # Sanity check params
@@ -126,16 +127,17 @@ def main():
         low_mem_size = 0
         with open(args.mems[0]) as f:
             for i, val in enumerate(f):
-              mem[args.low_mem_padding + i] = int(val, 16)
-              #print("--> Wrote ", to_hex(int(val, 16)), "to addr", args.low_mem_padding + i)
-              low_mem_size = i
+                mem[args.low_mem_padding + i] = int(val, 16)
+                #print("--> Wrote ", to_hex(int(val, 16)), "to addr", args.low_mem_padding + i)
+                low_mem_size = i
 
         if len(args.mems) == 2:
             # TODO: This value should not be hard-coded,
             # and should be read from some memory input format instead
             heap_block = 31457239
             high_mem_start = (low_mem_size + 1) + heap_block
-            log("Loading high mem at physical addr", format(high_mem_start + mem_start, '0x'))
+            log("Loading high mem at physical addr",
+                format(high_mem_start + mem_start, '0x'))
 
             with open(args.mems[1]) as f:
                 for i, val in enumerate(f):
