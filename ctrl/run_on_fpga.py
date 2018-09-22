@@ -30,6 +30,10 @@ def log(*msgs):
     print(*msgs)
 
 
+def to_hex(val):
+    return '{0:0{1}x}'.format(val, 8)
+
+
 # Copied from some pynq example
 def _get_uio_device(irq):
     dev_names = None
@@ -52,26 +56,46 @@ def _get_uio_device(irq):
 
     return None
 
-
+# Super inefficient, should use string buffer instead
 def print_interrupt_msg(mem):
-    for addr in range(16):
+    num = min(mem[0] & 0xFF, 63)
+
+    for addr in range(0, 16):
         val = mem[addr]
 
         for i in range(4):
-            c = 0xFF & (val >> 8*i)
+            # First byte is the length...
+            if addr == 0 and i == 0:
+                continue
 
-            if c == 0:
+            # Max number of chars reached?
+            bytenum = 4*addr + i
+
+            if bytenum > num:
                 print()
                 return
-            else:
-                print(chr(c), end='')
+
+            # If not, print current char
+            c = 0xFF & (val >> 8*i)
+            print(chr(c), end='')
 
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true")
+
     parser.add_argument("bit_file", metavar="bit-file", help="FPGA bitstream to load onto the FPGA")
-    parser.add_argument("program", help="Machine code to run")
+    parser.add_argument("--low_mem_padding", type=int, default=0)
+
+    parser.add_argument('mems', nargs='+')
+    #parser.add_argument("low_mem", default="low_mem_words.mem")
+    #parser.add_argument("high_mem", default="high_mem_words.mem")
     args = parser.parse_args()
+
+    # Sanity check params
+    if len(args.mems) > 2:
+        log("Too many mem params!")
+        sys.exit(1)
 
     # Interrupt handling
     idev_file = _get_uio_device(61)
@@ -98,21 +122,32 @@ def main():
             sys.exit(1)
 
         # Load program from file
+        log("Loading low mem at physical addr mem_start")
         low_mem_size = 0
-        with open("low_mem_words.mem") as f:
+        with open(args.mems[0]) as f:
             for i, val in enumerate(f):
-              mem[i] = int(val, 16)
+              mem[args.low_mem_padding + i] = int(val, 16)
+              #print("--> Wrote ", to_hex(int(val, 16)), "to addr", args.low_mem_padding + i)
               low_mem_size = i
 
-        high_mem_start = (low_mem_size + 1) + 31457239
+        if len(args.mems) == 2:
+            # TODO: This value should not be hard-coded,
+            # and should be read from some memory input format instead
+            heap_block = 31457239
+            high_mem_start = (low_mem_size + 1) + heap_block
+            log("Loading high mem at physical addr", format(high_mem_start + mem_start, '0x'))
 
-        with open("high_mem_words.mem") as f:
-            for i, val in enumerate(f):
-              mem[high_mem_start + i] = int(val, 16)
+            with open(args.mems[1]) as f:
+                for i, val in enumerate(f):
+                    mem[high_mem_start + i] = int(val, 16)
 
         # Setup FPGA
         ol = Overlay(args.bit_file)
         core_ctrl = MMIO(_CORE_CTRL_BASE_ADDRESS, 16)
+
+        # Useful if we want to sync with a hardware debugger
+        if args.debug:
+            input("Press anything to start:")
 
         core_ctrl.write(_CORE_CTRL_REG_MEM_START, mem_start)
 
