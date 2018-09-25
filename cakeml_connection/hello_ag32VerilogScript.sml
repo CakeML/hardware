@@ -47,29 +47,39 @@ val after_R_lift = Q.store_thm("after_R_lift",
  impl_tac >- (fs [relS_def, relS_var_def, get_var_def] \\ metis_tac []) \\
  strip_tac \\ fs [WORD_def] \\ rveq \\ fs [w2ver_bij] \\ metis_tac []);
 
+val external_memory_configured_def = Define`
+  external_memory_configured start contents size vstep fextv fext ⇔
+    relM_fextv fextv fext ∧
+    is_mem fext_accessor_verilog vstep fext ∧
+    is_interrupt_interface fext_accessor_verilog vstep fext ∧
+    is_mem_start_interface fext start ∧
+    mem_no_errors fext ∧
+    INIT_fext (fext 0) contents ∧
+    byte_aligned start ∧
+    w2n start + size < dimword (:32)`;
+
+val good_initial_state_def = Define`
+  good_initial_state init ⇔
+   vars_has_type init (relMtypes ⧺ ag32types) ∧
+   INIT_verilog init`;
+
 val hello_verilog = Q.store_thm("hello_verilog",
  `!vstep fext fextv init mem_start.
+   good_initial_state init ∧
    vstep = mrun fextv computer init ∧
-   relM_fextv fextv fext ∧
-   is_mem fext_accessor_verilog vstep fext ∧
-   is_interrupt_interface fext_accessor_verilog vstep fext ∧
-   is_mem_start_interface fext mem_start ∧
-   mem_no_errors fext ∧
-   vars_has_type init (relMtypes ⧺ ag32types) ∧
-   INIT_verilog init ∧
-   INIT_fext (fext 0) (hello_init_memory mem_start) ∧
+   external_memory_configured
+     mem_start (hello_init_memory mem_start) memory_size vstep fextv fext
 
-   byte_aligned mem_start ∧
-   w2n mem_start + memory_size < dimword (:32)
    ==>
-   ?k vs'.
-    vstep k = INR vs' /\
+   ?k fin.
+    vstep k = INR fin /\
     let
      outs = MAP (\mem. get_print_string (mem_start, mem)) (fext k).io_events
     in
-     (mget_var vs' "PC") = INR (w2ver (halt_addr mem_start)) ∧
+     (mget_var fin "PC") = INR (w2ver (halt_addr mem_start)) ∧
      outs ≼ hello_outputs ∧
-     (exit_code_0 vs' (fextv k) ==> outs = hello_outputs)`,
+     (exit_code_0 fin (fextv k) ==> outs = hello_outputs)`,
+ rewrite_tac[external_memory_configured_def, good_initial_state_def] \\
  rpt strip_tac \\
  drule_strip (vars_has_type_append |> SPEC_ALL |> EQ_IMP_RULE |> fst |> SPEC_ALL) \\
 
