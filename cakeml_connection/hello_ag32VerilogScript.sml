@@ -87,11 +87,13 @@ val hello_verilog = Q.store_thm("hello_verilog",
   drule_strip init_R_lift \\ fs [] \\ metis_tac [combinTheory.UPDATE_APPLY]) \\
 
  strip_tac \\
+ first_x_assum(qspec_then`k1`mp_tac) \\
+ impl_tac >- simp[] \\ strip_tac \\
 
  drule_strip (SIMP_RULE (srw_ss()) [] INIT_REL_circuit_verilog) \\
-
  qmatch_asmsub_abbrev_tac `FUNPOW _ _ s'` \\
- disch_then (qspecl_then [`k`, `hello_init_memory mem_start`, `s'`, `hol_s`] mp_tac) \\
+ disch_then (qspecl_then [`k1`, `hello_init_memory mem_start`, `s'`, `hol_s`] mp_tac) \\
+
  impl_tac >- (qunabbrev_tac `s'` \\ simp [combinTheory.UPDATE_APPLY]) \\ strip_tac \\
 
  asm_exists_tac \\ fs [REL_def, hello_machine_config_def] \\ conj_tac
