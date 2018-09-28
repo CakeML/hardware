@@ -280,10 +280,9 @@ val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
    INIT_verilog init /\
    INIT_fext (fext 0) initmem /\
 
-   s.R 0w = mem_start /\
-   s.PC = mem_start + 64w /\
    relM hol_s init /\
-   INIT (fext 0) hol_s s
+   INIT (fext 0) hol_s s /\
+   INIT_ISA s mem_start
    ==>
    ?m vs' hol_s'.
     vstep m = INR vs' /\

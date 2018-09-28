@@ -95,6 +95,11 @@ val INIT_def = Define `
   ~t.do_interrupt /\
   ~t.interrupt_req`;
 
+val INIT_ISA_def = Define `
+ INIT_ISA (s:ag32_state) mem_start <=>
+  s.PC = mem_start + 64w /\
+  s.R 0w = mem_start`;
+
 (* Variant of state_circuit_component_equality with only cpu-relevant fields *)
 val cpu_eq_def = Define `
  cpu_eq s1 s2 ⇔
@@ -1313,12 +1318,11 @@ val INIT_circuit = Q.store_thm("INIT_circuit",
    is_interrupt_interface fext_accessor_circuit c fext /\
    is_mem_start_interface fext mem_start /\
    mem_no_errors fext /\
-   INIT (fext 0) init s /\
 
-   s.PC = mem_start + 64w /\
-   s.R 0w = mem_start ==>
+   INIT (fext 0) init s /\
+   INIT_ISA s mem_start ==>
    ?m. REL (fext m) (c m) (FUNPOW Next 0 s)`,
- simp [INIT_def] \\ rpt strip_tac \\
+ simp [INIT_def, INIT_ISA_def] \\ rpt strip_tac \\
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_0_next) \\
  impl_tac >- simp [circuit_def] \\ strip_tac \\ fs [circuit_0, cpu_eq_def] \\
 
@@ -1328,25 +1332,26 @@ val INIT_circuit = Q.store_thm("INIT_circuit",
  qexists_tac `m' + m` \\ fs [cpu_eq_def, REL_def, INIT_R_def] \\
  match_mp_tac EQ_EXT \\ gen_tac \\ Cases_on `x = 0w` \\ simp [UPDATE_def]);
 
-val INIT_REL_circuit = Q.store_thm("INIT_REL_circuit",
+val INIT_REL_circuit_lem = Q.prove(
  `!n c s facc init fext mem_start.
    c = circuit facc init fext /\
 
    INIT (fext 0) init s /\
+   INIT_ISA s mem_start /\
 
    is_mem fext_accessor_circuit c fext /\
-   is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
    is_mem_start_interface fext mem_start /\
    mem_no_errors fext /\
-
-   s.PC = mem_start + 64w /\
-   s.R 0w = mem_start ==>
+   is_acc accelerator_f c ==>
    ?m. REL (fext m) (c m) (FUNPOW Next n s)`,
  simp [] \\ rpt strip_tac \\
  drule_strip (SIMP_RULE (bool_ss) [] INIT_circuit) \\
  drule_strip (SIMP_RULE (srw_ss()) [] REL_circuit) \\
  pop_assum (qspec_then `n` strip_assume_tac) \\
  qexists_tac `m + mi` \\ fs []);
+
+val INIT_REL_circuit = save_thm("INIT_REL_circuit",
+ SIMP_RULE (srw_ss()) [] INIT_REL_circuit_lem);
 
 val _ = export_theory ();
