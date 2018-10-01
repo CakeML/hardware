@@ -39,7 +39,8 @@ val cvars_def = Define `
  cvars = ["PC"; "data_out";
           "command"; "data_addr"; "data_wdata"; "data_wstrb";
           "acc_arg"; "acc_arg_ready";
-          "acc_res"; "acc_res_ready"]`;
+          "acc_res"; "acc_res_ready";
+          "interrupt_req"]`;
 
 fun intro_cvars_for_prog prog =
   list_mk_comb (``intro_cvars``, [``cvars``, prog])

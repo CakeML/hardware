@@ -4,6 +4,8 @@ open verilogTranslatorConfigLib verilogTranslatorCoreLib verilogTranslatorLib ve
 
 open verilogSyntax;
 
+val ERR = Feedback.mk_HOL_ERR "ag32VerilogPrintLib";
+
 val input_vars = ["data_in"];
 val output_vars = ["data_out", "command", "data_addr", "PC" (* for inst_addr *),
                    "data_wdata", "data_wstrb", "interrupt_req"];
@@ -84,6 +86,15 @@ val internal_let_vars =
  |> concat;
 
 (*val [prog_comm, prog_acc_comm] = computer_def |> concl |> rhs |> EVAL |> concl |> rhs |> dest_list |> fst;*)
+
+(* Sanity check output_vars *)
+
+val cvars = cvars_def |> concl |> rhs |> dest_list |> fst |> map fromHOLstring;
+
+val () = if (not (all (fn v => mem v cvars) output_vars)) then
+         raise ERR "cvars check" "Some external variable not in cvars!"
+        else
+         ();
 
 let
   val ss =
