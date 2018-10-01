@@ -142,7 +142,25 @@ end;
 (* To hex ... *)
 fun build_dump prg = let
   val prg = prg |> concl |> lhs
-  val dump = EVAL ``MAP (word_to_hex_string o Encode) ^prg``
+  val dump = EVAL ``(GENLIST (K "0") (64 DIV 4)) ++
+                    MAP (word_to_hex_string o Encode) ^prg``
+             |> concl |> rhs
+             |> dest_list |> fst |> map (fn tm => fromHOLstring tm ^ "\n")
+             |> concat
+in
+  writeFile "prg.data" dump
+end;
+
+(* TODO: To hex bytes ... *)
+
+(* Tmp: *)
+val word32_to_4bytes_def = Define `
+ word32_to_4bytes (w:word32) = [(w2w w):word8; w2w (w >>> 8); w2w (w >>> 16); w2w (w >>> 24)]`;
+
+fun build_dump prg = let
+  val prg = prg |> concl |> lhs
+  val dump = EVAL ``(GENLIST (K "0") 64) ++
+                    (FLAT (MAP (MAP word_to_hex_string o word32_to_4bytes o Encode) ^prg))``
              |> concl |> rhs
              |> dest_list |> fst |> map (fn tm => fromHOLstring tm ^ "\n")
              |> concat
