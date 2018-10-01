@@ -43,18 +43,18 @@ val relMtypes_def =
  |> (fn tms => listSyntax.mk_list (tms, ``:string # vertype``))
  |> (fn tm => Define `relMtypes = ^tm`);
 
-val relM_fextv_def =
+val lift_fext_def =
  zip (TypeBase.fields_of fext_ty)
      (TypeBase.accessors_of fext_ty |> map (rator o lhs o concl o SPEC_ALL))
  |> filter (fn ((name, _), _) => not (mem name model_fext_vars))
  |> map (fn ((f, ty), accessor) => (fromMLstring f, hol2ver_for_type ty, accessor))
  |> map (fn (f, ty, accessor) => ``fextv (n:num) ^f = INR (^ty (^accessor (fext n)))``)
  |> list_mk_conj |> inst [ alpha |-> ``:error`` ]
- |> (fn tm => Define `relM_fextv fextv fext = !n. ^tm`);
+ |> (fn tm => Define `lift_fext fextv fext = !n. ^tm`);
 
-val relM_fextv_fext_relS_fextv_fext = Q.store_thm("relM_fextv_fext_relS_fextv_fext",
- `!fextv fext. relM_fextv fextv fext <=> (!n. relS_fextv (fextv n) (fext n))`,
- rw [relM_fextv_def, relS_fextv_def]);
+val lift_fext_relS_fextv_fext = Q.store_thm("lift_fext_relS_fextv_fext",
+ `!fextv fext. lift_fext fextv fext <=> (!n. relS_fextv (fextv n) (fext n))`,
+ rw [lift_fext_def, relS_fextv_def]);
 
 (** Introduce non-blocking writes **)
 

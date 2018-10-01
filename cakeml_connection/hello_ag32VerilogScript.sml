@@ -20,10 +20,14 @@ val exit_code_0_def = Define `
 val halt_addr_def = Define `
  halt_addr mem_start = mem_start + n2w (heap_size + 4 * LENGTH data + 2 * ffi_offset)`;
 
+(* Should be moved, and replaced by event-based definition... *)
+val ag32_is_halted_def = Define `
+ ag32_is_halted fin mem_start <=> (mget_var fin "PC") = INR (w2ver (halt_addr mem_start))`;
+
 val init_R_lift = Q.store_thm("init_R_lift",
  `!init hol_s s fext i.
-   INIT_verilog init /\ relM hol_s init /\ INIT fext hol_s s /\ i <> 0w ==> s.R i = 0w`,
- rw [INIT_verilog_def, relM_def, relM_var_def, INIT_def, INIT_R_def] \\
+   INIT_verilog_vars init /\ relM hol_s init /\ INIT fext hol_s s /\ i <> 0w ==> s.R i = 0w`,
+ rw [INIT_verilog_vars_def, relM_def, relM_var_def, INIT_def, INIT_R_def] \\
 
  drule_first \\ pop_assum (fn th => rewrite_tac [GSYM th]) \\
 
@@ -33,14 +37,14 @@ val init_R_lift = Q.store_thm("init_R_lift",
 
 val after_R_lift = Q.store_thm("after_R_lift",
  `!env (hol_s:state_circuit) (s:ag32_state) fext fextv n.
-   relM_fextv fextv fext /\ relM hol_s env /\ hol_s.R = s.R /\ exit_code_0 env (fextv n) ==>
+   lift_fext fextv fext /\ relM hol_s env /\ hol_s.R = s.R /\ exit_code_0 env (fextv n) ==>
    s.R 1w = 0w`,
  rw [exit_code_0_def] \\
  assume_tac (hol2hardware_exp ``s:state_circuit`` ``(s:state_circuit).R 1w`` |> GEN_ALL) \\
  fs [Eval_def] \\
 
  drule_strip relM_relS \\
- fs [relM_fextv_fext_relS_fextv_fext] \\
+ fs [lift_fext_relS_fextv_fext] \\
  last_x_assum (qspec_then `n` assume_tac) \\
  first_x_assum (qspecl_then [`hol_s`, `fext n`, `env`, `fextv n`, `<| vars := env |>`] mp_tac) \\
 
@@ -48,38 +52,34 @@ val after_R_lift = Q.store_thm("after_R_lift",
  strip_tac \\ fs [WORD_def] \\ rveq \\ fs [w2ver_bij] \\ metis_tac []);
 
 val external_memory_configured_def = Define`
-  external_memory_configured start contents size vstep fextv fext ⇔
-    relM_fextv fextv fext ∧
-    is_mem fext_accessor_verilog vstep fext ∧
-    is_interrupt_interface fext_accessor_verilog vstep fext ∧
-    is_mem_start_interface fext start ∧
-    mem_no_errors fext ∧
-    INIT_fext (fext 0) contents ∧
-    byte_aligned start ∧
-    w2n start + size < dimword (:32)`;
+ external_memory_configured fext start contents ⇔
+  fext.mem = contents start ∧
+  byte_aligned start ∧
+  w2n start + memory_size < dimword (:32)`;
 
-val good_initial_state_def = Define`
-  good_initial_state init ⇔
-   vars_has_type init (relMtypes ⧺ ag32types) ∧
-   INIT_verilog init`;
+val ag32_verilog_types_def = Define `
+ ag32_verilog_types = relMtypes ++ ag32types`;
 
 val hello_verilog = Q.store_thm("hello_verilog",
  `!vstep fext fextv init mem_start.
-   good_initial_state init ∧
-   vstep = mrun fextv computer init ∧
-   external_memory_configured
-     mem_start (hello_init_memory mem_start) memory_size vstep fextv fext
+   vars_has_type init ag32_verilog_types ∧
+   INIT_verilog (fext 0) init ∧
 
+   vstep = mrun fextv computer init ∧
+
+   is_lab_env fext_accessor_verilog vstep fext mem_start ∧
+   external_memory_configured (fext 0) mem_start hello_init_memory ∧
+   lift_fext fextv fext
    ==>
    ?k fin.
     vstep k = INR fin /\
     let
      outs = MAP (\mem. get_print_string (mem_start, mem)) (fext k).io_events
     in
-     (mget_var fin "PC") = INR (w2ver (halt_addr mem_start)) ∧
+     ag32_is_halted fin mem_start ∧
      outs ≼ hello_outputs ∧
      (exit_code_0 fin (fextv k) ==> outs = hello_outputs)`,
- rewrite_tac[external_memory_configured_def, good_initial_state_def] \\
+ rewrite_tac[external_memory_configured_def,ag32_verilog_types_def] \\
  rpt strip_tac \\
  drule_strip (vars_has_type_append |> SPEC_ALL |> EQ_IMP_RULE |> fst |> SPEC_ALL) \\
 
@@ -94,7 +94,7 @@ val hello_verilog = Q.store_thm("hello_verilog",
  disch_then (qspec_then `s'` mp_tac) \\
  impl_tac >-
  (qunabbrev_tac `s'` \\
-  rw [ag32_targetTheory.is_ag32_init_state_def, ag32Theory.print_string_max_length_def] \\
+  fs [INIT_verilog_def, ag32_targetTheory.is_ag32_init_state_def, ag32Theory.print_string_max_length_def] \\
   match_mp_tac EQ_EXT \\
   rw [ag32_targetTheory.ag32_init_regs_def, combinTheory.UPDATE_APPLY] \\
   drule_strip init_R_lift \\ fs [] \\ metis_tac [combinTheory.UPDATE_APPLY]) \\
@@ -107,7 +107,7 @@ val hello_verilog = Q.store_thm("hello_verilog",
  pop_assum(qspec_then`k1`strip_assume_tac) \\
  asm_exists_tac \\ fs [REL_def, hello_machine_config_def] \\ conj_tac
 
- >- fs [relM_def, relM_var_def, WORD_def, halt_addr_def]
+ >- fs [ag32_is_halted_def, relM_def, relM_var_def, WORD_def, halt_addr_def]
 
  \\ strip_tac \\ drule_strip after_R_lift \\ drule_first);
 

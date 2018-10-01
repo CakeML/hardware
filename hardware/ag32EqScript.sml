@@ -28,9 +28,6 @@ val is_mem_data_write = rw_mem 4
 val is_mem_data_flush = rw_mem 5
 end
 
-val mem_no_errors_def = Define `
- mem_no_errors fext = !n. (fext n).error = 0w`;
-
 (** Correspondence relation **)
 
 val REL_def = Define `
@@ -68,7 +65,7 @@ val INIT_R_def = Define `
   !i. i <> 0w ==> t.R i = s.R i`;
 
 (* Similar to REL, but for initial state *)
-val INIT_def = Define `
+val INIT_def = Define ` (* <-- INIT replaced by INIT_REL *)
  INIT fext (t:state_circuit) (s:ag32_state) <=>
   (* Memory state *)
   (fext.mem = s.MEM) /\
@@ -1024,10 +1021,7 @@ val circuit_0 = Q.store_thm("circuit_0",
 val circuit_0_next = Q.store_thm("circuit_0_next",
  `!init fext facc c mem_start.
    c = circuit facc init fext /\
-   is_mem fext_accessor_circuit c fext /\
-   is_mem_start_interface fext mem_start /\
-   is_interrupt_interface fext_accessor_circuit c fext /\
-   mem_no_errors fext /\
+   is_lab_env fext_accessor_circuit c fext mem_start /\
 
    (c 0).state = 3w /\
    (c 0).command = 0w /\
@@ -1046,7 +1040,7 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
        (fext m).interrupt_state = InterruptReady /\
        (fext m).io_events = (fext 0).io_events /\
        ~(fext m).interrupt_ack`,
- rewrite_tac [is_mem_start_interface_def] \\ rpt strip_tac \\ rveq \\
+ rewrite_tac [is_lab_env_def, is_mem_start_interface_def] \\ rpt strip_tac \\ rveq \\
  drule_strip circuit_mem_start_ready_wait \\
  qpat_x_assum `cpu_eq _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
  fs [circuit_0] \\
@@ -1323,7 +1317,7 @@ val INIT_circuit = Q.store_thm("INIT_circuit",
    INIT_ISA s mem_start ==>
    ?m. REL (fext m) (c m) (FUNPOW Next 0 s)`,
  simp [INIT_def, INIT_ISA_def] \\ rpt strip_tac \\
- drule_strip (SIMP_RULE (srw_ss()) [] circuit_0_next) \\
+ drule_strip (SIMP_RULE (srw_ss()) [is_lab_env_def] circuit_0_next) \\
  impl_tac >- simp [circuit_def] \\ strip_tac \\ fs [circuit_0, cpu_eq_def] \\
 
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
@@ -1339,13 +1333,11 @@ val INIT_REL_circuit_lem = Q.prove(
    INIT (fext 0) init s /\
    INIT_ISA s mem_start /\
 
-   is_mem fext_accessor_circuit c fext /\
-   is_interrupt_interface fext_accessor_circuit c fext /\
-   is_mem_start_interface fext mem_start /\
-   mem_no_errors fext /\
+   is_lab_env fext_accessor_circuit c fext mem_start /\
+
    is_acc accelerator_f c ==>
    ?m. REL (fext m) (c m) (FUNPOW Next n s)`,
- simp [] \\ rpt strip_tac \\
+ simp [is_lab_env_def] \\ rpt strip_tac \\
  drule_strip (SIMP_RULE (bool_ss) [] INIT_circuit) \\
  drule_strip (SIMP_RULE (srw_ss()) [] REL_circuit) \\
  pop_assum (qspec_then `n` strip_assume_tac) \\

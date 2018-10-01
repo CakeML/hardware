@@ -157,6 +157,9 @@ val is_mem_def = Define `
        (fext (SUC (n + m))).inst_rdata = word_at_addr (fext n).mem (align_addr (accessors.get_PC (step n))) /\
        (fext (SUC (n + m))).ready)`;
 
+val mem_no_errors_def = Define `
+ mem_no_errors fext = !n. (fext n).error = 0w`;
+
 (** Accelerator specification **)
 
 val is_acc_def = Define `
@@ -202,6 +205,14 @@ val is_interrupt_interface_def = Define `
          (fext (SUC n)).interrupt_state = InterruptReady /\
          (fext (SUC n)).io_events = (fext n).io_events /\
          ~(fext (SUC n)).interrupt_ack)`;
+
+(* Collection of all interfaces in the current "laboratory environment" *)
+val is_lab_env_def = Define `
+ is_lab_env accessors step fext mem_start <=>
+  is_mem accessors step fext /\
+  is_mem_start_interface fext mem_start /\
+  is_interrupt_interface accessors step fext /\
+  mem_no_errors fext`;
 
 (** Cpu implementation **)
 

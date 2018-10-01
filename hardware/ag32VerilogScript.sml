@@ -102,11 +102,11 @@ val computer_Next_relM = Q.store_thm("computer_next_relM",
 
   ps = [prog; prog_acc] /\
   (* Simulation step *)
-  relM (circuit addacc_next init fext n) vs /\ relM_fextv fextv fext
+  relM (circuit addacc_next init fext n) vs /\ lift_fext fextv fext
   ==>
   ?vs'. mstep_commit (fextv n) (MAP (intro_cvars cvars) ps) vs = INR vs' /\
         relM (circuit addacc_next init fext (SUC n)) vs'`,
- rewrite_tac [relM_fextv_fext_relS_fextv_fext] \\ rpt strip_tac \\ first_x_assum (qspec_then `n` assume_tac) \\
+ rewrite_tac [lift_fext_relS_fextv_fext] \\ rpt strip_tac \\ first_x_assum (qspec_then `n` assume_tac) \\
  qspecl_then [`cvars`, `fext n`, `ps`, `fextv n`, `vs`, `circuit addacc_next init fext n`, `\vs. vars_has_type vs ag32types`] mp_tac mstep_commit_lift_EvalSs \\ impl_tac
  >- (simp [] \\ rpt conj_tac
     >- (gen_tac \\ strip_tac \\ rveq \\
@@ -138,7 +138,7 @@ val computer_def = Define `
 
 val computer_Next_relM_run = Q.store_thm("computer_Next_relM_run",
  `!n fextv fext init vs.
-  vars_has_type vs ag32types /\ relM init vs /\ relM_fextv fextv fext
+  vars_has_type vs ag32types /\ relM init vs /\ lift_fext fextv fext
   ==>
   ?vs'. mrun fextv computer vs n = INR vs' /\
         relM (circuit addacc_next init fext n) vs'`,
@@ -151,8 +151,8 @@ val computer_Next_relM_run = Q.store_thm("computer_Next_relM_run",
 (** Lift INIT_REL_circuit to Verilog level **)
 
 (* Similar to REL, but for initial state *)
-val INIT_verilog_def = Define `
- INIT_verilog env <=>
+val INIT_verilog_vars_def = Define `
+ INIT_verilog_vars env <=>
   (* Machine implementation registers *)
   WORD (3w:word3) (THE (ALOOKUP env "state")) /\
   BOOL F (THE (ALOOKUP env "acc_arg_ready")) /\
@@ -164,12 +164,14 @@ val INIT_verilog_def = Define `
   WORD_ARRAY (\(i:word6). (0w:word32)) (THE (ALOOKUP env "R"))`;
 
 val INIT_fext_def = Define `
- INIT_fext fext mem <=>
+ INIT_fext fext <=>
  fext.io_events = [] /\
  fext.ready /\
  fext.interrupt_state = InterruptReady /\
- ~fext.interrupt_ack /\
- fext.mem = mem`;
+ ~fext.interrupt_ack`;
+
+val INIT_verilog_def = Define `
+ INIT_verilog fext env <=> INIT_verilog_vars env /\ INIT_fext fext`;
 
 val relM_backwards = Q.store_thm("relM_backwards",
  `!vs. vars_has_type vs relMtypes ==> ?hol_s. relM hol_s vs`,
@@ -198,13 +200,13 @@ val align_align_2_4_add_0 = align_align_2_4_add |> Q.SPEC `0w` |> SIMP_RULE (srw
 
 val INIT_backwards = Q.store_thm("INIT_backwards",
  `!t fext env mem mem_start.
-   relM t env /\ INIT_verilog env /\ INIT_fext fext mem ==>
+   relM t env /\ INIT_verilog fext env /\ fext.mem = mem ==>
    ?s.
     INIT fext t (s with <| PC := mem_start + 64w;
                            R := (0w =+ mem_start) s.R;
                            MEM := mem;
                            io_events := [] |>)`,
- rw [relM_def, INIT_def, INIT_verilog_def, INIT_fext_def] \\
+ rw [relM_def, INIT_def, INIT_verilog_def, INIT_verilog_vars_def, INIT_fext_def] \\
 
  qexists_tac `<| R := t.R; CarryFlag := t.CarryFlag; OverflowFlag := t.OverflowFlag;
                  data_in := t.data_in; data_out := t.data_out |>` \\
@@ -225,7 +227,7 @@ val fext_accessor_verilog_def = Define `
 (* To cong thm here also? *)
 val is_interrupt_interface_verilog = Q.store_thm("is_interrupt_interface_verilog",
  `!vs init fext fextv.
-   vars_has_type vs ag32types /\ relM init vs /\ relM_fextv fextv fext /\
+   vars_has_type vs ag32types /\ relM init vs /\ lift_fext fextv fext /\
    is_interrupt_interface fext_accessor_verilog (mrun fextv computer vs) fext ==>
    is_interrupt_interface fext_accessor_circuit (circuit addacc_next init fext) fext`,
  simp [is_interrupt_interface_def, fext_accessor_circuit_def, fext_accessor_verilog_def] \\ rpt strip_tac \\
@@ -253,7 +255,7 @@ val is_mem_cong' = is_mem_cong
 
 val is_mem_verilog = Q.store_thm("is_mem_verilog",
  `!vs init fext fextv.
-   vars_has_type vs ag32types /\ relM init vs /\ relM_fextv fextv fext /\
+   vars_has_type vs ag32types /\ relM init vs /\ lift_fext fextv fext /\
    is_mem fext_accessor_verilog (mrun fextv computer vs) fext ==>
    is_mem fext_accessor_circuit (circuit addacc_next init fext) fext`,
  rpt strip_tac \\ pop_assum (fn th => match_mp_tac (MATCH_MP is_mem_cong' th)) \\ gen_tac \\
@@ -266,20 +268,24 @@ val is_mem_verilog = Q.store_thm("is_mem_verilog",
 
  fs [relM_def, relM_var_def, mget_var_ALOOKUP, WORD_def, ver2w_w2ver]);
 
+val is_lab_env_verilog_circuit = Q.store_thm("is_lab_env_verilog_circuit",
+ `!fext fextv vs init mem_start.
+   vars_has_type vs ag32types /\
+   relM init vs /\
+   lift_fext fextv fext /\
+   is_lab_env fext_accessor_verilog (mrun fextv computer vs) fext mem_start ==>
+   is_lab_env fext_accessor_circuit (circuit addacc_next init fext) fext mem_start`,
+ rw [is_lab_env_def] \\ metis_tac [is_interrupt_interface_verilog, is_mem_verilog]);
+
 val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
-  `!n init initmem mem_start fext fextv vstep s hol_s.
+  `!n init mem_start fext fextv vstep s hol_s.
    vstep = mrun fextv computer init /\
 
-   relM_fextv fextv fext /\
-   is_mem fext_accessor_verilog vstep fext /\
-   is_interrupt_interface fext_accessor_verilog vstep fext /\
-   is_mem_start_interface fext mem_start /\
-
-   mem_no_errors fext /\
+   lift_fext fextv fext /\
+   is_lab_env fext_accessor_verilog vstep fext mem_start /\
 
    vars_has_type init (relMtypes ++ ag32types) /\
-   INIT_verilog init /\
-   INIT_fext (fext 0) initmem /\
+   INIT_verilog (fext 0) init /\
 
    relM hol_s init /\
    INIT (fext 0) hol_s s /\
@@ -290,11 +296,10 @@ val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
     relM hol_s' vs' /\
     REL (fext m) hol_s' (FUNPOW Next n s)`,
  (* todo: append not needed here? *)
- simp [vars_has_type_append] \\ rpt strip_tac \\
+ simp [INIT_verilog_def, vars_has_type_append] \\ rpt strip_tac \\
 
- drule_strip is_interrupt_interface_verilog \\
+ drule_strip is_lab_env_verilog_circuit \\
  qspecl_then [`hol_s`, `fext`] assume_tac is_acc_addacc \\
- drule_strip is_mem_verilog \\
 
  drule_strip (SIMP_RULE (srw_ss()) [] INIT_REL_circuit) \\ simp [combinTheory.UPDATE_APPLY] \\
  pop_assum (qspec_then `n` strip_assume_tac) \\
