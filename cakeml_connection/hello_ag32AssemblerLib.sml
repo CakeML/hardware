@@ -3,7 +3,7 @@ struct
 
 open hardwarePreamble;
 
-open (*hello_ag32CompileTheory*) hello_ag32ProofTheory;
+open hello_ag32ProofTheory;
 
 (**
 Extract machine code words from hello_init_memory_words_def
@@ -78,10 +78,14 @@ val words_of_bytes_rw = Q.prove(
 
 val word_of_bytes_rw = Q.prove(
   `word_of_bytes F 0w [b1;b2;b3;b4] =
-    (w2w b1 || w2w b2 << 8 || w2w b3 << 16 || w2w b4 << 24):word32`,
+    (16777216w*w2w b4 + 65536w*w2w b3 + 256w*w2w b2 + w2w b1):word32`,
   fs [data_to_word_memoryProofTheory.word_of_bytes_def,LET_THM,
       wordSemTheory.set_byte_def,wordSemTheory.byte_index_def,wordSemTheory.word_slice_alt_def]
   \\ blastLib.BBLAST_TAC);
+
+val word_add_n2w_4 = Q.prove(
+ `n2w w1 + n2w w2 + n2w w3 + n2w w4 = n2w (w1 + w2 + w3 + w4)`,
+ rw [word_add_n2w]);
 
 local
 val all_8bits_ints = Math.pow (2.0, 8.0) |> trunc |> flip (curry List.tabulate) I;
@@ -89,33 +93,55 @@ val all_8bits_ints = Math.pow (2.0, 8.0) |> trunc |> flip (curry List.tabulate) 
 val ty8 = fcpSyntax.mk_int_numeric_type 8
 val ty32 = fcpSyntax.mk_int_numeric_type 32
 
-val shift_base =
+val w2w_all =
  all_8bits_ints
  |> map numSyntax.term_of_int
  |> map (fn n => wordsSyntax.mk_n2w (n, ty8))
  |> map (fn n => wordsSyntax.mk_w2w (n, ty32))
 
-val shift0 =
- shift_base
+val mult_base =
+ w2w_all
  |> map EVAL
 
-val shifts = map term_of_int [8, 16, 24]
-
-val shift_others =
- shift_base
- |> map (fn n => (map (fn shift => wordsSyntax.mk_word_lsl (n, shift)) shifts))
+val mults =
+ [16777216, 65536, 256]
+ |> map numSyntax.term_of_int
+ |> map (fn n => wordsSyntax.mk_n2w (n, ty32));
+in
+val mult_all =
+ w2w_all
+ |> map (fn n => (map (fn mult => wordsSyntax.mk_word_mul (mult, n)) mults))
  |> flatten
  |> map EVAL
-in
-val shifts_all = shift0 @ shift_others |> LIST_CONJ
+ |> (fn xs => mult_base @ xs)
+ |> LIST_CONJ
 end;
 
 (* max_print_depth := 50 *)
 
+(*
+Testing:
+
+val foo =
+``(words_of_bytes F (TAKE 40000 code)):word32 list``
+|> RAND_CONV EVAL
+|> concl |> rhs;
+
+val clock = start_time ();
+foo
+|> REWRITE_CONV [words_of_bytes_rw, word_of_bytes_rw, mult_all, word_add_n2w_4]
+|> concl |> rhs
+|> EVAL;
+end_time clock;
+*)
+
+(* val clock = start_time (); *)
 val words_of_bytes_code_eval =
  ``(words_of_bytes F code):word32 list``
- |> (REWRITE_CONV [hello_ag32CompileTheory.code_def,words_of_bytes_rw,word_of_bytes_rw,shifts_all]
+ |> (REWRITE_CONV [hello_ag32CompileTheory.code_def,
+                   words_of_bytes_rw,word_of_bytes_rw,mult_all,word_add_n2w_4]
      THENC EVAL);
+(* end_time clock; *)
 
 val high_mem_words =
  high_mem
