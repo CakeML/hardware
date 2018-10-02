@@ -1327,17 +1327,17 @@ val INIT_circuit = Q.store_thm("INIT_circuit",
  qexists_tac `m' + m` \\ fs [cpu_eq_def, REL_def, INIT_R_def] \\
  match_mp_tac EQ_EXT \\ gen_tac \\ Cases_on `x = 0w` \\ simp [UPDATE_def]);
 
-val INIT_REL_circuit_lem = Q.prove(
- `!n c s facc init fext mem_start.
-   c = circuit facc init fext /\
-
+val INIT_REL_circuit_lem = Q.store_thm("INIT_REL_circuit_lem",
+ `!n cstep s facc init fext mem_start.
    INIT (fext 0) init s /\
    INIT_ISA s mem_start /\
 
-   is_lab_env fext_accessor_circuit c fext mem_start /\
+   cstep = circuit facc init fext /\
 
-   is_acc accelerator_f c ==>
-   ?m. REL (fext m) (c m) (FUNPOW Next n s)`,
+   is_lab_env fext_accessor_circuit cstep fext mem_start /\
+
+   is_acc accelerator_f cstep ==>
+   ?m. REL (fext m) (cstep m) (FUNPOW Next n s)`,
  simp [is_lab_env_def] \\ rpt strip_tac \\
  drule_strip (SIMP_RULE (bool_ss) [] INIT_circuit) \\
  drule_strip (SIMP_RULE (srw_ss()) [] REL_circuit) \\
