@@ -114,7 +114,10 @@ val word_at_addr_def = Define `
  word_at_addr (mem : word32 -> word8) addr =
   (mem (addr + 3w) @@ (mem (addr + 2w) @@ (mem (addr + 1w) @@ mem addr):word16):word24):word32`;
 
-(* TODO: Should maybe add that errors are not allowed to occur, i.e. non-error implies this ... *)
+val mem_no_errors_def = Define `
+ mem_no_errors fext = !n. (fext n).error = 0w`;
+
+(* TODO: Should just handle errors in the same way as other interfaces *)
 (* TODO: Would make more sense to have alignment preconds, rather than doing alignment "automatically" *)
 val is_mem_def = Define `
  is_mem accessors step fext =
@@ -155,10 +158,9 @@ val is_mem_def = Define `
    ?m. (!p. p < m ==> (fext (SUC (n + p))).mem = (fext n).mem /\ ~(fext (SUC (n + p))).ready) /\
        (fext (SUC (n + m))).mem = (fext n).mem /\
        (fext (SUC (n + m))).inst_rdata = word_at_addr (fext n).mem (align_addr (accessors.get_PC (step n))) /\
-       (fext (SUC (n + m))).ready)`;
+       (fext (SUC (n + m))).ready) /\
 
-val mem_no_errors_def = Define `
- mem_no_errors fext = !n. (fext n).error = 0w`;
+  mem_no_errors fext`;
 
 (** Accelerator specification **)
 
@@ -211,8 +213,7 @@ val is_lab_env_def = Define `
  is_lab_env accessors step fext mem_start <=>
   is_mem accessors step fext /\
   is_mem_start_interface fext mem_start /\
-  is_interrupt_interface accessors step fext /\
-  mem_no_errors fext`;
+  is_interrupt_interface accessors step fext`;
 
 (** Cpu implementation **)
 

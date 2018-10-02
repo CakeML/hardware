@@ -26,6 +26,8 @@ val is_mem_inst_read = rw_mem 2
 val is_mem_data_read = rw_mem 3
 val is_mem_data_write = rw_mem 4
 val is_mem_data_flush = rw_mem 5
+(* special: *)
+val is_mem_def_mem_no_errors = el 6 o CONJUNCTS o SPEC_ALL o PURE_REWRITE_RULE [is_mem_def]
 end
 
 (** Correspondence relation **)
@@ -312,7 +314,6 @@ val circuit_acc_wait_help = Q.store_thm("circuit_acc_wait_help",
  `!l k n facc init fext.
    is_mem fext_accessor_circuit (circuit facc init fext) fext /\
    is_interrupt_interface fext_accessor_circuit (circuit facc init fext) fext /\
-   mem_no_errors fext /\
 
    (circuit facc init fext n).state = 2w /\
    (circuit facc init fext n).acc_arg_ready /\
@@ -337,7 +338,9 @@ val circuit_acc_wait_help = Q.store_thm("circuit_acc_wait_help",
                    (fext (SUC (n + m))).interrupt_state = InterruptReady /\
                    ~(fext (SUC (n + m))).interrupt_ack)`,
  (* TODO: This is a mess... but works for now *)
- rpt gen_tac \\ strip_tac \\ Induct_on `l`
+ rpt gen_tac \\ strip_tac \\
+ last_assum (assume_tac o is_mem_def_mem_no_errors) \\
+ Induct_on `l`
  >- (drule_strip no_interrupt_req \\
      simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
      last_x_assum (assume_tac o is_mem_do_nothing `n`) \\
@@ -359,7 +362,6 @@ val circuit_acc_wait = Q.store_thm("circuit_acc_wait",
  `!k n facc init fext.
    is_mem fext_accessor_circuit (circuit facc init fext) fext /\
    is_interrupt_interface fext_accessor_circuit (circuit facc init fext) fext /\
-   mem_no_errors fext /\
 
    (circuit facc init fext n).state = 2w /\
    (circuit facc init fext n).acc_arg_ready /\
@@ -382,7 +384,7 @@ val circuit_acc_wait = Q.store_thm("circuit_acc_wait",
                   (fext (SUC (n + m))).interrupt_state = InterruptReady /\
                   ~(fext (SUC (n + m))).interrupt_ack`,
  (* TODO: As the above proof, this is also a mess. *)
- rpt strip_tac' \\ Cases_on `m`
+ rpt strip_tac' \\ last_assum (assume_tac o is_mem_def_mem_no_errors) \\ Cases_on `m`
  >- (* duplication: *)
  (drule_strip no_interrupt_req \\
  simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
@@ -400,7 +402,6 @@ val circuit_acc_wait = Q.store_thm("circuit_acc_wait",
 val circuit_interrupt_wait = Q.store_thm("circuit_interrupt_wait",
  `!m n facc init fext.
    is_mem fext_accessor_circuit (circuit facc init fext) fext /\
-   mem_no_errors fext /\
 
    (circuit facc init fext n).state = 4w /\
    (circuit facc init fext n).command = 0w /\
@@ -414,7 +415,7 @@ val circuit_interrupt_wait = Q.store_thm("circuit_interrupt_wait",
           (circuit facc init fext n) /\
    (fext (SUC (n + m))).ready /\
    (fext (SUC (n + m))).mem = (fext n).mem`,
- Induct \\ rpt strip_tac' >-
+ Induct \\ rpt strip_tac' \\ last_assum (assume_tac o is_mem_def_mem_no_errors) >-
  (last_x_assum (assume_tac o is_mem_do_nothing `n`) \\ simp [] \\ pop_assum kall_tac \\
  simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
  simp [cpu_Next_4w_def, cpu_eq_def]) \\
@@ -430,7 +431,6 @@ val circuit_mem_start_ready_wait = Q.store_thm("circuit_mem_start_ready_wait",
  `!m facc init fext.
    is_mem fext_accessor_circuit (circuit facc init fext) fext /\
    is_interrupt_interface fext_accessor_circuit (circuit facc init fext) fext /\
-   mem_no_errors fext /\
 
    (circuit facc init fext 0).state = 3w /\
    (circuit facc init fext 0).command = 0w /\
@@ -449,7 +449,8 @@ val circuit_mem_start_ready_wait = Q.store_thm("circuit_mem_start_ready_wait",
    (fext m).io_events = (fext 0).io_events /\
    (fext m).interrupt_state = InterruptReady /\
    ~(fext m).interrupt_ack`,
- Induct \\ rpt strip_tac' >- simp [cpu_eq_def] \\
+ Induct \\ rpt strip_tac' \\
+ last_assum (assume_tac o is_mem_def_mem_no_errors) >- simp [cpu_eq_def] \\
  drule_last \\ impl_tac >- simp [] \\
  disch_then (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
  last_x_assum (mp_tac o is_mem_do_nothing `m`) \\ simp [] \\ disch_then kall_tac \\
@@ -500,8 +501,7 @@ val circuit_next = Q.store_thm("circuit_next",
    c = circuit facc init fext /\
    is_mem fext_accessor_circuit c fext /\
    is_acc f c /\
-   is_interrupt_interface fext_accessor_circuit c fext /\
-   mem_no_errors fext ==>
+   is_interrupt_interface fext_accessor_circuit c fext ==>
    !n. case (c n).state of
          0w =>
            !s.
@@ -706,7 +706,9 @@ val circuit_next = Q.store_thm("circuit_next",
                     (fext (n + m)).io_events = (fext n).io_events ++ [(fext n).mem] /\
                     ~(fext (n + m)).interrupt_ack
        | _ => T`,
- rpt strip_tac \\ rveq \\ TOP_CASE_TAC \\ simp [] \\
+ rpt strip_tac \\
+ last_assum (assume_tac o is_mem_def_mem_no_errors) \\
+ rveq \\ TOP_CASE_TAC \\ simp [] \\
 
  IF_CASES_TAC >-
 
@@ -1048,7 +1050,9 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
  qexists_tac `SUC n` \\
  last_assum (mp_tac o is_mem_do_nothing `n`) \\ simp [] \\ disch_then kall_tac \\
 
- rfs [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\ drule_strip no_interrupt_req \\
+ rfs [circuit_def, cpu_Next_def] \\
+ last_assum (assume_tac o is_mem_def_mem_no_errors) \\
+ no_mem_error_tac \\ drule_strip no_interrupt_req \\
  simp [cpu_Next_3w_def, cpu_eq_def]);
 
 val addr_add = Q.prove(
@@ -1074,7 +1078,6 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
    is_mem fext_accessor_circuit c fext /\
    is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
-   mem_no_errors fext /\
    REL (fext n) (c n) s ==>
    ?m. m <> 0 /\ REL (fext (n + m)) (c (n + m)) (Next s)`,
  rpt strip_tac \\
@@ -1292,7 +1295,6 @@ val REL_circuit = Q.store_thm("REL_circuit",
    is_mem fext_accessor_circuit c fext /\
    is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
-   mem_no_errors fext /\
    REL (fext ni) (c ni) (FUNPOW Next n s) ==>
    ?mi. (mi = 0 <=> m = 0) /\ REL (fext (ni + mi)) (c (ni + mi)) (FUNPOW Next (n + m) s)`,
  simp [] \\ Induct \\ rpt strip_tac
@@ -1311,7 +1313,6 @@ val INIT_circuit = Q.store_thm("INIT_circuit",
    is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
    is_mem_start_interface fext mem_start /\
-   mem_no_errors fext /\
 
    INIT (fext 0) init s /\
    INIT_ISA s mem_start ==>
