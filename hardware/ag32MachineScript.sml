@@ -410,7 +410,7 @@ val cpu_Next_3w_def = Define `
    s with <| state := 1w;
              command := 1w;
              mem_start := fext.mem_start_input;
-             PC := fext.mem_start_input + 64w |>
+             PC := fext.mem_start_input |>
   else
    s`;
 

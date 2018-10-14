@@ -202,7 +202,7 @@ val INIT_backwards = Q.store_thm("INIT_backwards",
  `!t fext env mem mem_start.
    relM t env /\ INIT_verilog fext env /\ fext.mem = mem ==>
    ?s.
-    INIT fext t (s with <| PC := mem_start + 64w;
+    INIT fext t (s with <| PC := mem_start;
                            R := (0w =+ mem_start) s.R;
                            MEM := mem;
                            io_events := [] |>)`,

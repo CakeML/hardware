@@ -96,7 +96,7 @@ val INIT_def = Define ` (* <-- INIT replaced by INIT_REL *)
 
 val INIT_ISA_def = Define `
  INIT_ISA (s:ag32_state) mem_start <=>
-  s.PC = mem_start + 64w /\
+  s.PC = mem_start /\
   s.R 0w = mem_start`;
 
 (* Variant of state_circuit_component_equality with only cpu-relevant fields *)
@@ -1036,7 +1036,7 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
                            state := 1w;
                            R := (0w =+ mem_start) (c 0).R;
                            mem_start := mem_start;
-                           PC := mem_start + 64w |>) /\
+                           PC := mem_start |>) /\
        (fext m).ready /\
        (fext m).mem = (fext 0).mem /\
        (fext m).interrupt_state = InterruptReady /\
