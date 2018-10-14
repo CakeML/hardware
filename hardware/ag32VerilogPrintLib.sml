@@ -54,7 +54,7 @@ local
       end else
       raise UnableToTranslate (spec, "Unknown case")
 in
-val init_assoc = map spec_to_init (INIT_verilog_def |> SPEC_ALL |> concl |> rhs |> strip_conj)
+val init_assoc = map spec_to_init (INIT_verilog_vars_def |> SPEC_ALL |> concl |> rhs |> strip_conj)
 end;
 
 fun print_interface_var (var, ty) = let
