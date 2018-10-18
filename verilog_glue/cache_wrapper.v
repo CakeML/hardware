@@ -112,7 +112,10 @@ cache_none cache(
     .inst_rdata(inst_rdata),
     
     .error(error),
-    
+
+    .mem_start_valid(mem_start_valid),
+    .mem_start_input(mem_start_input),
+
     .mem_d_awvalid(mem_d_awvalid),
     .mem_d_awready(mem_d_awready),
     .mem_d_awaddr(mem_d_awaddr),
