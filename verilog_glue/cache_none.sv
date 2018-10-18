@@ -30,7 +30,13 @@ module cache_none(
     
     // error reporting, 00 = no error, 01 = AXI error, 10 = internal cache error
     output[1:0] error,
-    
+
+    //
+    // Mem start interface
+    //
+    input wire mem_start_valid,
+    input wire[31:0] mem_start_input,
+
     //
     // AXI memory (data port)
     //
@@ -98,6 +104,8 @@ module cache_none(
     output reg mem_i_rready = 1
     );
 
+logic[31:0]  mem_start = 0;
+
 typedef enum { INIT, WAITING, ERROR_CACHE, ERROR_AXI } statet;
 statet state = INIT;
 
@@ -120,6 +128,20 @@ endfunction
 
 assign error = error_func(state);
 
+// mem_start handling
+always_ff @ (posedge clk) begin
+   if (mem_start_valid) begin
+      mem_start <= mem_start_input;
+   end
+end
+
+// "Address translation module"
+logic[31:0] data_addr_trans;
+assign data_addr_trans = data_addr + mem_start;
+logic[31:0] inst_addr_trans;
+assign inst_addr_trans = inst_addr + mem_start;
+
+// "actual" cache
 always_ff @ (posedge clk) begin
     case (state)
     INIT: begin
@@ -128,7 +150,7 @@ always_ff @ (posedge clk) begin
             state <= WAITING;
             
             mem_i_arvalid <= 1;
-            mem_i_araddr <= inst_addr;
+            mem_i_araddr <= inst_addr_trans;
             
             inst_cycle_ready = 0;
         end
@@ -136,12 +158,12 @@ always_ff @ (posedge clk) begin
         // Data read
         if (command == 2) begin
             // Simplify implementation
-            if (inst_addr == data_addr) begin
+            if (inst_addr_trans == data_addr_trans) begin
                 state <= ERROR_CACHE;
                 mem_i_arvalid <= 0;
             end else begin
                 mem_d_arvalid <= 1;
-                mem_d_araddr <= data_addr;
+                mem_d_araddr <= data_addr_trans;
                 
                 data_cycle_ready = 0;
             end
@@ -150,12 +172,12 @@ always_ff @ (posedge clk) begin
         // Data write
         if (command == 3) begin
             // Simplify implementation
-            if (inst_addr == data_addr) begin
+            if (inst_addr_trans == data_addr_trans) begin
                 state <= ERROR_CACHE;
                 mem_i_arvalid <= 0;
             end else begin
                 mem_d_awvalid <= 1;
-                mem_d_awaddr <= data_addr;
+                mem_d_awaddr <= data_addr_trans;
             
                 mem_d_wvalid <= 1;
                 mem_d_wdata <= data_wdata;
@@ -226,4 +248,3 @@ always_ff @ (posedge clk) begin
 end
 
 endmodule
-

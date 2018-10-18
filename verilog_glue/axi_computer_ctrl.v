@@ -44,8 +44,9 @@ localparam [31:0] REG_MEM_START_ADDR = BASE_ADDR;
 localparam [31:0] REG_INTERRUPT_ACK_ADDR = BASE_ADDR + 4;
 
 always @ (posedge clk) begin
-    // Always reset interrupt
+    // Always reset interrupt and mem_start_ready
     interrupt_ack <= 0;
+    mem_start_ready <= 0;
 
     // Stage 1
     if (awvalid && awready) begin

@@ -20,7 +20,14 @@ module cache_wrapper #(
     output[31:0] inst_rdata,
     
     output[1:0] error,
-    
+
+    //
+    // Mem start interface
+    //
+
+    input mem_start_valid,
+    input[31:0] mem_start_input,
+
     //
     // AXI memory (data port)
     //
