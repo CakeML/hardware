@@ -154,6 +154,7 @@ val computer_Next_relM_run = Q.store_thm("computer_Next_relM_run",
 val INIT_verilog_vars_def = Define `
  INIT_verilog_vars env <=>
   (* Machine implementation registers *)
+  WORD (0w:word32) (THE (ALOOKUP env "PC")) /\
   WORD (3w:word3) (THE (ALOOKUP env "state")) /\
   BOOL F (THE (ALOOKUP env "acc_arg_ready")) /\
   WORD (0w:word3) (THE (ALOOKUP env "command")) /\
@@ -199,18 +200,15 @@ val align_align_2_4_add = Q.prove(
 val align_align_2_4_add_0 = align_align_2_4_add |> Q.SPEC `0w` |> SIMP_RULE (srw_ss()) [];
 
 val INIT_backwards = Q.store_thm("INIT_backwards",
- `!t fext env mem mem_start.
+ `!t fext env mem.
    relM t env /\ INIT_verilog fext env /\ fext.mem = mem ==>
    ?s.
-    INIT fext t (s with <| PC := mem_start;
-                           R := (0w =+ mem_start) s.R;
-                           MEM := mem;
+    INIT fext t (s with <| MEM := mem;
                            io_events := [] |>)`,
  rw [relM_def, INIT_def, INIT_verilog_def, INIT_verilog_vars_def, INIT_fext_def] \\
 
- qexists_tac `<| R := t.R; CarryFlag := t.CarryFlag; OverflowFlag := t.OverflowFlag;
+ qexists_tac `<| PC := t.PC; R := t.R; CarryFlag := t.CarryFlag; OverflowFlag := t.OverflowFlag;
                  data_in := t.data_in; data_out := t.data_out |>` \\
- simp [INIT_R_def, combinTheory.UPDATE_APPLY] \\
 
  rfs [relM_var_def, WORD_def, BOOL_def, mget_var_ALOOKUP, w2ver_bij]);
 
@@ -269,27 +267,26 @@ val is_mem_verilog = Q.store_thm("is_mem_verilog",
  fs [relM_def, relM_var_def, mget_var_ALOOKUP, WORD_def, ver2w_w2ver]);
 
 val is_lab_env_verilog_circuit = Q.store_thm("is_lab_env_verilog_circuit",
- `!fext fextv vs init mem_start.
+ `!fext fextv vs init.
    vars_has_type vs ag32types /\
    relM init vs /\
    lift_fext fextv fext /\
-   is_lab_env fext_accessor_verilog (mrun fextv computer vs) fext mem_start ==>
-   is_lab_env fext_accessor_circuit (circuit addacc_next init fext) fext mem_start`,
+   is_lab_env fext_accessor_verilog (mrun fextv computer vs) fext ==>
+   is_lab_env fext_accessor_circuit (circuit addacc_next init fext) fext`,
  rw [is_lab_env_def] \\ metis_tac [is_interrupt_interface_verilog, is_mem_verilog]);
 
 val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
-  `!n init mem_start fext fextv vstep s hol_s.
+  `!n init fext fextv vstep s hol_s.
    vstep = mrun fextv computer init /\
 
    lift_fext fextv fext /\
-   is_lab_env fext_accessor_verilog vstep fext mem_start /\
+   is_lab_env fext_accessor_verilog vstep fext /\
 
    vars_has_type init (relMtypes ++ ag32types) /\
    INIT_verilog (fext 0) init /\
 
    relM hol_s init /\
-   INIT (fext 0) hol_s s /\
-   INIT_ISA s mem_start
+   INIT (fext 0) hol_s s
    ==>
    ?m vs' hol_s'.
     vstep m = INR vs' /\

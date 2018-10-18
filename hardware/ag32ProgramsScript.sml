@@ -142,8 +142,7 @@ end;
 (* To hex ... *)
 fun build_dump prg = let
   val prg = prg |> concl |> lhs
-  val dump = EVAL ``(GENLIST (K "0") (64 DIV 4)) ++
-                    MAP (word_to_hex_string o Encode) ^prg``
+  val dump = EVAL ``MAP (word_to_hex_string o Encode) ^prg``
              |> concl |> rhs
              |> dest_list |> fst |> map (fn tm => fromHOLstring tm ^ "\n")
              |> concat
@@ -170,7 +169,7 @@ end;
 
 (*
 
-val () = build_dump store_test_real_def;
+val () = build_dump plus_by_acc_def;
 
 *)
 

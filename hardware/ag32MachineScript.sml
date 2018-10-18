@@ -30,7 +30,6 @@ val _ = Datatype `
                 acc_arg : word32;
                 acc_arg_ready : bool;
 
-                mem_start : word32;
                 interrupt_req : bool;
                 do_interrupt : bool;
 
@@ -65,9 +64,8 @@ val _ = Datatype `
           data_rdata : word32;
           inst_rdata : word32;
 
-          (* Start of mem *)
+          (* Mem start interface used for indication on when to start *)
           mem_start_ready : bool;
-          mem_start_input : word32;
 
           (* Interrupt *)
           interrupt_state : interrupt_state;
@@ -179,8 +177,8 @@ val is_acc_def = Define `
 (** Start of mem interface **)
 
 val is_mem_start_interface_def = Define `
- is_mem_start_interface fext mem_start =
-  ?n. (!m. m < n ==> ~(fext m).mem_start_ready) /\ (fext n).mem_start_ready /\ (fext n).mem_start_input = mem_start`;
+ is_mem_start_interface fext =
+  ?n. (!m. m < n ==> ~(fext m).mem_start_ready) /\ (fext n).mem_start_ready`;
 
 (** Interrupt interface **)
 
@@ -210,9 +208,9 @@ val is_interrupt_interface_def = Define `
 
 (* Collection of all interfaces in the current "laboratory environment" *)
 val is_lab_env_def = Define `
- is_lab_env accessors step fext mem_start <=>
+ is_lab_env accessors step fext <=>
   is_mem accessors step fext /\
-  is_mem_start_interface fext mem_start /\
+  is_mem_start_interface fext /\
   is_interrupt_interface accessors step fext`;
 
 (** Cpu implementation **)
@@ -336,7 +334,7 @@ val execute_instruction_def = Define `
            with <|state := 1w; command := 1w|>
 
     (* Interrupt *)
-  | 12w => s with <|state := 1w; command := 4w; data_addr := s.mem_start; do_interrupt := T; PC := PC_next|>
+  | 12w => s with <|state := 1w; command := 4w; data_addr := 0w; do_interrupt := T; PC := PC_next|>
 
     (* LoadConstant, TODO: can reuse ALU here *)
   | 13w => (if word_bit 23 s.i then
@@ -404,13 +402,8 @@ val cpu_Next_2w_def = Define `
 val cpu_Next_3w_def = Define `
  cpu_Next_3w fext s =
   if fext.mem_start_ready then
-   (* Could maybe use ALU here rather than separate addition *)
-   (* R separated from rest for workaround for translator *)
-   let s = s with R := (0w =+ fext.mem_start_input) s.R in
    s with <| state := 1w;
-             command := 1w;
-             mem_start := fext.mem_start_input;
-             PC := fext.mem_start_input |>
+             command := 1w |>
   else
    s`;
 

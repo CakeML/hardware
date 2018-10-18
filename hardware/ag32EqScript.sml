@@ -62,10 +62,6 @@ val REL_def = Define `
   ~t.do_interrupt /\
   ~t.interrupt_req`;
 
-val INIT_R_def = Define `
- INIT_R (t:state_circuit) (s:ag32_state) =
-  !i. i <> 0w ==> t.R i = s.R i`;
-
 (* Similar to REL, but for initial state *)
 val INIT_def = Define ` (* <-- INIT replaced by INIT_REL *)
  INIT fext (t:state_circuit) (s:ag32_state) <=>
@@ -80,8 +76,9 @@ val INIT_def = Define ` (* <-- INIT replaced by INIT_REL *)
 
   (t.state = 3w) /\
 
-  (* Machine state, not including PC nor register zero *)
-  (INIT_R t s) /\
+  (* Machine state *)
+  (t.PC = s.PC) /\
+  (t.R = s.R) /\
   (t.CarryFlag = s.CarryFlag) /\
   (t.OverflowFlag = s.OverflowFlag) /\
   (t.data_in = s.data_in) /\
@@ -93,11 +90,6 @@ val INIT_def = Define ` (* <-- INIT replaced by INIT_REL *)
   (t.do_delay_write = 5w) /\
   ~t.do_interrupt /\
   ~t.interrupt_req`;
-
-val INIT_ISA_def = Define `
- INIT_ISA (s:ag32_state) mem_start <=>
-  s.PC = mem_start /\
-  s.R 0w = mem_start`;
 
 (* Variant of state_circuit_component_equality with only cpu-relevant fields *)
 val cpu_eq_def = Define `
@@ -116,7 +108,6 @@ val cpu_eq_def = Define `
   s1.data_in = s2.data_in ∧
   s1.acc_arg = s2.acc_arg ∧
   (s1.acc_arg_ready ⇔ s2.acc_arg_ready) ∧
-  s1.mem_start = s2.mem_start ∧
   (s1.interrupt_req ⇔ s2.interrupt_req) ∧
   (s1.do_interrupt ⇔ s2.do_interrupt) ∧
   s1.command = s2.command ∧
@@ -528,7 +519,7 @@ val circuit_next = Q.store_thm("circuit_next",
                                                state := 1w;
                                                command := 1w |>)
              | Interrupt =>
-               cpu_eq (c (n + 1)) (c n with <| data_addr := (c n).mem_start;
+               cpu_eq (c (n + 1)) (c n with <| data_addr := 0w;
                                                do_interrupt := T;
                                                PC := (c n).PC + 4w;
                                                state := 1w;
@@ -1021,9 +1012,9 @@ val circuit_0 = Q.store_thm("circuit_0",
  simp [circuit_def]);
 
 val circuit_0_next = Q.store_thm("circuit_0_next",
- `!init fext facc c mem_start.
+ `!init fext facc c.
    c = circuit facc init fext /\
-   is_lab_env fext_accessor_circuit c fext mem_start /\
+   is_lab_env fext_accessor_circuit c fext /\
 
    (c 0).state = 3w /\
    (c 0).command = 0w /\
@@ -1033,10 +1024,7 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
    ~(fext 0).interrupt_ack ==>
    ?m. cpu_eq (c m)
               (c 0 with <| command := 1w;
-                           state := 1w;
-                           R := (0w =+ mem_start) (c 0).R;
-                           mem_start := mem_start;
-                           PC := mem_start |>) /\
+                           state := 1w |>) /\
        (fext m).ready /\
        (fext m).mem = (fext 0).mem /\
        (fext m).interrupt_state = InterruptReady /\
@@ -1307,34 +1295,31 @@ val REL_circuit = Q.store_thm("REL_circuit",
 
 (* Strange FUNPOW in conclusion because that's the form we need in main thm *)
 val INIT_circuit = Q.store_thm("INIT_circuit",
- `!c s facc init fext mem_start.
+ `!c s facc init fext.
    c = circuit facc init fext /\
    is_mem fext_accessor_circuit c fext /\
    is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
-   is_mem_start_interface fext mem_start /\
+   is_mem_start_interface fext /\
 
-   INIT (fext 0) init s /\
-   INIT_ISA s mem_start ==>
+   INIT (fext 0) init s ==>
    ?m. REL (fext m) (c m) (FUNPOW Next 0 s)`,
- simp [INIT_def, INIT_ISA_def] \\ rpt strip_tac \\
+ simp [INIT_def] \\ rpt strip_tac \\
  drule_strip (SIMP_RULE (srw_ss()) [is_lab_env_def] circuit_0_next) \\
  impl_tac >- simp [circuit_def] \\ strip_tac \\ fs [circuit_0, cpu_eq_def] \\
 
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
  pop_assum (qspec_then `m` mp_tac) \\ fs [] \\ strip_tac \\
 
- qexists_tac `m' + m` \\ fs [cpu_eq_def, REL_def, INIT_R_def] \\
- match_mp_tac EQ_EXT \\ gen_tac \\ Cases_on `x = 0w` \\ simp [UPDATE_def]);
+ qexists_tac `m' + m` \\ fs [cpu_eq_def, REL_def]);
 
 val INIT_REL_circuit_lem = Q.store_thm("INIT_REL_circuit_lem",
- `!n cstep s facc init fext mem_start.
+ `!n cstep s facc init fext.
    INIT (fext 0) init s /\
-   INIT_ISA s mem_start /\
 
    cstep = circuit facc init fext /\
 
-   is_lab_env fext_accessor_circuit cstep fext mem_start /\
+   is_lab_env fext_accessor_circuit cstep fext /\
 
    is_acc accelerator_f cstep ==>
    ?m. REL (fext m) (cstep m) (FUNPOW Next n s)`,
