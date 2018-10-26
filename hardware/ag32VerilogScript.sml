@@ -203,14 +203,20 @@ val INIT_backwards = Q.store_thm("INIT_backwards",
  `!t fext env mem.
    relM t env /\ INIT_verilog fext env /\ fext.mem = mem ==>
    ?s.
-    INIT fext t (s with <| MEM := mem;
+    INIT fext t (s with <| PC := 0w;
+                           R := K 0w;
+                           MEM := mem;
                            io_events := [] |>)`,
  rw [relM_def, INIT_def, INIT_verilog_def, INIT_verilog_vars_def, INIT_fext_def] \\
 
  qexists_tac `<| PC := t.PC; R := t.R; CarryFlag := t.CarryFlag; OverflowFlag := t.OverflowFlag;
                  data_in := t.data_in; data_out := t.data_out |>` \\
 
- rfs [relM_var_def, WORD_def, BOOL_def, mget_var_ALOOKUP, w2ver_bij]);
+ rfs [relM_var_def, WORD_def, WORD_ARRAY_def, BOOL_def, mget_var_ALOOKUP, w2ver_bij] \\
+
+ Cases_on `v` \\ rfs [] \\ match_mp_tac EQ_EXT \\ gen_tac \\
+ first_x_assum (qspec_then `x` mp_tac) \\
+ simp [w2ver_bij]);
 
 val fext_accessor_verilog_def = Define `
  fext_accessor_verilog =

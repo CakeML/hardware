@@ -18,19 +18,8 @@ val exit_code_0_def = Define `
 
 (* Should be moved, and replaced by event-based definition... *)
 val ag32_is_halted_def = Define `
- ag32_is_halted fin mem_start <=>
- (mget_var fin "PC") = INR (w2ver (hello_machine_config mem_start).halt_pc)`;
-
-val init_R_lift = Q.store_thm("init_R_lift",
- `!init hol_s s fext i.
-   INIT_verilog_vars init /\ relM hol_s init /\ INIT fext hol_s s /\ i <> 0w ==> s.R i = 0w`,
- rw [INIT_verilog_vars_def, relM_def, relM_var_def, INIT_def, INIT_R_def] \\
-
- drule_first \\ pop_assum (fn th => rewrite_tac [GSYM th]) \\
-
- qmatch_asmsub_rename_tac `mget_var init "R" = INR r` \\
- fs [WORD_ARRAY_def, mget_var_ALOOKUP] \\
- Cases_on `r` \\ fs [w2ver_bij]);
+ ag32_is_halted fin <=>
+ (mget_var fin "PC") = INR (w2ver (hello_machine_config 0w).halt_pc)`;
 
 val after_R_lift = Q.store_thm("after_R_lift",
  `!env (hol_s:state_circuit) (s:ag32_state) fext fextv n.
@@ -48,57 +37,55 @@ val after_R_lift = Q.store_thm("after_R_lift",
  impl_tac >- (fs [relS_def, relS_var_def, get_var_def] \\ metis_tac []) \\
  strip_tac \\ fs [WORD_def] \\ rveq \\ fs [w2ver_bij] \\ metis_tac []);
 
-val external_memory_configured_def = Define`
- external_memory_configured fext start contents ⇔
-  fext.mem = contents ∧
-  byte_aligned start ∧
-  w2n start + memory_size < dimword (:32)`;
-
 val ag32_verilog_types_def = Define `
  ag32_verilog_types = relMtypes ++ ag32types`;
 
+val Abbrev_0w_n2w_ZERO = Q.prove(`Abbrev (0w = n2w ZERO)`,
+ rewrite_tac [markerTheory.Abbrev_def, ALT_ZERO]);
+
+val hello_ag32_next_0w =
+ hello_ag32_next
+ |> Q.GEN `r0` |> Q.SPEC `0w`
+ |> REWRITE_RULE [Abbrev_0w_n2w_ZERO]
+ |> SIMP_RULE (srw_ss()) [alignmentTheory.byte_aligned_def, alignmentTheory.aligned_0,
+                          ag32_basis_ffiTheory.memory_size_def]
+ |> GEN_ALL;
+
 val hello_verilog = Q.store_thm("hello_verilog",
- `!vstep fext fextv init mem_start cl inp.
+ `!vstep fext fextv init cl inp.
    vars_has_type init ag32_verilog_types ∧
    INIT_verilog (fext 0) init ∧
 
    vstep = mrun fextv computer init ∧
 
-   is_lab_env fext_accessor_verilog vstep fext mem_start ∧
-   external_memory_configured (fext 0) mem_start (hello_init_memory mem_start (cl, inp)) ∧
+   is_lab_env fext_accessor_verilog vstep fext ∧
+   (fext 0).mem = (hello_init_memory 0w (cl, inp)) ∧
    lift_fext fextv fext ∧
 
    SUM (MAP strlen cl) + LENGTH cl ≤ cline_size ∧
    wfcl cl ∧
-   LENGTH inp ≤ stdin_size ∧
+   STRLEN inp ≤ stdin_size ∧
    2 ≤ maxFD
    ⇒
    ?k fin.
     vstep k = INR fin /\
-    let outs = MAP (get_ag32_io_event mem_start) (fext k).io_events;
+    let outs = MAP (get_ag32_io_event 0w) (fext k).io_events;
         outs_spec = MAP get_output_io_event (hello_io_events cl (stdin_fs inp)) in
-      ag32_is_halted fin mem_start ∧
+      ag32_is_halted fin ∧
       outs ≼ outs_spec ∧
       (exit_code_0 fin (fextv k) ⇒ (outs = outs_spec))`,
- rewrite_tac[external_memory_configured_def,ag32_verilog_types_def] \\
+ rewrite_tac[ag32_verilog_types_def] \\
  rpt strip_tac \\
  drule_strip (vars_has_type_append |> SPEC_ALL |> EQ_IMP_RULE |> fst |> SPEC_ALL) \\
 
  drule_strip relM_backwards \\
  drule_strip INIT_backwards \\
- pop_assum (qspec_then `mem_start` strip_assume_tac) \\
  qmatch_asmsub_abbrev_tac `INIT _ _ s'` \\
 
- drule_strip (GEN_ALL hello_ag32_next) \\
+ drule_strip hello_ag32_next_0w \\
 
- `INIT_ISA s' mem_start` by (qunabbrev_tac `s'` \\ simp [INIT_ISA_def, combinTheory.UPDATE_APPLY]) \\
  disch_then (qspec_then `s'` mp_tac) \\
- impl_tac >-
- (qunabbrev_tac `s'` \\
-  fs [INIT_verilog_def, ag32_targetTheory.is_ag32_init_state_def] \\
-  match_mp_tac EQ_EXT \\
-  rw [ag32_targetTheory.ag32_init_regs_def, combinTheory.UPDATE_APPLY] \\
-  drule_strip init_R_lift \\ fs [] \\ metis_tac [combinTheory.UPDATE_APPLY]) \\
+ impl_tac >- (qunabbrev_tac `s'` \\ simp [ag32_targetTheory.is_ag32_init_state_def]) \\
 
  strip_tac \\
  first_x_assum(qspec_then`k1`mp_tac) \\
@@ -107,7 +94,8 @@ val hello_verilog = Q.store_thm("hello_verilog",
  drule_strip (SIMP_RULE (srw_ss()) [] INIT_REL_circuit_verilog) \\
  pop_assum(qspec_then`k1`strip_assume_tac) \\
  asm_exists_tac \\
- fs [REL_def, ag32_is_halted_def, hello_machine_config_def, ag32_machine_config_def] \\ conj_tac
+ fs [REL_def, ag32_is_halted_def, hello_machine_config_def,
+     ag32_basis_ffiTheory.ag32_machine_config_def] \\ conj_tac
 
  >- fs [relM_def, relM_var_def, WORD_def]
 

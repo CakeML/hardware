@@ -3,34 +3,48 @@ struct
 
 open hardwarePreamble;
 
-open hello_ag32ProofTheory;
+open helloProofTheory;
 
 (**
 Extract machine code words from hello_init_memory_words_def
 **)
 
-fun words_to_file filename words =
- ``MAP word_to_hex_string ^words``
+fun list_toJSON l =
+ String.concat ["[", String.concatWith ", " l, "]"];
+
+fun HOLlist_toJSON l =
+ ``MAP w2n ^l``
  |> EVAL |> concl |> rhs
  |> listSyntax.dest_list |> fst
- |> map (fn tm => stringSyntax.fromHOLstring tm ^ "\n")
- |> concat
- |> writeFile filename;
+ |> map (Arbnumcore.toString o dest_numeral)
+ |> list_toJSON;
 
-val (low_mem, zeroes_mem, high_mem) =
- case hello_init_memory_words_def |> concl |> rhs |> listSyntax.strip_append of
-  h1 :: h2 :: h3 :: t => (listSyntax.mk_append (h1, h2), h3, listSyntax.list_mk_append t);
+fun outputJSONfield fd key value =
+ (TextIO.output (fd, "\"" ^ key ^ "\": ");
+ TextIO.output (fd, value));
 
-(** Low **)
+val [startup_code, startup_code_padding,
+     cline_arg_count, cline_args,
+     stdin_pointer, stdin_length, stdin,
+     output_buffer,
+     ffi_code,
+     heap_and_stack,
+     ffi_jumps,
+     cakeml_code,
+     cakeml_data] =
+ hello_init_memory_words_def |> SPEC_ALL |> concl |> rhs |> listSyntax.strip_append;
+
+(** Startup **)
 
 val cmp = wordsLib.words_compset ();
 val () = computeLib.extend_compset
     [computeLib.Extenders
       [ag32_targetLib.add_ag32_encode_compset],
      computeLib.Defs
-      [hello_ag32CompileTheory.code_def
-      ,hello_ag32CompileTheory.data_def]
-    ] cmp;
+      [helloCompileTheory.code_def
+      ,helloCompileTheory.data_def
+      ,helloCompileTheory.config_def]
+      ] cmp;
 
 val eval = computeLib.CBV_CONV cmp;
 
@@ -42,30 +56,67 @@ val hello_startup_code_eval =
                          THENC
                          EVAL));
 
-val low_mem_ground = low_mem |> (REWRITE_CONV [hello_startup_code_eval] THENC EVAL);
-val low_mem_ground' = low_mem_ground |> concl |> rhs;
-
-val () = words_to_file "low_mem_words.mem" low_mem_ground';
-
-(** Middle **)
-
-(* Number of words: *)
-val zeroes_mem_len =
- zeroes_mem
- |> rator |> rand
- |> (REWRITE_CONV [heap_size_def, hello_startup_code_eval] THENC EVAL);
-
-(** High **)
-
 (* TODO: *)
-computeLib.add_funs [ag32Theory.Encode_def, ag32Theory.enc_def, ag32Theory.ri2bits_def,
+computeLib.add_funs [ag32Theory.Encode_def,
+                     ag32Theory.enc_def, ag32Theory.encShift_def,
+                     ag32Theory.ri2bits_def,
 
-                     hello_ag32CompileTheory.data_def, hello_ag32CompileTheory.code_def,
+                     helloCompileTheory.data_def, helloCompileTheory.code_def,
 
                      bitstringTheory.v2w_def];
 
-val hello_ag32_ffi_code_eval =
- ``MAP Encode hello_ag32_ffi_code`` |> EVAL;
+val hello_startup_code_eval = CONV_RULE (RHS_CONV EVAL) hello_startup_code_eval;
+
+val startup_code_ground =
+ startup_code |> (REWRITE_CONV [hello_startup_code_eval] THENC EVAL);
+val startup_code_padding_ground =
+ startup_code_padding |> (REWRITE_CONV [hello_startup_code_eval] THENC EVAL);
+
+val full_startup_code =
+ listSyntax.mk_append (startup_code_ground |> concl |> rhs,
+                       startup_code_padding_ground |> concl |> rhs)
+ |> EVAL |> concl |> rhs;
+
+(** Command-line arguments **)
+
+(* Sanity check *)
+val _ = assert (equal 1) (cline_arg_count |> listSyntax.dest_list |> fst |> length);
+
+(* More difficult to sanity check cline_args... *)
+
+val cline_size_words = ``cline_size DIV 4`` |> EVAL |> concl |> rhs;
+
+(** Stdin **)
+
+(* Sanity check *)
+val _ = assert (equal 1) (stdin_pointer |> listSyntax.dest_list |> fst |> length);
+val _ = assert (equal 1) (stdin_length |> listSyntax.dest_list |> fst |> length);
+
+val stdin_size_words = ``stdin_size DIV 4`` |> EVAL |> concl |> rhs;
+
+(** Output buffer (for stdout/stderr) **)
+
+val output_buffer_size_words =
+ ``LENGTH ^output_buffer``
+ |> ((REWRITE_CONV [rich_listTheory.LENGTH_REPLICATE]) THENC EVAL)
+ |> concl |> rhs;
+
+(** Heap + stack **)
+
+val heap_and_stack_size_words =
+ ``LENGTH ^heap_and_stack``
+ |> ((REWRITE_CONV [rich_listTheory.LENGTH_REPLICATE]) THENC EVAL)
+ |> concl |> rhs;
+
+(** FFI **)
+
+val ffi_code_words =
+ ffi_code |> EVAL;
+
+val ffi_jumps_words =
+ ffi_jumps |> (REWRITE_CONV [helloCompileTheory.config_def] THENC EVAL);
+
+(** cakeml code **)
 
 val words_of_bytes_rw = Q.prove(
  `(words_of_bytes be [] = []:word32 list) /\
@@ -136,18 +187,71 @@ end_time clock;
 *)
 
 (* val clock = start_time (); *)
-val words_of_bytes_code_eval =
- ``(words_of_bytes F code):word32 list``
- |> (REWRITE_CONV [hello_ag32CompileTheory.code_def,
+val cakeml_code_eval =
+ cakeml_code
+ |> (REWRITE_CONV [helloCompileTheory.code_def,
                    words_of_bytes_rw,word_of_bytes_rw,mult_all,word_add_n2w_4]
      THENC EVAL);
 (* end_time clock; *)
 
-val high_mem_words =
- high_mem
- |> (REWRITE_CONV [hello_ag32_ffi_code_eval,words_of_bytes_code_eval] THENC EVAL)
- |> concl |> rhs;
+val top_mem = (let
+ val ffi_jumps_words = ffi_jumps_words |> concl |> rhs
+ val cakeml_code_eval = cakeml_code_eval |> concl |> rhs
+ val cakeml_data = cakeml_data |> EVAL |> concl |> rhs
+in
+ ``^ffi_jumps_words ++ ^cakeml_code_eval ++ ^cakeml_data``
+end) |> EVAL;
 
-val () = words_to_file "high_mem_words.mem" high_mem_words;
+(** Write everything do file... *)
+
+val fd = TextIO.openOut "prg.json"
+
+val _ = TextIO.output (fd, "{\n");
+
+(* startup_code, startup_code_padding *)
+
+val _ = outputJSONfield fd "startup_code"
+                        (full_startup_code |> HOLlist_toJSON);
+val _ = TextIO.output (fd, ",\n");
+
+(* cline_arg_count, cline_args *)
+
+val _ = outputJSONfield fd "cline_args_size"
+                        (cline_size_words |> dest_numeral |> Arbnumcore.toString);
+val _ = TextIO.output (fd, ",\n");
+
+(* stdin_pointer, stdin_length, stdin *)
+
+val _ = outputJSONfield fd "stdin_size"
+                        (stdin_size_words |> dest_numeral |> Arbnumcore.toString);
+val _ = TextIO.output (fd, ",\n");
+
+(* output_buffer *)
+
+val _ = outputJSONfield fd "output_buffer_size"
+                        (output_buffer_size_words |> dest_numeral |> Arbnumcore.toString);
+val _ = TextIO.output (fd, ",\n");
+
+(* ffi_code *)
+
+val _ = outputJSONfield fd "ffi_code"
+                        (ffi_code_words |> concl |> rhs |> HOLlist_toJSON);
+val _ = TextIO.output (fd, ",\n");
+
+(* heap_and_stack *)
+
+val _ = outputJSONfield fd "heap_and_stack_size"
+                        (heap_and_stack_size_words |> dest_numeral |> Arbnumcore.toString);
+val _ = TextIO.output (fd, ",\n");
+
+(* top_mem: ffi_jumps, cakeml_code, cakeml_data *)
+
+val _ = outputJSONfield fd "top_mem"
+                        (top_mem |> concl |> rhs |> HOLlist_toJSON);
+
+(* close stream... *)
+
+val _ = TextIO.output (fd, "}\n");
+val _ = TextIO.closeOut fd;
 
 end
