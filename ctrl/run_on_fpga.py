@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 import json
+import math
 
 # Workaround for pynq overriding the default SIGINT handler for some reason
 # (Hopefully no cleanup is done in custom handler?)
@@ -88,6 +89,40 @@ def flatten(l):
 
 def print_debug_char(c):
     print(c, chr(c))
+
+
+def convert_ffi_word32(w):
+    return ((w << 8*3) & 0xFF000000) | ((w << 8) & 0xFF0000) | ((w >> 8) & 0xFF00) | ((w >> 8*3) & 0xFF)
+
+
+# Super inefficient, should use string buffer instead
+def print_ffi_write_data(mem, base, num):
+    for addr in range(0, math.ceil(num / 4)):
+        val = mem[base + addr]
+
+        for i in range(4):
+            # Max number of chars reached?
+            bytenum = 4*addr + i
+
+            if bytenum > num:
+                print()
+                return
+
+            # If not, print current char
+            c = 0xFF & (val >> 8*i)
+            print(chr(c), end='')
+
+
+ffi_id_to_name = {
+    0: "exit",
+    1: "get_arg_count",
+    2: "get_arg_length",
+    3: "get_arg",
+    4: "read",
+    5: "write",
+    6: "open_in",
+    7: "open_out",
+    8: "close"}
 
 
 def main():
@@ -190,11 +225,13 @@ def main():
 
         mempointer += jsonprg["stdin_size"]
 
-        start_of_stdin = mempointer
-
         # stderr + stdout not written from python script...
 
+        start_of_stdout = mempointer
+
         mempointer += jsonprg["output_buffer_size"]
+
+        start_ffi_call_id = mempointer - 1
 
         # ffi code
 
@@ -228,14 +265,24 @@ def main():
 
             log("Got interrupt", interrupt_num, "!")
 
-            #print_interrupt_msg(mem, start_of_stdin)
-            for i in range(0, 10):
-                w = mem[start_of_stdin + i]
+            w = mem[start_ffi_call_id]
+            ffi_call_id = convert_ffi_word32(w)
+            print("ffi call id:", ffi_id_to_name[ffi_call_id])
 
-                print_debug_char(w & 0xFF)
-                print_debug_char((w >> 8*1) & 0xFF)
-                print_debug_char((w >> 8*2) & 0xFF)
-                print_debug_char((w >> 8*3) & 0xFF)
+            if ffi_call_id == 5:
+                read_len = convert_ffi_word32(mem[start_of_stdout + 2])
+                print("length:", read_len)
+
+                print("data:", end='')
+                print_ffi_write_data(mem, start_of_stdout + 3, read_len)
+
+                #for i in range(0, 10):
+                #    w = mem[start_of_stdout + 3 + i]
+
+                #    print_debug_char(w & 0xFF)
+                #    print_debug_char((w >> 8*1) & 0xFF)
+                #    print_debug_char((w >> 8*2) & 0xFF)
+                #    print_debug_char((w >> 8*3) & 0xFF)
 
             # Respond to interrupt
             core_ctrl.write(_CORE_CTRL_REG_INTERRUPT_ACK, 0)

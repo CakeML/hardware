@@ -1,13 +1,28 @@
-structure hello_ag32AssemblerLib =
+structure ag32AssemblerLib =
 struct
 
 open hardwarePreamble;
 
-open helloProofTheory;
-
 (**
 Extract machine code words from hello_init_memory_words_def
 **)
+
+(*open helloProofTheory helloCompileTheory;*)
+open wordcountProofTheory wordcountCompileTheory;
+
+val [startup_code, startup_code_padding,
+     cline_arg_count, cline_args,
+     stdin_pointer, stdin_length, stdin,
+     output_buffer,
+     ffi_code,
+     heap_and_stack,
+     ffi_jumps,
+     cakeml_code,
+     cakeml_data] =
+ wordcount_init_memory_words_def |> SPEC_ALL |> concl |> rhs |> listSyntax.strip_append;
+(* hello_init_memory_words_def |> SPEC_ALL |> concl |> rhs |> listSyntax.strip_append;*)
+
+(** Various JSON infrastructure **)
 
 fun list_toJSON l =
  String.concat ["[", String.concatWith ", " l, "]"];
@@ -23,54 +38,43 @@ fun outputJSONfield fd key value =
  (TextIO.output (fd, "\"" ^ key ^ "\": ");
  TextIO.output (fd, value));
 
-val [startup_code, startup_code_padding,
-     cline_arg_count, cline_args,
-     stdin_pointer, stdin_length, stdin,
-     output_buffer,
-     ffi_code,
-     heap_and_stack,
-     ffi_jumps,
-     cakeml_code,
-     cakeml_data] =
- hello_init_memory_words_def |> SPEC_ALL |> concl |> rhs |> listSyntax.strip_append;
-
 (** Startup **)
 
+(*
 val cmp = wordsLib.words_compset ();
 val () = computeLib.extend_compset
     [computeLib.Extenders
       [ag32_targetLib.add_ag32_encode_compset],
      computeLib.Defs
-      [helloCompileTheory.code_def
-      ,helloCompileTheory.data_def
-      ,helloCompileTheory.config_def]
+      [code_def
+      ,data_def
+      ,config_def]
       ] cmp;
 
 val eval = computeLib.CBV_CONV cmp;
+*)
 
-val hello_startup_code_eval =
- hello_startup_code_def
+val LENGTH_code =
+ ``LENGTH code`` |> (REWRITE_CONV [code_def] THENC EVAL);
+val LENGTH_data =
+ ``LENGTH data`` |> (REWRITE_CONV [data_def] THENC EVAL);
+val LENGTH_conf =
+ ``LENGTH (THE config.ffi_names)`` |> (REWRITE_CONV [config_def] THENC EVAL);
+
+val startup_code_eval =
+ wordcount_startup_code_def
  |> CONV_RULE (RHS_CONV (RAND_CONV (RAND_CONV EVAL
                                     THENC
-                                    listLib.MAP_CONV eval)
+                                    (REWRITE_CONV [LENGTH_code, LENGTH_data, LENGTH_conf])
+                                    THENC
+                                    listLib.MAP_CONV ag32_targetLib.ag32_encode_conv)
                          THENC
                          EVAL));
 
-(* TODO: *)
-computeLib.add_funs [ag32Theory.Encode_def,
-                     ag32Theory.enc_def, ag32Theory.encShift_def,
-                     ag32Theory.ri2bits_def,
-
-                     helloCompileTheory.data_def, helloCompileTheory.code_def,
-
-                     bitstringTheory.v2w_def];
-
-val hello_startup_code_eval = CONV_RULE (RHS_CONV EVAL) hello_startup_code_eval;
-
 val startup_code_ground =
- startup_code |> (REWRITE_CONV [hello_startup_code_eval] THENC EVAL);
+ startup_code |> (REWRITE_CONV [startup_code_eval] THENC EVAL);
 val startup_code_padding_ground =
- startup_code_padding |> (REWRITE_CONV [hello_startup_code_eval] THENC EVAL);
+ startup_code_padding |> (REWRITE_CONV [startup_code_eval] THENC EVAL);
 
 val full_startup_code =
  listSyntax.mk_append (startup_code_ground |> concl |> rhs,
@@ -110,11 +114,20 @@ val heap_and_stack_size_words =
 
 (** FFI **)
 
+(* TODO: *)
+computeLib.add_funs [ag32Theory.Encode_def,
+                     ag32Theory.enc_def, ag32Theory.encShift_def,
+                     ag32Theory.ri2bits_def,
+
+                     (*data_def, code_def,*)
+
+                     bitstringTheory.v2w_def];
+
 val ffi_code_words =
  ffi_code |> EVAL;
 
 val ffi_jumps_words =
- ffi_jumps |> (REWRITE_CONV [helloCompileTheory.config_def] THENC EVAL);
+ ffi_jumps |> (REWRITE_CONV [config_def] THENC EVAL);
 
 (** cakeml code **)
 
@@ -189,7 +202,7 @@ end_time clock;
 (* val clock = start_time (); *)
 val cakeml_code_eval =
  cakeml_code
- |> (REWRITE_CONV [helloCompileTheory.code_def,
+ |> (REWRITE_CONV [code_def,
                    words_of_bytes_rw,word_of_bytes_rw,mult_all,word_add_n2w_4]
      THENC EVAL);
 (* end_time clock; *)
@@ -197,7 +210,7 @@ val cakeml_code_eval =
 val top_mem = (let
  val ffi_jumps_words = ffi_jumps_words |> concl |> rhs
  val cakeml_code_eval = cakeml_code_eval |> concl |> rhs
- val cakeml_data = cakeml_data |> EVAL |> concl |> rhs
+ val cakeml_data = cakeml_data |> (REWRITE_CONV [data_def] THENC EVAL) |> concl |> rhs
 in
  ``^ffi_jumps_words ++ ^cakeml_code_eval ++ ^cakeml_data``
 end) |> EVAL;
