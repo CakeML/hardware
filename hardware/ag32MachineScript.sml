@@ -160,6 +160,10 @@ val is_mem_def = Define `
 
   mem_no_errors fext`;
 
+val is_mem_mem_no_errors = Q.store_thm("is_mem_mem_no_errors",
+ `!accs c fext. is_mem accs c fext ==> mem_no_errors fext`,
+ rw [is_mem_def]);
+
 (** Accelerator specification **)
 
 val is_acc_def = Define `

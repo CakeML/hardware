@@ -20,7 +20,7 @@ val hello_ag32_next_verilog = Q.store_thm("hello_ag32_next_verilog",
    vstep = mrun fextv computer init ∧
 
    is_lab_env fext_accessor_verilog vstep fext ∧
-   (fext 0).mem = (hello_init_memory (cl, inp)) ∧
+   (fext 0).mem = (init_memory code data (THE config.ffi_names) (cl, inp)) ∧
    lift_fext fextv fext ∧
 
    SUM (MAP strlen cl) + LENGTH cl ≤ cline_size ∧
@@ -54,8 +54,7 @@ val hello_ag32_next_verilog = Q.store_thm("hello_ag32_next_verilog",
  drule_strip (SIMP_RULE (srw_ss()) [] INIT_REL_circuit_verilog) \\
  pop_assum(qspec_then`k1`strip_assume_tac) \\
  asm_exists_tac \\
- fs [REL_def, ag32_is_halted_def, hello_machine_config_def,
-     ag32_machine_configTheory.ag32_machine_config_def] \\ conj_tac
+ fs [REL_def, ag32_is_halted_def, ag32_machine_configTheory.ag32_machine_config_def] \\ conj_tac
 
  >- fs [relM_def, relM_var_def, WORD_def]
 

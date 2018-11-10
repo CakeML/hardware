@@ -21,9 +21,9 @@ val ag32_is_halted_def = Define `
  ag32_is_halted fin conf <=>
  (mget_var fin "PC") = INR (w2ver conf.halt_pc)`;
 
-val after_R_lift = Q.store_thm("after_R_lift",
+val after_R_1w_lift = Q.store_thm("after_R_1w_lift",
  `!env (hol_s:state_circuit) (s:ag32_state) fext fextv n.
-   lift_fext fextv fext /\ relM hol_s env /\ hol_s.R = s.R /\ exit_code_0 env (fextv n) ==>
+   lift_fext fextv fext /\ relM hol_s env /\ hol_s.R 1w = s.R 1w /\ exit_code_0 env (fextv n) ==>
    s.R 1w = 0w`,
  rw [exit_code_0_def] \\
  assume_tac (hol2hardware_exp ``s:state_circuit`` ``(s:state_circuit).R 1w`` |> GEN_ALL) \\
@@ -36,6 +36,12 @@ val after_R_lift = Q.store_thm("after_R_lift",
 
  impl_tac >- (fs [relS_def, relS_var_def, get_var_def] \\ metis_tac []) \\
  strip_tac \\ fs [WORD_def] \\ rveq \\ fs [w2ver_bij] \\ metis_tac []);
+
+val after_R_lift = Q.store_thm("after_R_lift",
+ `!env (hol_s:state_circuit) (s:ag32_state) fext fextv n.
+   lift_fext fextv fext /\ relM hol_s env /\ hol_s.R = s.R /\ exit_code_0 env (fextv n) ==>
+   s.R 1w = 0w`,
+ metis_tac [after_R_1w_lift]);
 
 (* Unnecessary *)
 val ag32_verilog_types_def = Define `

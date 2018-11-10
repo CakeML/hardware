@@ -294,10 +294,10 @@ val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
    relM hol_s init /\
    INIT (fext 0) hol_s s
    ==>
-   ?m vs' hol_s'.
+   ?m vs'.
     vstep m = INR vs' /\
-    relM hol_s' vs' /\
-    REL (fext m) hol_s' (FUNPOW Next n s)`,
+    relM (circuit addacc_next hol_s fext m) vs' /\
+    REL (fext m) (circuit addacc_next hol_s fext m) (FUNPOW Next n s)`,
  (* todo: append not needed here? *)
  simp [INIT_verilog_def, vars_has_type_append] \\ rpt strip_tac \\
 
