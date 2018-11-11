@@ -47,4 +47,17 @@ val after_R_lift = Q.store_thm("after_R_lift",
 val ag32_verilog_types_def = Define `
  ag32_verilog_types = relMtypes ++ ag32types`;
 
+(* Move *)
+val get_mem_word_word_at_addr = Q.store_thm("get_mem_word_word_at_addr",
+ `!mem addr. get_mem_word mem addr = word_at_addr mem addr`,
+ rw [word_at_addr_def, ag32_memoryTheory.get_mem_word_def]);
+
+val is_prefix_extract_writes = Q.store_thm("is_prefix_extract_writes",
+ `!l1 l2 fd. l1 ≼ l2 ==> extract_writes fd l1 ≼ extract_writes fd l2`,
+ Induct >- rw [ag32_basis_ffiProofTheory.extract_writes_def] \\
+
+ rw [] \\ every_case_tac \\ fs [] \\
+ rveq \\ first_x_assum drule \\ disch_then (qspec_then `fd` assume_tac) \\
+ fs [ag32_basis_ffiProofTheory.extract_writes_def] \\ rw []);
+
 val _ = export_theory ();
