@@ -32,7 +32,7 @@ val hello_ag32_next_verilog = Q.store_thm("hello_ag32_next_verilog",
       outs_stdout ≼ outs_stdout_spec ∧
       (exit_code_0 fin (fextv k) ⇒ outs_stdout = outs_stdout_spec)`,
  lift_tac hello_ag32_next
-          hello_extract_writes_stdout
-          helloCompileTheory.config_def);
+          helloCompileTheory.config_def \\
+ lift_stdout_tac hello_extract_writes_stdout);
 
 val _ = export_theory ();

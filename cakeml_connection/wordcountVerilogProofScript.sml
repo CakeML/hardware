@@ -32,7 +32,7 @@ val wordcount_ag32_next_verilog = Q.store_thm("wordcount_ag32_next_verilog",
       outs_stdout ≼ outs_stdout_spec ∧
       (exit_code_0 fin (fextv k) ⇒ outs_stdout = outs_stdout_spec)`,
  lift_tac wordcount_ag32_next
-          wordcount_extract_writes_stdout
-          wordcountCompileTheory.config_def);
+          wordcountCompileTheory.config_def \\
+ lift_stdout_tac wordcount_extract_writes_stdout);
 
 val _ = export_theory ();
