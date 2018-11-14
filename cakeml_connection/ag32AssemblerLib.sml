@@ -40,6 +40,13 @@ fun HOLlist_toJSON l =
  |> map (Arbnumcore.toString o dest_numeral)
  |> list_toJSON;
 
+(* This does not do bounds-checking *)
+fun HOLlist_toJSON_cheat l =
+ l
+ |> listSyntax.dest_list |> fst
+ |> map (Arbnumcore.toString o dest_numeral o fst o wordsSyntax.dest_n2w)
+ |> list_toJSON;
+
 fun outputJSONfield fd key value =
  (TextIO.output (fd, "\"" ^ key ^ "\": ");
  TextIO.output (fd, value));
@@ -183,6 +190,8 @@ foo
 end_time clock;
 *)
 
+(* Skip if large program, see below: *)
+
 (* val clock = start_time (); *)
 val cakeml_code_eval =
  cakeml_code
@@ -243,8 +252,26 @@ val _ = TextIO.output (fd, ",\n");
 
 (* top_mem: ffi_jumps, cakeml_code, cakeml_data *)
 
+(* Proper way: *)
 val _ = outputJSONfield fd "top_mem"
                         (top_mem |> concl |> rhs |> HOLlist_toJSON);
+
+(* Temporary workaround for large programs,
+   until we have a better way to eval from bytes to words:
+
+val _ = outputJSONfield fd "ffi_jumps"
+                        (ffi_jumps_words |> concl |> rhs |> HOLlist_toJSON);
+val _ = TextIO.output (fd, ",\n");
+
+val _ = outputJSONfield fd "cakeml_code_bytes"
+                        (code_def |> concl |> rhs |> HOLlist_toJSON_cheat);
+val _ = TextIO.output (fd, ",\n");
+
+val cakeml_data_unfold = cakeml_data |> (REWRITE_CONV [data_def] THENC EVAL);
+val _ = outputJSONfield fd "cakeml_data"
+                        (cakeml_data_unfold |> concl |> rhs |> HOLlist_toJSON);
+val _ = TextIO.output (fd, "\n");
+*)
 
 (* close stream... *)
 
