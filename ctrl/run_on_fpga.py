@@ -8,6 +8,8 @@ import signal
 import sys
 import json
 import math
+from itertools import zip_longest
+import gc
 
 # Workaround for pynq overriding the default SIGINT handler for some reason
 # (Hopefully no cleanup is done in custom handler?)
@@ -26,7 +28,7 @@ _CORE_CTRL_REG_MEM_START = 0
 _CORE_CTRL_REG_INTERRUPT_ACK = 4
 
 _date_format = "%Y-%m-%d %H:%M:%S"
-
+_prg_name = "noname"
 
 def log(*msgs):
     print(datetime.now().strftime(_date_format), ": ", sep="", end="")
@@ -61,7 +63,7 @@ def _get_uio_device(irq):
 
 
 def tokenize(s):
-    return filter(lambda s: s, s.split(' '))
+    return list(filter(lambda s: s, s.split(' ')))
 
 
 def word_of_bytes(bs):
@@ -83,6 +85,16 @@ def words_of_bytes(bs):
         return []
 
 
+# https://stackoverflow.com/questions/434287
+def grouper(iterable, n, fillvalue=None):
+    args = [iter(iterable)] * n
+    return zip_longest(*args, fillvalue=fillvalue)
+
+
+def words_of_bytes_cheap(bs):
+    return map(word_of_bytes, grouper(bs, 4, 0))
+
+
 def flatten(l):
     return sum(l, [])
 
@@ -97,14 +109,14 @@ def convert_ffi_word32(w):
 
 # Super inefficient, should use string buffer instead
 def print_ffi_write_data(mem, base, num):
-    for addr in range(0, math.ceil(num / 4)):
+    for addr in range(0, num + (4 - num) % 4):
         val = mem[base + addr]
 
         for i in range(4):
             # Max number of chars reached?
             bytenum = 4*addr + i
 
-            if bytenum > num:
+            if bytenum >= num:
                 print()
                 return
 
@@ -112,9 +124,11 @@ def print_ffi_write_data(mem, base, num):
             c = 0xFF & (val >> 8*i)
             print(chr(c), end='')
 
+    print()
+
 
 ffi_id_to_name = {
-    0: "exit",
+    0: "empty",
     1: "get_arg_count",
     2: "get_arg_length",
     3: "get_arg",
@@ -122,7 +136,8 @@ ffi_id_to_name = {
     5: "write",
     6: "open_in",
     7: "open_out",
-    8: "close"}
+    8: "close",
+    9: "exit"}
 
 
 def main():
@@ -130,6 +145,7 @@ def main():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--args", help="Argv arguments, note that separate arguments must be separates by spaces only")
     parser.add_argument("--stdin", help="Contents to preload stdin buffer with")
+    parser.add_argument("--largeprogram", action="store_true")
 
     parser.add_argument("bit_file", metavar="bit-file",
                         help="FPGA bitstream to load onto the FPGA")
@@ -175,34 +191,34 @@ def main():
         mempointer = len(jsonprg["startup_code"])
 
         # Write cline
-        log("Cline...")
-
         cline_args_size = jsonprg["cline_args_size"]
 
         if args.args is None:
-            mempointer += 1 + cline_args_size
+            cakeml_args = [_prg_name]
         else:
-            cakeml_args = tokenize(args.args)
+            cakeml_args = [_prg_name] + tokenize(args.args)
 
-            # cline arg count
-            mem[mempointer] = len(cakeml_args)
-            mempointer += 1
+        # cline arg count
+        mem[mempointer] = len(cakeml_args)
+        mempointer += 1
 
-            # cline args
-            cakeml_args = flatten(map(lambda arg: map(ord, arg) + [0], cakeml_args))
+        log("Got {} cl argument(s) (including program name)".format(len(cakeml_args)))
 
-            if len(cakeml_args) >= 4*cline_args_size:
-                log("Too long program arguments")
-                sys.exit(1)
+        # cline args
+        cakeml_args = flatten(map(lambda arg: list(map(ord, arg)) + [0], cakeml_args))
 
-            if not all(map(allowed_char, cakeml_args)):
-                log('Program arguments contain illegal chars')
-                sys.exit(1)
+        if len(cakeml_args) >= 4*cline_args_size:
+            log("Too long program arguments")
+            sys.exit(1)
 
-            for i, w in enumerate(words_of_bytes(cakeml_args)):
-                mem[mempointer + i] = w
+        if False: #not all(map(allowed_char, cakeml_args)):
+            log('Program arguments contain illegal chars')
+            sys.exit(1)
 
-            mempointer += cline_args_size
+        for i, w in enumerate(words_of_bytes(cakeml_args)):
+            mem[mempointer + i] = w
+
+        mempointer += cline_args_size
 
         # stdin
 
@@ -219,8 +235,14 @@ def main():
         mem[mempointer] = len(stdin)
         mempointer += 1
 
+        stdin_words = list(words_of_bytes_cheap(stdin))
+
+        if len(stdin_words) >= jsonprg["stdin_size"]:
+            log('Stdin too long')
+            sys.exit(1)
+
         # stdin
-        for i, w in enumerate(words_of_bytes(stdin)):
+        for i, w in enumerate(stdin_words):
             mem[mempointer + i] = w
 
         mempointer += jsonprg["stdin_size"]
@@ -245,8 +267,28 @@ def main():
         mempointer += jsonprg["heap_and_stack_size"]
 
         # ffi call jumps + cakeml data + code
-        for i, w in enumerate(jsonprg["top_mem"]):
-            mem[mempointer + i] = w
+        if args.largeprogram:
+            for i, w in enumerate(jsonprg["ffi_jumps"]):
+                mem[mempointer + i] = w
+            mempointer += len(jsonprg["ffi_jumps"])
+
+            cakeml_code_words = list(words_of_bytes_cheap(jsonprg["cakeml_code_bytes"]))
+            for i, w in enumerate(cakeml_code_words):
+                mem[mempointer + i] = w
+            mempointer += len(cakeml_code_words)
+
+            for i, w in enumerate(jsonprg["cakeml_data"]):
+                mem[mempointer + i] = w
+            #mempointer += len(jsonprg["ffi_jumps"])
+        else:
+            for i, w in enumerate(jsonprg["top_mem"]):
+                mem[mempointer + i] = w
+
+        # Don't need the json file anymore!
+        # (Not sure how much this actually helps,
+        # there are a lot of other things floating around as well.)
+        del jsonprg
+        gc.collect()
 
         # Setup FPGA
         ol = Overlay(args.bit_file)
