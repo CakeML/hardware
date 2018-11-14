@@ -6,33 +6,45 @@ open commonVerilogProofLib;
 
 val _ = new_theory "wordcountVerilogProof";
 
-val wordcount_ag32_next_verilog = Q.store_thm("wordcount_ag32_next_verilog",
- `!vstep fext fextv init inp.
-   vars_has_type init ag32_verilog_types ∧
-   INIT_verilog (fext 0) init ∧
+(* Temporary *)
+val wc_spec_def = Define`
+  wc_spec input output <=>
+      output = explode (
+        (concat [mlnum$toString (LENGTH (TOKENS isSpace input)); strlit " ";
+                 mlnum$toString (LENGTH (splitlines input)); strlit "\n"]))`;
 
-   vstep = mrun fextv computer init ∧
+val ag32_verilog_init_def = Define `
+ ag32_verilog_init (code, data, config') (cl, input) init fext fextv <=>
+  lift_fext fextv fext /\
+  (fext 0).mem = (init_memory code data (THE config'.ffi_names) (cl, input)) /\
+  vars_has_type init (relMtypes ++ ag32types) /\
+  INIT_verilog (fext 0) init`;
 
+val wordcount_ag32_next_verilog = Q.prove(
+ `!vstep fext fextv ms input output.
+   vstep = mrun fextv computer ms ∧
+
+   STRLEN input ≤ stdin_size ∧
+   wc_spec input output ∧
    is_lab_env fext_accessor_verilog vstep fext ∧
-   (fext 0).mem = (init_memory code data (THE config.ffi_names) ([strlit "wordcount"], inp)) ∧
-   lift_fext fextv fext ∧
-
-   STRLEN inp ≤ stdin_size
+   ag32_verilog_init (code, data, config) ([strlit "wordcount"], input) ms fext fextv
    ⇒
-   ?k1.
-    !k. k1 ≤ k ==>
+   ?k1. !k. k1 ≤ k ==>
     ?fin. vstep k = INR fin /\
-    let outs = MAP get_ag32_io_event (fext k).io_events;
-        outs_stdout = extract_writes 1 outs;
-        outs_stdout_spec = explode (concat
-                             [toString (LENGTH (TOKENS isSpace inp)); strlit " ";
-                              toString (LENGTH (splitlines inp)); strlit "\n"])
+    let stdout = extract_writes 1 (MAP get_ag32_io_event (fext k).io_events)
     in
-      ag32_is_halted fin wordcount_machine_config ∧
-      outs_stdout ≼ outs_stdout_spec ∧
-      (exit_code_0 fin (fextv k) ⇒ outs_stdout = outs_stdout_spec)`,
+      is_halted fin wordcount_machine_config ∧
+      stdout ≼ output ∧
+      (exit_code_0 fin (fextv k) ⇒ stdout = output)`,
+ cheat);
+
+val _ = save_thm("wordcount_ag32_next_verilog",
+  wordcount_ag32_next_verilog |> REWRITE_RULE [LET_THM] |> BETA_RULE);
+
+(*
  lift_tac wordcount_ag32_next
           wordcountCompileTheory.config_def \\
  lift_stdout_tac wordcount_extract_writes_stdout);
+*)
 
 val _ = export_theory ();

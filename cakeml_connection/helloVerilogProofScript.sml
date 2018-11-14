@@ -6,6 +6,7 @@ open commonVerilogProofLib;
 
 val _ = new_theory "helloVerilogProof";
 
+(*
 val hello_ag32_next_verilog = Q.store_thm("hello_ag32_next_verilog",
  `!vstep fext fextv init cl inp.
    vars_has_type init ag32_verilog_types ∧
@@ -34,5 +35,6 @@ val hello_ag32_next_verilog = Q.store_thm("hello_ag32_next_verilog",
  lift_tac hello_ag32_next
           helloCompileTheory.config_def \\
  lift_stdout_tac hello_extract_writes_stdout);
+*)
 
 val _ = export_theory ();

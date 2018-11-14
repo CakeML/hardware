@@ -9,7 +9,6 @@ open ag32MachineTheory ag32EqTheory ag32HaltTheory ag32VerilogTheory;
 open commonVerilogProofTheory;
 
 fun lift_tac ag32_next_thm config_def =
- rewrite_tac[ag32_verilog_types_def] \\
  rpt strip_tac \\
  drule_strip (vars_has_type_append |> SPEC_ALL |> EQ_IMP_RULE |> fst |> SPEC_ALL) \\
 
@@ -46,7 +45,7 @@ fun lift_tac ag32_next_thm config_def =
  strip_tac \\
 
  drule_strip computer_Next_relM_run \\ pop_assum (qspec_then `m1 + m` strip_assume_tac) \\
- fs [REL_def, ag32_is_halted_def, ag32_machine_configTheory.ag32_machine_config_def];
+ fs [REL_def, is_halted_def, ag32_machine_configTheory.ag32_machine_config_def];
 
 fun lift_stdout_tac spec_thm =
  rpt conj_tac

@@ -17,8 +17,8 @@ val exit_code_0_def = Define `
   erun fextv <| vars := vs |> (ArrayIndex (Var "R") [Const (w2ver (1w:word6))]) = INR (w2ver (0w:word32))`;
 
 (* Should be replaced by event-based definition? *)
-val ag32_is_halted_def = Define `
- ag32_is_halted fin conf <=>
+val is_halted_def = Define `
+ is_halted fin conf <=>
  (mget_var fin "PC") = INR (w2ver conf.halt_pc)`;
 
 val after_R_1w_lift = Q.store_thm("after_R_1w_lift",
@@ -42,10 +42,6 @@ val after_R_lift = Q.store_thm("after_R_lift",
    lift_fext fextv fext /\ relM hol_s env /\ hol_s.R = s.R /\ exit_code_0 env (fextv n) ==>
    s.R 1w = 0w`,
  metis_tac [after_R_1w_lift]);
-
-(* Unnecessary *)
-val ag32_verilog_types_def = Define `
- ag32_verilog_types = relMtypes ++ ag32types`;
 
 (* Move *)
 val get_mem_word_word_at_addr = Q.store_thm("get_mem_word_word_at_addr",
