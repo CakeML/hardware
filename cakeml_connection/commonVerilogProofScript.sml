@@ -18,8 +18,9 @@ val exit_code_0_def = Define `
 
 (* Should be replaced by event-based definition? *)
 val is_halted_def = Define `
- is_halted fin conf <=>
- (mget_var fin "PC") = INR (w2ver conf.halt_pc)`;
+ is_halted fin (_, _, config') <=>
+ let num_ffis = LENGTH (THE config'.ffi_names) in
+  (mget_var fin "PC") = INR (n2ver (ffi_jumps_offset + (num_ffis + 1) * ffi_offset))`;
 
 val after_R_1w_lift = Q.store_thm("after_R_1w_lift",
  `!env (hol_s:state_circuit) (s:ag32_state) fext fextv n.

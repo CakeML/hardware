@@ -33,7 +33,7 @@ val wordcount_ag32_next_verilog = Q.prove(
     ?fin. vstep k = INR fin /\
     let stdout = extract_writes 1 (MAP get_ag32_io_event (fext k).io_events)
     in
-      is_halted fin wordcount_machine_config ∧
+      is_halted fin (code, data, config) ∧
       stdout ≼ output ∧
       (exit_code_0 fin (fextv k) ⇒ stdout = output)`,
  cheat);
