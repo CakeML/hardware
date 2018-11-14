@@ -12,6 +12,13 @@ val _ = new_theory "commonVerilogProof";
 val _ = guess_lengths ();
 val _ = prefer_num ();
 
+val ag32_verilog_init_def = Define `
+ ag32_verilog_init (code, data, config') (cl, input) init fext fextv <=>
+  lift_fext fextv fext /\
+  (fext 0).mem = (init_memory code data (THE config'.ffi_names) (cl, input)) /\
+  vars_has_type init (relMtypes ++ ag32types) /\
+  INIT_verilog (fext 0) init`;
+
 val exit_code_0_def = Define `
  exit_code_0 vs fextv <=>
   erun fextv <| vars := vs |> (ArrayIndex (Var "R") [Const (w2ver (1w:word6))]) = INR (w2ver (0w:word32))`;
@@ -20,7 +27,7 @@ val exit_code_0_def = Define `
 val is_halted_def = Define `
  is_halted fin (_, _, config') <=>
  let num_ffis = LENGTH (THE config'.ffi_names) in
-  (mget_var fin "PC") = INR (n2ver (ffi_jumps_offset + (num_ffis + 1) * ffi_offset))`;
+  (mget_var fin "PC") = INR (w2ver (n2w (ffi_jumps_offset + (num_ffis + 1) * ffi_offset):word32))`;
 
 val after_R_1w_lift = Q.store_thm("after_R_1w_lift",
  `!env (hol_s:state_circuit) (s:ag32_state) fext fextv n.

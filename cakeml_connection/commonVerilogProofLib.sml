@@ -9,7 +9,7 @@ open ag32MachineTheory ag32EqTheory ag32HaltTheory ag32VerilogTheory;
 open commonVerilogProofTheory;
 
 fun lift_tac ag32_next_thm config_def =
- rpt strip_tac \\
+ rw [ag32_verilog_init_def] \\
  drule_strip (vars_has_type_append |> SPEC_ALL |> EQ_IMP_RULE |> fst |> SPEC_ALL) \\
 
  drule_strip relM_backwards \\
