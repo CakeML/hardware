@@ -9,7 +9,12 @@ open ag32MachineTheory ag32EqTheory ag32HaltTheory ag32VerilogTheory;
 open commonVerilogProofTheory;
 
 fun lift_tac ag32_next_thm config_def =
+ rewrite_tac [verilog_sem_def] \\ rpt gen_tac \\
+ SELECT_ELIM_TAC \\ conj_asm1_tac >- metis_tac[lift_fext_exists] \\
+
  rw [ag32_verilog_init_def] \\
+ `mrun x computer ms = mrun x' computer ms` by metis_tac [lift_fext_unique] \\
+ last_x_assum kall_tac \\ fs [] \\ pop_assum kall_tac \\
  drule_strip (vars_has_type_append |> SPEC_ALL |> EQ_IMP_RULE |> fst |> SPEC_ALL) \\
 
  drule_strip relM_backwards \\

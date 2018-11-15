@@ -14,12 +14,12 @@ val wc_spec_def = Define`
                  mlnum$toString (LENGTH (splitlines input)); strlit "\n"]))`;
 
 val wordcount_ag32_next_verilog = Q.prove(
- `!vstep fext fextv ms input.
-   vstep = mrun fextv computer ms ∧
+ `!vstep fext ms input.
+   vstep = verilog_sem fext computer ms ∧
 
    STRLEN input ≤ stdin_size ∧
    is_lab_env fext_accessor_verilog vstep fext ∧
-   ag32_verilog_init (code, data, config) ([strlit "wordcount"], input) ms fext fextv
+   ag32_verilog_init (code, data, config) ([strlit "wordcount"], input) ms fext
    ⇒
    ?output. wc_spec input output ∧
    ?k1. !k. k1 ≤ k ==>
@@ -28,7 +28,7 @@ val wordcount_ag32_next_verilog = Q.prove(
     in
       is_halted fin (code, data, config) ∧
       stdout ≼ output ∧
-      (exit_code_0 fin (fextv k) ⇒ stdout = output)`,
+      (exit_code_0 fin ⇒ stdout = output)`,
  rewrite_tac [wc_spec_def] \\
  lift_tac wordcount_ag32_next
           wordcountCompileTheory.config_def \\
