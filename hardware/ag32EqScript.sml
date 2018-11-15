@@ -1335,9 +1335,9 @@ val INIT_circuit = Q.store_thm("INIT_circuit",
 
 val INIT_REL_circuit_lem = Q.store_thm("INIT_REL_circuit_lem",
  `!n cstep s facc init fext.
-   INIT (fext 0) init s /\
-
    cstep = circuit facc init fext /\
+
+   INIT (fext 0) init s /\
 
    is_lab_env fext_accessor_circuit cstep fext /\
 
