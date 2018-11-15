@@ -6,45 +6,67 @@ open commonVerilogProofLib;
 
 val _ = new_theory "cakeVerilogProof";
 
-val cake_ag32_next_verilog = Q.store_thm("cake_ag32_next_verilog",
- `!vstep fext fextv init cl inp.
-   vars_has_type init ag32_verilog_types ∧
-   INIT_verilog (fext 0) init ∧
+val compiler_spec_def = Define `
+ compiler_spec input cl stdout stderr <=>
+  (stdout, stderr) =
+   if has_version_flag (TL cl) then
+    (explode current_build_info_str, "")
+   else
+    let (cout, cerr) = compile_32 (TL cl) input in
+        (explode (concat (append cout)), explode cerr)`;
 
-   vstep = mrun fextv computer init ∧
+val compiler_spec_alt = Q.prove(
+ `!input cl stdout stderr.
+   compiler_spec input cl stdout stderr <=>
+   (stdout =
+   if has_version_flag (TL cl) then
+    explode current_build_info_str
+   else
+    explode (concat (append (FST (compile_32 (TL cl) input))))) /\
+   (stderr =
+   if has_version_flag (TL cl) then
+    ""
+   else
+    explode (SND (compile_32 (TL cl) input)))`,
+ rw [compiler_spec_def] \\ pairarg_tac \\ fs []);
+
+val cl_ok_def = Define `
+ cl_ok cl <=>
+  SUM (MAP strlen cl) + LENGTH cl ≤ cline_size ∧
+  wfcl cl`;
+
+val cake_ag32_next_verilog = Q.prove(
+ `!vstep fext ms cl input.
+   vstep = verilog_sem fext computer ms ∧
+
+   cl_ok cl ∧
+   STRLEN input ≤ stdin_size ∧
 
    is_lab_env fext_accessor_verilog vstep fext ∧
-   (fext 0).mem = (init_memory code data (THE config.ffi_names) (cl, inp)) ∧
-   lift_fext fextv fext ∧
-
-   SUM (MAP strlen cl) + LENGTH cl ≤ cline_size ∧
-   wfcl cl ∧
-   STRLEN inp ≤ stdin_size
+   ag32_verilog_init (code, data, config) (cl, input) ms fext
    ⇒
+   ?stdout stderr. compiler_spec input cl stdout stderr /\
    ?k1.
     !k. k1 ≤ k ==>
     ?fin. vstep k = INR fin /\
     let outs = MAP get_ag32_io_event (fext k).io_events;
         outs_stdout = extract_writes 1 outs;
-        outs_stderr = extract_writes 2 outs;
-        (outs_stdout_spec, outs_stderr_spec) =
-         if has_version_flag (TL cl) then
-          (explode current_build_info_str, "")
-         else
-          let (cout, cerr) = compile_32 (TL cl) inp in
-           (explode (concat (append cout)), explode cerr)
+        outs_stderr = extract_writes 2 outs
     in
-      ag32_is_halted fin cake_machine_config ∧
-      outs_stdout ≼ outs_stdout_spec ∧
-      outs_stderr ≼ outs_stderr_spec ∧
-      (exit_code_0 fin (fextv k) ⇒
-       outs_stdout = outs_stdout_spec ∧
-       outs_stderr = outs_stderr_spec)`,
+      is_halted fin (code, data, config) ∧
+      outs_stdout ≼ stdout ∧
+      outs_stderr ≼ stderr ∧
+      (exit_code_0 fin ⇒
+       outs_stdout = stdout ∧
+       outs_stderr = stderr)`,
+ rewrite_tac [cl_ok_def, compiler_spec_alt] \\
  lift_tac cake_ag32_next
           ag32BootstrapTheory.config_def \\
- pairarg_tac \\ simp [] \\
- pairarg_tac \\ fs [] \\
- drule cake_extract_writes \\ simp [] \\ strip_tac \\
+
+ drule (cake_extract_writes |> GEN_ALL) \\
+ disch_then (qspec_then `input` mp_tac) \\
+ simp [] \\
+ pairarg_tac \\ simp [] \\ strip_tac \\
  rpt conj_tac
 
  >- fs [relM_def, relM_var_def, WORD_def]
@@ -55,5 +77,8 @@ val cake_ag32_next_verilog = Q.store_thm("cake_ag32_next_verilog",
 
  \\ strip_tac \\ rfs [] \\ drule_strip after_R_1w_lift \\ drule_first \\
     every_case_tac \\ fs [cake_extract_writes]);
+
+val _ = save_thm("cake_ag32_next_verilog",
+ cake_ag32_next_verilog |> REWRITE_RULE [LET_THM] |> BETA_RULE);
 
 val _ = export_theory ();

@@ -11,10 +11,11 @@ open commonVerilogProofTheory;
 fun lift_tac ag32_next_thm config_def =
  rewrite_tac [verilog_sem_def] \\ rpt gen_tac \\
  SELECT_ELIM_TAC \\ conj_asm1_tac >- metis_tac[lift_fext_exists] \\
+ pop_assum strip_assume_tac \\
 
- rw [ag32_verilog_init_def] \\
+ rewrite_tac [ag32_verilog_init_def] \\ rpt strip_tac \\
  `mrun x computer ms = mrun x' computer ms` by metis_tac [lift_fext_unique] \\
- last_x_assum kall_tac \\ fs [] \\ pop_assum kall_tac \\
+ last_x_assum kall_tac \\ FULL_SIMP_TAC bool_ss [] \\ pop_assum kall_tac \\
  drule_strip (vars_has_type_append |> SPEC_ALL |> EQ_IMP_RULE |> fst |> SPEC_ALL) \\
 
  drule_strip relM_backwards \\
@@ -38,7 +39,7 @@ fun lift_tac ag32_next_thm config_def =
  drule_strip is_mem_verilog \\
  drule_strip is_interrupt_interface_verilog \\
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_halt_compute_step_full_actual') \\
- fs [arithmeticTheory.LESS_EQ_EXISTS] \\ 
+ fs [arithmeticTheory.LESS_EQ_EXISTS] \\
  qmatch_assum_rename_tac `k = m + m1` \\ rveq \\
  disch_then (qspecl_then [`m`, `m1`] mp_tac) \\ impl_tac
  >- (rpt conj_tac
@@ -56,7 +57,7 @@ fun lift_stdout_tac spec_thm =
  rpt conj_tac
 
  >- fs [relM_def, relM_var_def, WORD_def]
- 
+
  >- metis_tac [spec_thm, is_prefix_extract_writes]
 
  \\ strip_tac \\ rfs [] \\ drule_strip after_R_1w_lift \\ drule_first \\
