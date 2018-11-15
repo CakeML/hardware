@@ -66,4 +66,14 @@ fun verty_for_type ty =
   end
   else raise UnableToTranslateTy (ty, "just a type variable");
 
+fun build_fextv_others include_time vars = let
+ val vars = pred_setSyntax.mk_set vars
+ val tm = if include_time then
+           ``!var. var ∉ ^vars ==> fextv (n:num) var = INL UnknownVariable``
+          else
+            ``!var. var ∉ ^vars ==> fextv var = INL UnknownVariable``
+in
+ inst [ alpha |-> ``:value`` ] tm
+end;
+
 end

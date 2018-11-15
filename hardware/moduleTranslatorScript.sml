@@ -43,14 +43,30 @@ val relMtypes_def =
  |> (fn tms => listSyntax.mk_list (tms, ``:string # vertype``))
  |> (fn tm => Define `relMtypes = ^tm`);
 
-val lift_fext_def =
+val lift_fext_vars =
  zip (TypeBase.fields_of fext_ty)
      (TypeBase.accessors_of fext_ty |> map (rator o lhs o concl o SPEC_ALL))
- |> filter (fn ((name, _), _) => not (mem name model_fext_vars))
+ |> filter (fn ((name, _), _) => not (mem name model_fext_vars));
+
+val lift_fext_others =
+ lift_fext_vars
+ |> map (fromMLstring o fst o fst);
+
+val lift_fext_def =
+ lift_fext_vars
  |> map (fn ((f, ty), accessor) => (fromMLstring f, hol2ver_for_type ty, accessor))
  |> map (fn (f, ty, accessor) => ``fextv (n:num) ^f = INR (^ty (^accessor (fext n)))``)
+ |> flip append [build_fextv_others true lift_fext_others]
  |> list_mk_conj |> inst [ alpha |-> ``:error`` ]
  |> (fn tm => Define `lift_fext fextv fext = !n. ^tm`);
+
+val lift_fext_unique = Q.store_thm("lift_fext_unique",
+ `!fext fextv1 fextv2.
+   lift_fext fextv1 fext /\ lift_fext fextv2 fext ==> fextv1 = fextv2`,
+ rw [lift_fext_def, FUN_EQ_THM] \\
+ qmatch_goalsub_rename_tac `fextv1 _ var` \\
+ MAP_EVERY (fn var => Cases_on `var = ^var` >- rw []) lift_fext_others \\
+ fs []);
 
 val lift_fext_relS_fextv_fext = Q.store_thm("lift_fext_relS_fextv_fext",
  `!fextv fext. lift_fext fextv fext <=> (!n. relS_fextv (fextv n) (fext n))`,

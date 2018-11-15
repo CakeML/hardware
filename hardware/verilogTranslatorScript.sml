@@ -46,7 +46,8 @@ end;
 val relS_fextv_def =
  fext_accessors
  |> map build_fextv_var
- |> list_mk_conj
+ |> flip append [build_fextv_others false (fext_accessors |> map (fromMLstring o fst))]
+ |> list_mk_conj |> inst [ alpha |-> ``:error`` ]
  |> (fn tm => Define `relS_fextv fextv fext = ^tm`);
 
 (*
