@@ -6,35 +6,31 @@ open commonVerilogProofLib;
 
 val _ = new_theory "helloVerilogProof";
 
-(*
-val hello_ag32_next_verilog = Q.store_thm("hello_ag32_next_verilog",
- `!vstep fext fextv init cl inp.
-   vars_has_type init ag32_verilog_types ∧
-   INIT_verilog (fext 0) init ∧
+val hello_spec_def = Define `
+ wc_spec output <=> output = "Hello World!\n"`;
 
-   vstep = mrun fextv computer init ∧
-
-   is_lab_env fext_accessor_verilog vstep fext ∧
-   (fext 0).mem = (init_memory code data (THE config.ffi_names) (cl, inp)) ∧
-   lift_fext fextv fext ∧
+val hello_ag32_next_verilog = Q.prove(
+ `!vstep fext ms cl input.
+   vstep = verilog_sem fext computer ms ∧
 
    SUM (MAP strlen cl) + LENGTH cl ≤ cline_size ∧
    wfcl cl ∧
-   STRLEN inp ≤ stdin_size
+   STRLEN input ≤ stdin_size ∧
+   is_lab_env fext_accessor_verilog vstep fext ∧
+   ag32_verilog_init (code, data, config) (cl, input) ms fext
    ⇒
-   ?k1.
-    !k. k1 ≤ k ==>
-    ?fin. vstep k = INR fin /\
-    let outs = MAP get_ag32_io_event (fext k).io_events;
-        outs_stdout = extract_writes 1 outs;
-        outs_stdout_spec = "Hello World!\n"
+   ?output. ?k1. !k. k1 ≤ k ==> ?fin.
+    wc_spec output ∧
+    vstep k = INR fin /\
+    let stdout = extract_writes 1 (MAP get_ag32_io_event (fext k).io_events)
     in
-      ag32_is_halted fin hello_machine_config ∧
-      outs_stdout ≼ outs_stdout_spec ∧
-      (exit_code_0 fin (fextv k) ⇒ outs_stdout = outs_stdout_spec)`,
- lift_tac hello_ag32_next
+      is_halted (code, data, config) fin ∧
+      stdout ≼ output ∧
+      (exit_code_0 fin ⇒ stdout = output)`,
+ rewrite_tac [hello_spec_def] \\
+ lift_tac 1
+          hello_ag32_next
           helloCompileTheory.config_def \\
  lift_stdout_tac hello_extract_writes_stdout);
-*)
 
 val _ = export_theory ();
