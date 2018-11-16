@@ -21,16 +21,17 @@ val wordcount_ag32_next_verilog = Q.prove(
    is_lab_env fext_accessor_verilog vstep fext ∧
    ag32_verilog_init (code, data, config) ([strlit "wordcount"], input) ms fext
    ⇒
-   ?output. wc_spec input output ∧
-   ?k1. !k. k1 ≤ k ==>
-    ?fin. vstep k = INR fin /\
+   ?output. ?k1. !k. k1 ≤ k ==> ?fin.
+    wc_spec input output ∧
+    vstep k = INR fin /\
     let stdout = extract_writes 1 (MAP get_ag32_io_event (fext k).io_events)
     in
       is_halted fin (code, data, config) ∧
       stdout ≼ output ∧
       (exit_code_0 fin ⇒ stdout = output)`,
  rewrite_tac [wc_spec_def] \\
- lift_tac wordcount_ag32_next
+ lift_tac 1
+          wordcount_ag32_next
           wordcountCompileTheory.config_def \\
  lift_stdout_tac wordcount_extract_writes_stdout);
 
