@@ -26,7 +26,7 @@ val wordcount_ag32_next_verilog = Q.prove(
     vstep k = INR fin /\
     let stdout = extract_writes 1 (MAP get_ag32_io_event (fext k).io_events)
     in
-      is_halted fin (code, data, config) ∧
+      is_halted (code, data, config) fin ∧
       stdout ≼ output ∧
       (exit_code_0 fin ⇒ stdout = output)`,
  rewrite_tac [wc_spec_def] \\

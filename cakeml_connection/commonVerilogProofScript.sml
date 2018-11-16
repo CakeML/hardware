@@ -52,7 +52,7 @@ val exit_code_0_def = Define `
 
 (* Should be replaced by event-based definition? *)
 val is_halted_def = Define `
- is_halted fin (_, _, config') <=>
+ is_halted (_, _, config') fin <=>
  let num_ffis = LENGTH (THE config'.ffi_names) in
   (mget_var fin "PC") = INR (w2ver (n2w (ffi_jumps_offset + (num_ffis + 1) * ffi_offset):word32))`;
 
