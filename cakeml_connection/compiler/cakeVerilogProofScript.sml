@@ -45,10 +45,9 @@ val cake_ag32_next_verilog = Q.prove(
    is_lab_env fext_accessor_verilog vstep fext ∧
    ag32_verilog_init (code, data, config) (cl, input) ms fext
    ⇒
-   ?stdout stderr. compiler_spec input cl stdout stderr /\
-   ?k1.
-    !k. k1 ≤ k ==>
-    ?fin. vstep k = INR fin /\
+   ?stdout stderr k1. !k. k1 ≤ k ==> ?fin.
+    compiler_spec input cl stdout stderr /\
+    vstep k = INR fin /\
     let outs = MAP get_ag32_io_event (fext k).io_events;
         outs_stdout = extract_writes 1 outs;
         outs_stderr = extract_writes 2 outs
@@ -60,7 +59,8 @@ val cake_ag32_next_verilog = Q.prove(
        outs_stdout = stdout ∧
        outs_stderr = stderr)`,
  rewrite_tac [cl_ok_def, compiler_spec_alt] \\
- lift_tac cake_ag32_next
+ lift_tac 2
+          cake_ag32_next
           ag32BootstrapTheory.config_def \\
 
  drule (cake_extract_writes |> GEN_ALL) \\
