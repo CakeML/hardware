@@ -52,7 +52,7 @@ val cake_ag32_next_verilog = Q.prove(
         outs_stdout = extract_writes 1 outs;
         outs_stderr = extract_writes 2 outs
     in
-      is_halted fin (code, data, config) ∧
+      is_halted (code, data, config) fin ∧
       outs_stdout ≼ stdout ∧
       outs_stderr ≼ stderr ∧
       (exit_code_0 fin ⇒
