@@ -4,7 +4,7 @@ open arithmeticTheory bitstringTheory fcpTheory indexedListsTheory optionTheory 
 open bitstringLib dep_rewrite wordsLib;
 open bitstringSyntax boolSyntax combinSyntax numSyntax stringSyntax;
 
-open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory ag32MachineTheory;
+open sumExtraTheory verilogTheory verilogTypeTheory verilogMetaTheory;
 open verilogTranslatorConfigLib verilogTranslatorCoreLib;
 open verilogSyntax;
 

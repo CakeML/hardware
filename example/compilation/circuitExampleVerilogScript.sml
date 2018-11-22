@@ -5,11 +5,9 @@ open moduleTranslatorTheory;
 open verilogTranslatorLib verilogLiftLib;
 open circuitExampleTheory;
 
-val _ = new_theory "circuitExampleTranslator";
+val _ = new_theory "circuitExampleVerilog";
 
-(*
-
-prefer_num ();
+val _ = prefer_num ();
 
 (* TODO: Duplication *)
 fun intro_cvars_for_prog prog =
@@ -47,11 +45,11 @@ end;
 
 val AB_mstep_commit = Q.store_thm("AB_mstep_commit",
  `!n fext fextv init vs ps.
-  relM (AB fext init n) vs /\ relM_fextv fextv fext
+  relM (AB fext init n) vs /\ lift_fext fextv fext
   ==>
   ?vs'. mstep_commit (fextv n) ABv vs = INR vs' /\
         relM (AB fext init (SUC n)) vs'`,
- rewrite_tac [relM_fextv_fext_relS_fextv_fext, ABv_def] \\ rpt strip_tac \\
+ rewrite_tac [lift_fext_relS_fextv_fext, ABv_def] \\ rpt strip_tac \\
  first_x_assum (qspec_then `n` assume_tac) \\
  qspecl_then [`cvars`, `fext n`, `[Av; Bv]`, `fextv n`, `vs`, `AB fext init n`, `K T`] mp_tac mstep_commit_lift_EvalSs \\ impl_tac
  >- (rpt conj_tac
@@ -74,7 +72,7 @@ val AB_mstep_commit = Q.store_thm("AB_mstep_commit",
 
 val AB_mrun = Q.store_thm("AB_mrun",
  `!n fextv fext init vs.
-  relM init vs /\ relM_fextv fextv fext
+  relM init vs /\ lift_fext fextv fext
   ==>
   ?vs'. mrun fextv ABv vs n = INR vs' /\ relM (AB fext init n) vs'`,
  rpt strip_tac \\ match_mp_tac mstep_commit_mrun \\ qexists_tac `[]` \\ rpt conj_tac
@@ -97,18 +95,19 @@ val relM_backwards = Q.prove(
 val pulse_spec_verilog_def = Define `
  pulse_spec_verilog fext <=>
   (!n. ?m. (fext (n + m)) "pulse" = INR (VBool T)) /\
-  !n. ?b. (fext n) "pulse" = INR (VBool b)`;
+  (!n. ?b. (fext n) "pulse" = INR (VBool b)) /\
+  (!n var. var <> "pulse" ==> (fext n) var = INL UnknownVariable)`;
 
 val pulse_spec_verilog_to_pulse_spec_def = Define `
  pulse_spec_verilog_to_pulse_spec fextv n = <| pulse := ((fextv n) "pulse" = INR (VBool T)) |>`;
 
 val pulse_spec_verilog_backwards = Q.prove(
- `!fextv. pulse_spec_verilog fextv ==> ?fext. pulse_spec fext /\ relM_fextv fextv fext`,
- rw [pulse_spec_verilog_def, pulse_spec_def, relM_fextv_def] \\
+ `!fextv. pulse_spec_verilog fextv ==> ?fext. pulse_spec fext /\ lift_fext fextv fext`,
+ rw [pulse_spec_verilog_def, pulse_spec_def, lift_fext_def] \\
  qexists_tac `pulse_spec_verilog_to_pulse_spec fextv` \\
  rw [pulse_spec_verilog_to_pulse_spec_def] \\
  Cases_on `fextv n "pulse"` >- metis_tac [sumTheory.ISR] \\
- Cases_on `y` \\ simp [] \\ first_x_assum (qspec_then `n` strip_assume_tac) \\ fs []);
+ Cases_on `y` \\ simp [] \\ ntac 2 (first_x_assum (qspec_then `n` strip_assume_tac)) \\ fs []);
 
 val AB_spec_verilog = Q.store_thm("AB_spec_verilog",
  `!fext fextv Γ.
@@ -142,7 +141,5 @@ R_trans |> vprog_print |> print
 
 val word_xor_1_2 = save_thm("word_xor_1_2",
  hol2hardware_exp (mk_var ("s", state_ty)) ``word_xor (1w:word8) 2w``);
-
-*)
 
 val _ = export_theory ();
