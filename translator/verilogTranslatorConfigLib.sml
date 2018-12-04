@@ -5,15 +5,15 @@ open hardwarePreamble;
 
 (** Config **)
 
+(*
 open ag32MachineTheory;
 val state_ty = ``:state_circuit``;
 val fext_ty = ``:ext``;
+*)
 
-(*
 open circuitExampleTheory;
 val state_ty = ``:state``;
 val fext_ty = ``:ext_state``;
-*)
 
 (** State record info **)
 
