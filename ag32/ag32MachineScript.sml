@@ -234,9 +234,8 @@ val decode_instruction_def = Define `
   else
     s with instruction := 15w`;
 
-(* sw2sw around R is needed to be able to extract to Verilog *)
 val DecodeReg_imm_def = Define `
- DecodeReg_imm (flag, v) s = (if flag then sw2sw v else sw2sw (s.R v)):word32`;
+ DecodeReg_imm (flag, v) s = (if flag then sw2sw v else s.R v):word32`;
 
 val ALU_def = Define `
  ALU ((func:word4), ALU_fst, ALU_snd) s =
