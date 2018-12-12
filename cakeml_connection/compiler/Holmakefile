@@ -1,5 +1,6 @@
 INCLUDES = .. \
-           ../../hardware \
+           ../.. \
+           ../../ag32/compilation \
            $(CAKEMLDIR)/compiler/bootstrap/compilation/ag32/32 \
            $(CAKEMLDIR)/compiler/bootstrap/compilation/ag32/32/proofs \
            $(CAKEMLDIR)/compiler/encoders/ag32 \

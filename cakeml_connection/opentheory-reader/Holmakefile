@@ -1,5 +1,6 @@
 INCLUDES = .. \
-           ../../hardware \
+           ../.. \
+           ../../ag32/compilation \
            $(CAKEMLDIR)/candle/standard/opentheory/compilation/ag32 \
            $(CAKEMLDIR)/candle/standard/opentheory/compilation/ag32/proofs \
            $(CAKEMLDIR)/compiler/encoders/ag32 \
