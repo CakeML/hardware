@@ -228,12 +228,6 @@ val _ = Datatype `
       | Arith exp arith exp
         (* For arrays, reduces to boolean. Equality for arrays is here. *)
       | Cmp exp cmp exp
-
-        (* This is a hack because we do not have resizing (and sign handling) formalized,
-           should be removed in separate later pass (as done with non-blocking assignments).
-
-           Removing them requires non-local reasoning, i.e. reasoning not compatible with the
-           translator (first-step) approach. *)
       | Resize exp resize num`;
 
 val exp_size_def = definition "exp_size_def";
@@ -360,10 +354,12 @@ val erun_shift_def = Define `
  (erun_shift ShiftLogicalR l r = TAKE (LENGTH l) (GENLIST (K (VBool F)) r ++ l))`;
 
 val erun_arith_def = Define `
- (erun_arith Plus (l:num) r _ = l + r) /\
- (erun_arith Minus l r max = l + ((max - r) MOD max)) /\ (* max - r term is 2comp, see e.g. word_2comp *)
- (erun_arith Times l r _ = l * r) /\
- (erun_arith Mod l r _ = l MOD r)`;
+ (erun_arith Plus (l:num) r _ = INR (l + r)) /\
+ (* max - r term is 2comp, see e.g. word_2comp: *)
+ (erun_arith Minus l r max = INR (l + ((max - r) MOD max))) /\
+ (erun_arith Times l r _ = INR (l * r)) /\
+ (* this is ok as we only consider non-negative numbers: *)
+ (erun_arith Mod l r _ = if r = 0 then INL InvalidArgument else INR (l MOD r))`;
 
 (* Compare operations for arrays *)
 val erun_cmp_def = Define `
@@ -474,8 +470,8 @@ val erun_def = tDefine "erun" `
                                         sum_bind (ver_mapVArray LENGTH lhs) (\lhslen.
                                         sum_bind (ver2n lhs) (\lhsn.
                                         sum_bind (ver2n rhs) (\rhsn.
-                                        ver_liftVArray (ver_fixwidth lhslen)
-                                                       (n2ver (erun_arith aop lhsn rhsn (2 ** lhslen))))))
+                                        sum_bind (erun_arith aop lhsn rhsn (2 ** lhslen)) (\res.
+                                        ver_liftVArray (ver_fixwidth lhslen) (n2ver res)))))
                                       else
                                         INL TypeError))) /\
  (erun fext s (Cmp lhs cmp rhs) = sum_bind (erun fext s lhs) (\lhs.

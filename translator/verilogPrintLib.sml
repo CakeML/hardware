@@ -99,13 +99,11 @@ fun exp_print tm =
     (exp_print_paren exp1) ^ bop ^ (exp_print_paren exp2)
   end
 
-  (* LIMITATION: *)
   else if is_Shift tm then let
     val (exp1, shift, exp2) = dest_Shift tm
   in
     if is_ShiftArithR shift then
-      (* TODO: Check this, should be wrapped in $unsigned? *)
-      "$signed(" ^ (exp_print exp1) ^ ") >>> (" ^ (exp_print exp2) ^ ")"
+      "{$signed(" ^ (exp_print exp1) ^ ") >>> (" ^ (exp_print exp2) ^ ")}"
     else if is_ShiftLogicalL shift then
       (exp_print_paren exp1) ^ " << " ^ (exp_print_paren exp2)
     else if is_ShiftLogicalR shift then
@@ -121,7 +119,6 @@ fun exp_print tm =
     (exp_print_paren exp1) ^ bop ^ (exp_print_paren exp2)
   end
 
-  (* LIMITATION: *)
   else if is_Cmp tm then let
     val (exp1, cmp, exp2) = dest_Cmp tm
     val exp1' = exp_print_paren exp1
@@ -132,26 +129,27 @@ fun exp_print tm =
     else if is_ArrayNotEqual cmp then
       exp1' ^ " != " ^ exp2'
     else if is_LessThan cmp then
-      "$signed(" ^ (exp_print exp1) ^ ") < $signed(" ^ (exp_print exp2) ^ ")"
+      "{$signed(" ^ (exp_print exp1) ^ ") < $signed(" ^ (exp_print exp2) ^ ")}"
     else if is_LowerThan cmp then
       exp1' ^ " < " ^ exp2'
     else if is_LessThanOrEqual cmp then
-      "$signed(" ^ (exp_print exp1) ^ ") <= $signed(" ^ (exp_print exp2) ^ ")"
+      "{$signed(" ^ (exp_print exp1) ^ ") <= $signed(" ^ (exp_print exp2) ^ ")}"
     else if is_LowerThanOrEqual cmp then
       exp1' ^ " <= " ^ exp2'
     else
       failwith "Unknown shift operator"
   end
 
-  (* LIMITATION: *)
   else if is_Resize tm then let
-    val (exp, resize, _) = dest_Resize tm
+    val (exp, resize, width) = dest_Resize tm
     val exp = exp_print exp
+    val width = width |> dest_numeral |> Arbnumcore.toString
   in
     if is_SignExtend resize then
-      "$signed(" ^ exp ^ ")"
+      (* It's not entirely clear if additional {} are around exp here, but I don't think so... *)
+      "{" ^ width ^ "'($signed(" ^ exp ^ "))}"
     else
-      exp
+      width ^ "'({" ^ exp ^ "})"
   end
 
   else
@@ -245,7 +243,7 @@ and vprog_print_paren tm =
  else
    vprog_print tm
 
-(* NOTE: Here we assume that the "lhs" will just be constants, as is the case for Tiny, so we do not add parens for lhs *)
+(* NOTE: Here we assume that the "lhs" will just be constants, so we do not add parens for lhs *)
 and vprog_cases_print tm = let
   val (exp, prg) = dest_pair tm
   val exp = exp_print exp

@@ -6,7 +6,7 @@ val _ = new_theory "sumExtra";
 
 (* Error type, should probably have a lot more cases *)
 val error_def = Datatype `
- error = UnknownVariable | TypeError | InvalidIndex | NotImplemented`;
+ error = UnknownVariable | TypeError | InvalidIndex | NotImplemented | InvalidArgument`;
 
 val sum_bind_def = Define `
   (sum_bind (INL l) _ = INL l) /\

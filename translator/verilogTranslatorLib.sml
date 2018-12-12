@@ -171,7 +171,7 @@ val builtin_binops = [
 
   Eval_WORD_ShiftArithR, Eval_WORD_ShiftLogicalL, Eval_WORD_ShiftLogicalR,
 
-  Eval_WORD_Minus, Eval_WORD_Plus, Eval_WORD_Times, Eval_WORD_Mod,
+  Eval_WORD_Minus, Eval_WORD_Plus, Eval_WORD_Times,
 
   Eval_WORD_Equal, Eval_WORD_LessThan, Eval_WORD_LowerThan,
   Eval_WORD_LessThanOrEqual, Eval_WORD_LowerThanOrEqual
@@ -221,6 +221,18 @@ fun hol2hardware_exp s tm =
     val result = MATCH_MP lemma (CONJ th1 th2)
   in
     check_inv_Eval "binop" tm result
+  end
+
+  (* CASE: Mod? Need special case as we need to check non-zero. *)
+  else if is_word_mod tm then let
+    val (x1, x2) = dest_word_mod tm
+    val th1 = hol2hardware_exp s x1
+    val th2 = hol2hardware_exp s x2
+    val result = MATCH_MP Eval_WORD_Mod (CONJ th1 th2)
+    (* Will only work for simple cases: *)
+    val result = EVAL_MP result
+  in
+    check_inv_Eval "word_mod" tm result
   end
 
   (* CASE: Neg? *)
@@ -289,8 +301,10 @@ fun hol2hardware_exp s tm =
     (*val in_dim = dim_of arg
     val precond = mk_less (mk_dimindex in_dim, mk_dimindex out_dim) |> EVAL_PROVE*)
     val arg' = hol2hardware_exp s arg
+    val result = MATCH_MP Eval_w2w arg'
+    val result = INST_TYPE [ beta |-> out_dim ] result
   in
-    arg' |> MATCH_MP Eval_w2w |> INST_TYPE [ beta |-> out_dim ] |> (CONV_RULE o RAND_CONV o RAND_CONV) EVAL
+    ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
   end
 
   (* CASE: zero extend? (Almost identical to w2w.) *)
@@ -299,8 +313,9 @@ fun hol2hardware_exp s tm =
     val in_dim = dim_of arg
     val precond = mk_leq (mk_dimindex in_dim, mk_dimindex out_dim) |> EVAL_PROVE
     val arg' = hol2hardware_exp s arg
+    val result = MATCH_MP Eval_sw2sw (CONJ precond arg')
   in
-    MATCH_MP Eval_sw2sw (CONJ precond arg')
+    ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
   end
 
   else if is_v2w tm then let
