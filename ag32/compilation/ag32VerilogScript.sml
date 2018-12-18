@@ -162,7 +162,7 @@ val INIT_verilog_vars_def = Define `
   BOOL F (THE (ALOOKUP env "do_interrupt")) /\
   BOOL F (THE (ALOOKUP env "interrupt_req")) /\
 
-  WORD_ARRAY (\(i:word6). (0w:word32)) (THE (ALOOKUP env "R"))`;
+  WORD_ARRAY WORD (\(i:word6). (0w:word32)) (THE (ALOOKUP env "R"))`;
 
 val INIT_fext_def = Define `
  INIT_fext fext <=>

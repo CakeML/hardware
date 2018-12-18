@@ -359,10 +359,18 @@ fun hol2hardware_exp s tm =
 
     (* SUBCASE: Array indexing? Just assume it is for now... TODO *)
     else let
+      (* Strips state var as well... *)
+      val (f, args) = strip_comb tm
+      val f = mk_comb (f, hd args)
+      val args = tl args
       val f' = hol2hardware_exp s f
-      val arg' = hol2hardware_exp s arg
+      val args' = map (hol2hardware_exp s) args
+      val precond = LIST_CONJ (f' :: args')
     in
-      MATCH_MP Eval_WORD_ARRAY_indexing (CONJ f' arg')
+      case length args' of
+         1 => MATCH_MP Eval_WORD_ARRAY_indexing precond
+       | 2 => MATCH_MP Eval_WORD_ARRAY_indexing2 precond
+       | _ => raise UnableToTranslate (tm, "Unsupported indexing")
     end
 
     (*else
@@ -404,7 +412,9 @@ fun update_base_tac field =
 
  imp_res_tac same_shape_BOOL \\
  imp_res_tac same_shape_WORD \\
- imp_res_tac same_shape_WORD_ARRAY \\
+ imp_res_tac same_shape_WORD_ARRAY_BOOL \\
+ imp_res_tac same_shape_WORD_ARRAY_WORD \\
+ imp_res_tac same_shape_WORD_ARRAY_WORD_ARRAY_WORD \\
 
  simp [sum_bind_def, prun_bassn_def, assn_def, sum_for_def, sum_map_def] \\
  fs [relS_def, relS_var_def, get_var_cleanup];
@@ -507,7 +517,10 @@ fun WORD_ARRAY_slice_update_base_tac name =
  simp [prun_bassn_def, assn_def, sum_bind_def, sum_for_def, sum_map_def] \\
  simp [get_VArray_data_def, sum_bind_def, sum_for_def, sum_map_def] \\
 
- fs [get_VArray_data_def, WORD_ARRAY_def, w2ver_def, sum_bind_def] \\
+ fs [WORD_ARRAY_def] \\
+ first_assum (qspec_then `i` (strip_assume_tac o REWRITE_RULE [WORD_def, w2ver_def])) \\
+ rveq \\
+ simp [sum_bind_def, get_VArray_data_def] \\
 
  qmatch_goalsub_abbrev_tac `bit_field_insert _ _ wnew wold` \\
  Q.ISPECL_THEN [`wold`, `wnew`] mp_tac prun_set_slice_bit_field_insert \\
@@ -527,18 +540,23 @@ fun WORD_ARRAY_slice_update_base_tac name =
  unabbrev_all_tac \\
 
  impl_tac
- >- (simp [] \\ match_mp_tac EVERY_sum_revEL \\ rw [] \\ first_x_assum (qspec_then `n2w n` assume_tac) \\
-     rfs [w2n_n2w, LESS_MOD, same_shape_VArray_MAP_VBool]) \\
+ >- (simp [] \\ match_mp_tac EVERY_sum_revEL \\ rw [] \\ 
+     first_x_assum (qspec_then `n2w n` strip_assume_tac) \\
+     rfs [w2n_n2w, LESS_MOD, same_shape_VArray_MAP_VBool, WORD_def, w2ver_def]) \\
 
  strip_tac \\ rev_full_simp_tac bool_ss [sum_for_def, sum_map_def] \\ simp [] \\
 
  fs [relS_def, relS_var_def, WORD_ARRAY_def, WORD_def, get_var_cleanup] \\
  strip_tac \\ IF_CASES_TAC \\ fs [w2ver_def, combinTheory.UPDATE_def];
 
+fun can' f x = case total f x of SOME y => y | _ => false;
+
 (* Note that we do not have step thms for WORD_ARRAYs *)
 val WORD_ARRAY_update_base_thms =
  zip updates accessors
- |> filter (fn (_, (_, facc)) => (facc |> type_of |> dom_rng |> snd |> dest_type |> fst) = "fun")
+ |> filter (fn (_, (_, facc)) => can' ((fn (t1, t2) => is_word_type t1 andalso is_word_type t2) o
+                                       dom_rng o snd o dom_rng o type_of)
+                                  facc)
  |> map (fn ((name, updf), (_, projf)) =>
          (updf,
           [prove (build_WORD_ARRAY_slice_update_base_stmt name projf updf,

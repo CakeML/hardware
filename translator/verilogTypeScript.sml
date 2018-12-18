@@ -4,7 +4,7 @@ open bitstringTheory;
 
 open verilogTheory sumExtraTheory;
 
-(* This should really be replaced by a proper static type system, 
+(* This should really be replaced by a proper static type system,
    formalizing the actual Verilog type system. The current "type system" is based on what's needed
    for translation from HOL to Verilog only. *)
 
@@ -55,11 +55,11 @@ val WORD_def = Define `
 (* Arrays are in reverse order as we only have packed arrays in "reverse order"
    in this formalization *)
 val WORD_ARRAY_def = Define `
-  WORD_ARRAY (a:'a word -> 'b word) v <=>
+  WORD_ARRAY pred (arr:'a word -> 'b) v <=>
    case v of
        VBool _ => F
      | VArray vs => LENGTH vs = dimword(:'a) /\
-                    !i. sum_revEL (w2n i) vs = INR (w2ver (a i))`;
+                    !i. ?w. sum_revEL (w2n i) vs = INR w /\ pred (arr i) w`;
 
 val var_has_value_def = Define `
  var_has_value (env:envT) var P = ?v. ALOOKUP env var = SOME v /\ P v`;
@@ -84,6 +84,52 @@ val nbq_vars_has_type_def = Define `
  (nbq_vars_has_type env ((v, ty) :: xs) = (nbq_var_has_type env v ty /\ nbq_vars_has_type env xs))`;
 
 (** Various lemmas **)
+
+val BOOL_eq = Q.store_thm("BOOL_eq",
+ `!f1 f2 v.
+   BOOL f1 v /\
+   BOOL f2 v ==>
+   f1 = f2`,
+ rw [BOOL_def]);
+
+val WORD_eq = Q.store_thm("WORD_eq",
+ `!f1 f2 v.
+   WORD f1 v /\
+   WORD f2 v ==>
+   f1 = f2`,
+ rw [WORD_def] \\ fs [w2ver_bij]);
+
+val WORD_ARRAY_BOOL_eq = Q.store_thm("WORD_ARRAY_BOOL_eq",
+ `!f1 f2 v.
+   WORD_ARRAY BOOL f1 v /\
+   WORD_ARRAY BOOL f2 v ==>
+   f1 = f2`,
+ rw [WORD_ARRAY_def, BOOL_def] \\ every_case_tac \\ fs [] \\
+ match_mp_tac EQ_EXT \\ gen_tac \\
+ last_x_assum (qspec_then `x` assume_tac) \\
+ fs [w2ver_bij]);
+
+val WORD_ARRAY_WORD_eq = Q.store_thm("WORD_ARRAY_WORD_eq",
+ `!f1 f2 v.
+   WORD_ARRAY WORD f1 v /\
+   WORD_ARRAY WORD f2 v ==>
+   f1 = f2`,
+ rw [WORD_ARRAY_def, WORD_def] \\ every_case_tac \\ fs [] \\
+ match_mp_tac EQ_EXT \\ gen_tac \\
+ last_x_assum (qspec_then `x` assume_tac) \\
+ fs [w2ver_bij]);
+
+val WORD_ARRAY_WORD_ARRAY_WORD_eq = Q.store_thm("WORD_ARRAY_WORD_ARRAY_WORD_eq",
+ `!f1 f2 v.
+   WORD_ARRAY (WORD_ARRAY WORD) f1 v /\
+   WORD_ARRAY (WORD_ARRAY WORD) f2 v ==>
+   f1 = f2`,
+ rw [WORD_ARRAY_def, WORD_def] \\ every_case_tac \\ fs [] \\
+ rpt (match_mp_tac EQ_EXT \\ gen_tac) \\
+ rpt (first_x_assum (qspec_then `x` strip_assume_tac)) \\
+ every_case_tac \\ fs [] \\
+ rpt (first_x_assum (qspec_then `x'` assume_tac)) \\
+ fs [w2ver_bij]);
 
 val WORD_verlength = Q.store_thm("WORD_verlength",
  `!w v. WORD (w:'a word) v ==> verlength v = INR (dimindex(:'a))`,
@@ -172,6 +218,10 @@ val same_shape_append = Q.store_thm("same_shape_append",
    same_shape (VArray (xs1 ++ ys1)) (VArray (xs2 ++ ys2))`,
  rw [same_shape_VArray_cong2] \\ rw [EL_APPEND_EQN]);
 
+val same_shape_VArray_MAP_VBool = Q.store_thm("same_shape_VArray_MAP_VBool",
+`!l1 l2. LENGTH l1 = LENGTH l2 ==> same_shape (VArray (MAP VBool l1)) (VArray (MAP VBool l2))`,
+ Induct \\ rw [same_shape_def] \\ Cases_on `l2` \\ fs [same_shape_def]);
+
 val same_shape_w2ver = Q.store_thm("same_shape_w2ver",
  `!(w1:'a word) (w2:'a word). same_shape (w2ver w1) (w2ver w2)`,
  rw [w2ver_def, same_shape_VArray_from_v]);
@@ -184,12 +234,46 @@ val same_shape_WORD = Q.store_thm("same_shape_WORD",
  `!w1 v1 w2 v2. WORD (w1:'a word) v1 /\ WORD (w2:'a word) v2 ==> same_shape v1 v2`,
  rw [WORD_def, w2ver_def, same_shape_VArray_from_v]);
 
-val same_shape_WORD_ARRAY = Q.store_thm("same_shape_WORD_ARRAY",
+val same_shape_WORD_ARRAY_BOOL = Q.store_thm("same_shape_WORD_ARRAY_BOOL",
+ `!(w1:'a word -> bool) v1 (w2:'a word -> bool) v2.
+   WORD_ARRAY BOOL w1 v1 /\ WORD_ARRAY BOOL w2 v2 ==> same_shape v1 v2`,
+ rw [WORD_ARRAY_def, BOOL_def] \\ every_case_tac \\ fs [] \\
+ match_mp_tac same_shape_VArray_cong \\ rw [] \\
+ rpt (first_x_assum (qspec_then `n2w n` assume_tac)) \\
+ rfs [arithmeticTheory.LESS_MOD, same_shape_def]);
+
+val same_shape_WORD_ARRAY_WORD = Q.store_thm("same_shape_WORD_ARRAY_WORD",
  `!(w1:'a word -> 'b word) v1 (w2:'a word -> 'b word) v2.
-   WORD_ARRAY w1 v1 /\ WORD_ARRAY w2 v2 ==> same_shape v1 v2`,
- rw [WORD_ARRAY_def, w2ver_def] \\ Cases_on `v1` \\ Cases_on `v2` \\ fs [] \\
- match_mp_tac same_shape_VArray_sum_revEL_cong \\ qexists_tac `dimindex (:'b)` \\
- metis_tac [length_w2v]);
+   WORD_ARRAY WORD w1 v1 /\ WORD_ARRAY WORD w2 v2 ==> same_shape v1 v2`,
+ rw [WORD_ARRAY_def, WORD_def, w2ver_def] \\
+
+ every_case_tac \\ fs [] \\
+ match_mp_tac same_shape_VArray_cong \\ rw [] \\
+ rpt (first_x_assum (qspec_then `n2w n` assume_tac)) \\
+ rfs [arithmeticTheory.LESS_MOD] \\
+
+ match_mp_tac same_shape_VArray_MAP_VBool \\
+ simp [length_w2v]);
+
+val same_shape_WORD_ARRAY_WORD_ARRAY_WORD = Q.store_thm("same_shape_WORD_ARRAY_WORD_ARRAY_WORD",
+ `!(w1:'a word -> 'b word -> 'c word) v1 (w2:'a word -> 'b word -> 'c word) v2.
+   WORD_ARRAY (WORD_ARRAY WORD) w1 v1 /\ WORD_ARRAY (WORD_ARRAY WORD) w2 v2 ==> same_shape v1 v2`,
+ rw [WORD_ARRAY_def, WORD_def, w2ver_def] \\
+
+ (* First level *)
+ every_case_tac \\ fs [] \\
+ match_mp_tac same_shape_VArray_cong \\ rw [] \\
+ rpt (first_x_assum (qspec_then `n2w n` assume_tac)) \\
+ rfs [arithmeticTheory.LESS_MOD] \\
+
+ (* Second level *)
+ every_case_tac \\ fs [] \\
+ match_mp_tac same_shape_VArray_cong \\ rw [] \\
+ rpt (first_x_assum (qspec_then `n2w n'` assume_tac)) \\
+ rfs [arithmeticTheory.LESS_MOD] \\
+
+ match_mp_tac same_shape_VArray_MAP_VBool \\
+ simp [length_w2v]);
 
 (** Has value/type thms **)
 
@@ -244,13 +328,15 @@ val var_has_type_old_var_has_type_WORD = Q.store_thm("var_has_type_old_var_has_t
  rw [var_has_type_old_def] \\ eq_tac
  >- rw [var_has_value_var_has_type_WORD]
  \\ rw [var_has_type_def, Once has_type_cases, var_has_value_def, WORD_def] \\ rw [w2ver_def] \\
-    drule_strip var_has_type_old_var_has_type_WORD_help \\ 
+    drule_strip var_has_type_old_var_has_type_WORD_help \\
     qexists_tac `v2w bs` \\ match_mp_tac MAP_CONG \\ simp [w2v_v2w]);
 
 val var_has_value_var_has_type_WORD_ARRAY_help = Q.prove(
- `!l (w:'a word -> 'b word) v.
-   LENGTH l = dimword (:'a) /\ (!(i:'a word). sum_revEL (w2n i) l = INR (w2ver (w i))) /\ MEM v l ==>
-   ?(w':'b word). v = w2ver w'`,
+ `!P (w:'a word -> 'b) v l.
+   (!(i:'a word). sum_revEL (w2n i) l = INR (P (w i))) /\
+   LENGTH l = dimword (:'a) /\
+   MEM v l ==>
+   ?(w':'b). v = P w'`,
  simp [MEM_EL, sum_revEL_def] \\ rpt strip_tac \\ rveq \\
  first_x_assum (qspec_then `n2w (LENGTH l - n - 1)` assume_tac) \\
  fs [] \\ `(LENGTH l - (n + 1)) MOD dimword (:'a) = (LENGTH l - (n + 1))` by fs [] \\
@@ -258,11 +344,35 @@ val var_has_value_var_has_type_WORD_ARRAY_help = Q.prove(
  `LENGTH l − (LENGTH l − (n + 1) + 1) = n` by DECIDE_TAC \\ fs [] \\
  metis_tac []);
 
+(* In need of cleanup *)
+val var_has_type_old_var_has_type_WORD_ARRAY_BOOL = Q.store_thm("var_has_type_old_var_has_type_WORD_ARRAY_BOOL",
+ `!var env.
+   var_has_type_old env var (WORD_ARRAY BOOL : ('a word -> bool) -> value -> bool) <=>
+   var_has_type env var (VArray_t [dimword (:'a)])`,
+ rw [var_has_type_old_def] \\ eq_tac
+ >- (rw [var_has_value_def, var_has_type_def, WORD_ARRAY_def, BOOL_def] \\ every_case_tac \\ fs [] \\
+    match_mp_tac has_type_array_base \\ rw [] \\
+    drule_strip var_has_value_var_has_type_WORD_ARRAY_help \\
+    simp [has_type_bool])
+ \\ rw [var_has_type_def, Once has_type_cases, var_has_value_def, WORD_ARRAY_def, BOOL_def] \\
+    asm_exists_tac \\ simp [] \\
+    qexists_tac `(\i. OUTR (ver2bool (EL (LENGTH vs − (w2n i + 1)) vs)))` \\
+    rw [sum_revEL_def]
+
+    >-
+    (simp [sum_EL_EL] \\ fs [MEM_EL] \\
+    Cases_on `EL (LENGTH vs − (w2n i + 1)) vs` >- simp [ver2bool_def] \\
+    first_x_assum (qspec_then `EL (LENGTH vs − (w2n i + 1)) vs` mp_tac) \\
+    rw [] >- (qexists_tac `LENGTH vs − (w2n i + 1)` \\ simp []) \\
+    simp [has_type_VArray_not_VBool_t])
+
+    \\ metis_tac [w2n_lt]);
+
 val var_has_value_var_has_type_WORD_ARRAY = Q.store_thm("var_has_value_var_has_type_WORD_ARRAY",
  `!var (w:'a word -> 'b word) env.
-   var_has_value env var (WORD_ARRAY w) ==>
+   var_has_value env var (WORD_ARRAY WORD w) ==>
    var_has_type env var (VArray_t [dimword (:'a); dimindex(:'b)])`,
- rw [var_has_value_def, var_has_type_def, WORD_ARRAY_def] \\
+ rw [var_has_value_def, var_has_type_def, WORD_ARRAY_def, WORD_def] \\
  FULL_CASE_TAC \\ fs [] \\
  match_mp_tac has_type_array_step \\
  simp [dimword_def] \\ rpt strip_tac \\ drule var_has_value_var_has_type_WORD_ARRAY_help \\
@@ -271,11 +381,11 @@ val var_has_value_var_has_type_WORD_ARRAY = Q.store_thm("var_has_value_var_has_t
 (* In need of cleanup *)
 val var_has_type_old_var_has_type_WORD_ARRAY = Q.store_thm("var_has_type_old_var_has_type_WORD_ARRAY",
  `!var env.
-   var_has_type_old env var (WORD_ARRAY:('a word -> 'b word) -> value -> bool) <=>
+   var_has_type_old env var (WORD_ARRAY WORD:('a word -> 'b word) -> value -> bool) <=>
    var_has_type env var (VArray_t [dimword (:'a); dimindex (:'b)])`,
  rw [var_has_type_old_def] \\ eq_tac
  >- rw [var_has_value_var_has_type_WORD_ARRAY]
- \\ rw [var_has_type_def, Once has_type_cases, var_has_value_def, WORD_ARRAY_def] \\
+ \\ rw [var_has_type_def, Once has_type_cases, var_has_value_def, WORD_ARRAY_def, WORD_def] \\
     asm_exists_tac \\ simp [] \\
     qexists_tac `(\i. OUTR (ver2w (EL (LENGTH vs − (w2n i + 1)) vs)))` \\
     rw [sum_revEL_def]
@@ -285,6 +395,47 @@ val var_has_type_old_var_has_type_WORD_ARRAY = Q.store_thm("var_has_type_old_var
 
     fs [MEM_EL] \\ first_x_assum (qspec_then `EL (LENGTH vs − (w2n i + 1)) vs` mp_tac) \\
     impl_tac >- (qexists_tac `LENGTH vs − (w2n i + 1)` \\ simp []) \\
+    strip_tac \\ drule_strip has_type_cases_imp \\ fs [has_type_rules] \\
+    simp [ver2v_def] \\ drule_strip var_has_type_old_var_has_type_WORD_help \\
+    match_mp_tac MAP_CONG \\ rw [sum_mapM_VBool, sum_map_def, w2v_v2w])
+
+    \\ metis_tac [w2n_lt]);
+
+(* In need of cleanup *)
+val var_has_type_old_var_has_type_WORD_ARRAY_WORD_ARRAY = Q.store_thm("var_has_type_old_var_has_type_WORD_ARRAY_WORD_ARRAY",
+ `!var env.
+   var_has_type_old env var (WORD_ARRAY (WORD_ARRAY WORD):('a word -> 'b word -> 'c word) -> value -> bool) <=>
+   var_has_type env var (VArray_t [dimword (:'a); dimword (:'b); dimindex (:'c)])`,
+ rw [var_has_type_old_def] \\ eq_tac
+ >- (rw [var_has_value_def, var_has_type_def, WORD_ARRAY_def, WORD_def] \\ every_case_tac \\ fs [] \\
+    
+    match_mp_tac has_type_array_step \\ rw [] \\
+    fs [MEM_sum_revEL] \\ first_x_assum (qspec_then `n2w n` strip_assume_tac) \\ rfs [] \\
+    FULL_CASE_TAC \\ fs [] \\ rveq \\
+    
+    match_mp_tac has_type_array_step \\ rw [] \\
+
+    drule_strip var_has_value_var_has_type_WORD_ARRAY_help \\
+    simp [has_type_w2ver])
+
+ \\ rw [var_has_type_def, Once has_type_cases, var_has_value_def, WORD_ARRAY_def, WORD_def] \\
+    asm_exists_tac \\ simp [] \\
+    qexists_tac `(\i j. let outer = EL (LENGTH vs − (w2n i + 1)) vs;
+                            outer = OUTR (get_VArray_data outer) in
+                            OUTR (ver2w (EL (LENGTH outer - (w2n j + 1)) outer)))` \\
+    rw [sum_revEL_def]
+
+    >-
+    (simp [sum_EL_EL] \\ simp [w2ver_def, ver2w_def] \\
+
+    fs [MEM_EL] \\ first_x_assum (qspec_then `EL (LENGTH vs − (w2n i + 1)) vs` mp_tac) \\
+    impl_tac >- (qexists_tac `LENGTH vs − (w2n i + 1)` \\ simp []) \\
+    strip_tac \\ drule_strip has_type_cases_imp \\ fs [has_type_rules] \\
+    simp [get_VArray_data_def] \\
+
+    gen_tac \\ conj_tac >- metis_tac [w2n_lt] \\
+    fs [MEM_EL] \\ first_x_assum (qspec_then `EL (LENGTH vs' − (w2n i' + 1)) vs'` mp_tac) \\
+    impl_tac >- (qexists_tac `LENGTH vs' − (w2n i' + 1)` \\ simp [] \\ metis_tac [DIMWORD_GT_0]) \\
     strip_tac \\ drule_strip has_type_cases_imp \\ fs [has_type_rules] \\
     simp [ver2v_def] \\ drule_strip var_has_type_old_var_has_type_WORD_help \\
     match_mp_tac MAP_CONG \\ rw [sum_mapM_VBool, sum_map_def, w2v_v2w])

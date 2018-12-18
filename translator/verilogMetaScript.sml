@@ -233,9 +233,8 @@ val prun_get_var_INL = Q.store_thm("prun_get_var_INL",
 (** misc thms, vnwrites correct etc. **)
 
 val vnwrites_nil_correct = Q.store_thm("vnwrites_nil_correct",
- `!fext ver_s p env ver_s'.
-   vnwrites p = [] /\
-   prun fext ver_s p = INR ver_s' ==>
+ `!fext ver_s p ver_s'.
+   prun fext ver_s p = INR ver_s' /\ vnwrites p = [] ==>
    ver_s'.nbq = ver_s.nbq`,
  recInduct prun_ind \\ rpt strip_tac \\ rveq \\ fs [vnwrites_def]
  >- (* Skip *)

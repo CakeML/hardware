@@ -133,7 +133,7 @@ val prun_bassn_type_pred_def = Define `
    prun_bassn fext (ver_s with vars := env) (Var name) newv = INR (ver_s with vars := (name, newv) :: env)`;
 
 val prun_bassn_type_pred_ALL = Q.store_thm("prun_bassn_type_pred_ALL",
- `prun_bassn_type_pred BOOL /\ prun_bassn_type_pred WORD /\ prun_bassn_type_pred WORD_ARRAY`,
+ `prun_bassn_type_pred BOOL /\ prun_bassn_type_pred WORD /\ prun_bassn_type_pred (WORD_ARRAY WORD)`,
  rpt CONJ_TAC \\
  rw [prun_bassn_type_pred_def, var_has_type_old_def, var_has_value_def, get_var_def,
      Eval_def, erun_def, prun_bassn_def, assn_def] \\
@@ -141,7 +141,7 @@ val prun_bassn_type_pred_ALL = Q.store_thm("prun_bassn_type_pred_ALL",
 
  imp_res_tac same_shape_BOOL \\
  imp_res_tac same_shape_WORD \\
- imp_res_tac same_shape_WORD_ARRAY \\
+ imp_res_tac same_shape_WORD_ARRAY_WORD \\
 
  fs [set_var_def, sum_bind_def, sum_for_def, sum_map_def]);
 
@@ -154,7 +154,7 @@ val prun_bassn_type_pred_WORD = Q.store_thm("prun_bassn_type_pred_WORD",
  rw [prun_bassn_type_pred_ALL]);
 
 val prun_bassn_type_pred_WORD_ARRAY = Q.store_thm("prun_bassn_type_pred_WORD_ARRAY",
- `prun_bassn_type_pred WORD_ARRAY`,
+ `prun_bassn_type_pred (WORD_ARRAY WORD)`,
   rw [prun_bassn_type_pred_ALL]);
 
 (** Eval thms and hol2hardware_exp **)
@@ -612,13 +612,35 @@ val Eval_InlineIf = Q.store_thm("Eval_InlineIf",
  rw [BOOL_def, Eval_def, erun_def, sum_bind_def, get_VBool_data_def]);
 
 val Eval_WORD_ARRAY_indexing = Q.store_thm("Eval_WORD_ARRAY_indexing",
- `!s wa var i iexp.
-   Eval fext s env (WORD_ARRAY wa) (Var var) /\
+ `!s a wa var i iexp.
+   Eval fext s env (WORD_ARRAY a wa) (Var var) /\
    Eval fext s env (WORD i) iexp ==>
-   Eval fext s env (WORD (wa i)) (ArrayIndex (Var var) [iexp])`,
+   Eval fext s env (a (wa i)) (ArrayIndex (Var var) [iexp])`,
  rw [WORD_def, WORD_ARRAY_def, Eval_def, erun_def] \\ res_tac \\
+ every_case_tac \\ fs [] \\ rveq \\
  simp [sum_bind_def, sum_mapM_def, sum_map_def, ver2n_w2ver] \\
- Cases_on `res` \\ fs [get_array_index_def, sum_bind_def]);
+ 
+ simp [get_array_index_def] \\
+ first_x_assum (qspec_then `i` assume_tac) \\
+ fs [sum_bind_def]);
+
+val Eval_WORD_ARRAY_indexing2 = Q.store_thm("Eval_WORD_ARRAY_indexing2",
+ `!s a wa var i iexp j jexp.
+   Eval fext s env (WORD_ARRAY (WORD_ARRAY a) wa) (Var var) /\
+   Eval fext s env (WORD i) iexp /\
+   Eval fext s env (WORD j) jexp ==>
+   Eval fext s env (a (wa i j)) (ArrayIndex (Var var) [iexp; jexp])`,
+ rw [WORD_def, WORD_ARRAY_def, Eval_def, erun_def] \\ res_tac \\
+ every_case_tac \\ fs [] \\ rveq \\
+ simp [sum_bind_def, sum_mapM_def, sum_map_def, ver2n_w2ver] \\
+
+ simp [get_array_index_def] \\
+ first_x_assum (qspec_then `i` assume_tac) \\
+ fs [sum_bind_def] \\
+
+ every_case_tac \\ fs [] \\
+ first_x_assum (qspec_then `j` assume_tac) \\
+ fs [get_array_index_def, sum_bind_def]);
 
 val Eval_neg = Q.store_thm("Eval_neg",
  `!s b bexp.
@@ -679,7 +701,7 @@ val WORD_ARRAY_EVERY_same_shape = Q.store_thm("WORD_ARRAY_EVERY_same_shape",
 
 val prun_bassn_correct = Q.store_thm("prun_bassn_correct",
  `!fext iw ie iv vw v l lw var i s.
-   WORD_ARRAY (lw:'a word -> 'b word) (VArray l) /\
+   WORD_ARRAY WORD (lw:'a word -> 'b word) (VArray l) /\
    erun fext s ie = INR iv /\ WORD (iw:'a word) iv /\ ver2n iv = INR i /\
    WORD (vw:'b word) v /\
    get_var s var = INR (VArray l)
@@ -872,10 +894,6 @@ val bit_field_insert_lemma1 = Q.prove(
 val bit_field_insert_lemma2 = Q.prove(
  `!l a b. TAKE (LENGTH a) l = a /\ DROP (LENGTH a) l = b ==> l = a ++ b`,
  metis_tac [TAKE_DROP]);
-
-val same_shape_VArray_MAP_VBool = Q.store_thm("same_shape_VArray_MAP_VBool",
-`!l1 l2. LENGTH l1 = LENGTH l2 ==> same_shape (VArray (MAP VBool l1)) (VArray (MAP VBool l2))`,
- Induct \\ rw [same_shape_def] \\ Cases_on `l2` \\ fs [same_shape_def]);
 
 val prun_set_slice_bit_field_insert = Q.store_thm("prun_set_slice_bit_field_insert",
  `!wold wnew vold vnew hb lb.

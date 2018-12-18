@@ -157,4 +157,15 @@ val sum_revEL_INR_LENGTH = Q.store_thm("sum_revEL_INR_LENGTH",
  `!n xs x y. n < LENGTH xs /\ sum_revEL n (x::xs) = INR y ==> sum_revEL n xs = INR y`,
  rw [sum_revEL_def] \\ metis_tac [sum_EL_LENGTH_INR_LENGTH]);
 
+val MEM_sum_revEL = Q.store_thm("MEM_sum_revEL",
+ `!l x. MEM x l <=> ∃n. n < LENGTH l /\ INR x = sum_revEL n l`,
+ Induct \\ rw [] \\ eq_tac \\ rw []
+ >- (qexists_tac `LENGTH l` \\ rw [sum_revEL_def, sum_EL_def])
+ >- (qexists_tac `n` \\ `h::l = [h] ++ l` by simp [] \\
+     pop_assum (fn th => rewrite_tac [th]) \\ rewrite_tac [sum_revEL_APPEND_EQN] \\
+     simp [])
+ \\ Cases_on `n = LENGTH l`
+    >- (rveq \\ fs [sum_revEL_LENGTH])
+    \\ `n < LENGTH l` by decide_tac \\ metis_tac [sum_revEL_INR_LENGTH]);
+
 val _ = export_theory ();

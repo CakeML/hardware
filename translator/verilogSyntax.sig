@@ -137,9 +137,9 @@ sig
   val mk_WORD : term * term -> term
 
   val WORD_ARRAY_tm : term
-  val dest_WORD_ARRAY : term -> term * term
+  val dest_WORD_ARRAY : term -> term * term * term
   val is_WORD_ARRAY : term -> bool
-  val mk_WORD_ARRAY : term * term -> term
+  val mk_WORD_ARRAY : term * term * term -> term
 
   (* New types *)
 

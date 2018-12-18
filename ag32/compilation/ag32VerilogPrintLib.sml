@@ -42,12 +42,12 @@ local
       in
         (var, exp_print v)
       end else if is_WORD_ARRAY spec then let
-        val (v, var) = dest_WORD_ARRAY spec
+        val (pred, v, var) = dest_WORD_ARRAY spec
         val v = v |> dest_abs |> snd
         val var = get_var var
       in
         (* TODO: Special handling for this for now *)
-        if v = ``0w:word32`` then
+        if same_const WORD_tm pred andalso v = ``0w:word32`` then
           (var, "0")
         else
           raise UnableToTranslate (spec, "Too general WORD_ARRAY expression for current implementation")

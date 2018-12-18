@@ -260,7 +260,9 @@ fun type2vertype tm =
                   |> fcpSyntax.dest_numeric_type |> Arbnumcore.less1 |> Arbnumcore.toString
   in
     "logic[" ^ size ^ ":0]"
-  end else if same_const WORD_ARRAY_tm tm then let
+  end else if is_comb tm andalso same_const (rator tm) WORD_ARRAY_tm then let
+    (* Sanity check for now: *)
+    val () = if same_const WORD_tm (rand tm) then () else failwith "expected WORD"
     val (size1, size2) = tm |> type_of |> dom_rng |> fst |> dom_rng |> list_of_pair
                             |> map (fcpSyntax.dest_numeric_type o
                                     dest_word_type)

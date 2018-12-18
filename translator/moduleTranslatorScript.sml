@@ -102,6 +102,19 @@ val intro_cvars_def = tDefine "intro_cvars" `
 
 val intro_cvars_ind = fetch "-" "intro_cvars_ind";
 
+val intro_cvars_nil_help = Q.prove(
+ `!vars p. vars = [] ==> intro_cvars vars p = p`,
+ recInduct intro_cvars_ind \\ rw [intro_cvars_def]
+ >- (Induct_on `cases` \\ rw []
+    >- (pairarg_tac \\ simp [])
+    \\ metis_tac [])
+ >- (Cases_on `def` \\ fs [])
+ \\ every_case_tac \\ simp []);
+
+val intro_cvars_nil = Q.store_thm("intro_cvars_nil",
+ `!p. intro_cvars [] p = p`,
+ rw [intro_cvars_nil_help]);
+
 val vwrites_intro_cvars_eq = Q.store_thm("vwrites_intro_cvars_eq",
  `!vars p var. MEM var (vwrites (intro_cvars vars p)) <=> MEM var (vwrites p) /\ ~MEM var vars`,
  recInduct intro_cvars_ind \\ rpt strip_tac \\ fs [intro_cvars_def, vwrites_def]

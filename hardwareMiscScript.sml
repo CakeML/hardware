@@ -55,6 +55,10 @@ val w2v_not_empty = Q.store_thm("w2v_not_empty",
 
 (** Automatic rewrites **)
 
+val DIMWORD_GT_0 = Q.store_thm("DIMWORD_GT_0",
+ `0 < dimword (:α)`,
+ simp [dimword_def]);
+
 val DIMINDEX_NEQ_0 = Q.store_thm("DIMINDEX_NEQ_0[simp]",
  `dimindex (:'a) <> 0`,
  assume_tac DIMINDEX_GT_0 \\ DECIDE_TAC);

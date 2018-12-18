@@ -3,6 +3,8 @@ struct
 
 open hardwarePreamble;
 
+open verilogTranslatorCoreLib;
+
 (** Config **)
 
 (*
@@ -14,6 +16,12 @@ val fext_ty = ``:ext``;
 open circuitExampleTheory;
 val state_ty = ``:state``;
 val fext_ty = ``:ext_state``;
+
+(*
+open regexpExampleTheory;
+val state_ty = ``:rc``;
+val fext_ty = ``:rc_ext``;
+*)
 
 (** State record info **)
 
@@ -41,5 +49,11 @@ val fext_fields = map (fst o fst) raw;
 val fext_accessors = map (fn ((name, _), acc) => (name, acc)) raw
                      |> snd_map (rator o lhs o snd o strip_forall o concl);
 end
+
+fun predicate_for_var var = let
+ val acc = lookup var accessors
+in
+ acc |> type_of |> dom_rng |> snd |> predicate_for_type_ty
+end;
 
 end

@@ -20,10 +20,11 @@ fun predicate_for_type_ty ty =
       BOOL_tm
     else if tname = "fun" then let
       val (alpha', beta') = dom_rng ty
+      val ipred = predicate_for_type_ty beta'
       val alpha' = dest_word_type alpha'
-      val beta' = dest_word_type beta'
+      val pred = inst [ alpha |-> alpha' ] WORD_ARRAY_tm
     in
-      inst [ alpha |-> alpha', beta |-> beta' ] WORD_ARRAY_tm
+      mk_icomb (pred, ipred)
     end else if is_word_type ty then
       inst [ alpha |-> dest_word_type ty ] WORD_tm
     else
@@ -32,7 +33,8 @@ fun predicate_for_type_ty ty =
   else raise UnableToTranslateTy (ty, "just a type variable");
 
 (* TODO: Rename function? *)
-fun predicate_for_type tm = predicate_for_type_ty (type_of tm);
+fun predicate_for_type tm =
+ tm |> type_of |> predicate_for_type_ty;
 
 fun hol2ver_for_type ty =
   if ty = bool then
@@ -44,7 +46,6 @@ fun hol2ver_for_type ty =
   end else
     raise UnableToTranslateTy (ty, "unknown type");
 
-(* I think this is a duplicate of a function available elsewhere? *)
 fun verty_for_type ty =
   if is_type ty then let
     val (tname, tl) = dest_type ty
@@ -52,11 +53,14 @@ fun verty_for_type ty =
     if tname = "bool" then
       VBool_t_tm
     else if tname = "fun" then let
-      val (alpha', beta') = dom_rng ty
-      val alpha' = alpha' |> dest_word_type |> dest_numeric_type
-      val beta' = beta' |> dest_word_type |> dest_numeric_type
+      val (args, res) = strip_fun ty
+      val args = map (curry Arbnumcore.pow Arbnumcore.two o dest_numeric_type o dest_word_type) args
+      val res = if res = bool then
+                  []
+                else (* otherwise assume we have word ... *)
+                  [res |> dest_word_type |> dest_numeric_type]
     in
-      mk_VArray_t [Arbnumcore.pow (Arbnumcore.two, alpha'), beta']
+      mk_VArray_t (args @ res)
     end else if is_word_type ty then let
       val n = ty |> dest_word_type |> dest_numeric_type
     in
