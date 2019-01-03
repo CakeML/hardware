@@ -112,7 +112,7 @@ val computer_Next_relM = Q.store_thm("computer_next_relM",
     >- (gen_tac \\ strip_tac \\ rveq \\
         (conj_tac >- (metis_tac [DISCH_ALL trans, trans_acc])) \\ EVAL_TAC)
     >- EVAL_TAC
-    \\ rw [valid_ps_for_module_def, cvars_def] \\ pop_assum mp_tac \\ EVAL_TAC \\ rw []) \\
+    \\ match_mp_tac comp_idx_iter_all_idx \\ EVAL_TAC \\ rw []) \\
  strip_tac \\ simp [] \\
 
  drule_strip relM_relS \\

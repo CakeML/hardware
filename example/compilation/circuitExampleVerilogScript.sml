@@ -58,7 +58,7 @@ val AB_mstep_commit = Q.store_thm("AB_mstep_commit",
   >- EVAL_TAC
   >- simp []
   >- simp []
-  >- (EVAL_TAC \\ rpt gen_tac \\ strip_tac \\ rveq \\ EVAL_TAC \\ rw [])) \\
+  \\ match_mp_tac comp_idx_iter_all_idx \\ EVAL_TAC \\ rw []) \\
 
  strip_tac \\ simp [] \\
 

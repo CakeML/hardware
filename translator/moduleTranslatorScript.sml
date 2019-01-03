@@ -193,94 +193,56 @@ val prun_intro_cvars_same_after3 = Q.store_thm("prun_intro_cvars_same_after3",
   rpt strip_tac \\ `~MEM var (vnwrites p)` by simp [] \\
   metis_tac [vnwrites_intro_cvars_eq, prun_same_after]);
 
-(*
-val vwrites_intro_cvars = Q.store_thm("vwrites_intro_cvars",
- `!vars p. elems_not_in vars (vwrites (intro_cvars vars p))`,
- recInduct intro_cvars_ind \\ rpt strip_tac
- \\ (* Most cases *)
- TRY (fs [elems_not_in_def, vwrites_def, intro_cvars_def] \\ NO_TAC)
-
- >- (* Case *)
- (simp [intro_cvars_def, vwrites_def, elems_not_in_APPEND, elems_not_in_FLAT] \\ CONJ_TAC
-  >- (simp [MAP_MAP_o, EVERY_MAP, EVERY_MEM] \\ Cases \\ rw [] \\ res_tac)
-  \\ (Cases_on `def` \\ fs [elems_not_in_def]))
-
- \\ (* BlockingAssign *)
- (Cases_on `lhs` \\
- simp [intro_cvars_def, get_assn_var_def, vwrites_def, evwrites_def, elems_not_in_def] \\
- (* Only needed for the "difficult" cases: *)
- TOP_CASE_TAC \\ rw [vwrites_def, evwrites_def] \\ CCONTR_TAC \\ fs []));
-*)
-
 (** valid_ps_for_module **)
 
 (* Processes are not allowed to read variables written non-blockingly from other modules,
    must use non-blocking writes for communication.
 
    If a module is valid, then the order processes are run in does not matter. *)
+val all_idx_def = Define `
+ all_idx P xs =
+  !i j. 0 <= i /\ i < LENGTH xs /\ 0 <= j /\ j < LENGTH xs /\ i <> j ==>
+        let p = EL i xs;
+            q = EL j xs in
+         P p q`;
+
 val valid_ps_for_module_def = Define `
-  valid_ps_for_module vars ps =
-   !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
-            (!x. ((~MEM x vars /\ MEM x (vreads p)) ==> ~MEM x (vwrites q))) /\
-            (!x. MEM x (vwrites p) ==> ~MEM x (vwrites q))`;
-
-(* Use this or something similar as the actual definition? *)
-val valid_ps_for_module_alt = Q.store_thm("valid_ps_for_module_alt",
- `!ps vars.
-   valid_ps_for_module vars ps <=>
-    !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
-    (DISJOINT ((set (vreads p)) DIFF (set vars)) (set (vwrites q)) /\
-    DISJOINT (set (vwrites p)) (set (vwrites q)))`,
- rw [valid_ps_for_module_def, DISJOINT_DEF, DIFF_DEF, INTER_DEF] \\ eq_tac \\ rpt strip_tac'
- >- (conj_tac \\ match_mp_tac EQ_EXT \\ rw [] \\ metis_tac [])
- \\ last_x_assum (qspecl_then [`p`, `q`] assume_tac) \\ drule_first \\
-    fs [EMPTY_DEF, FUN_EQ_THM] \\ metis_tac []);
-
-(* Just for the paper, not part of the formal development. *)
-val valid_program_def = Define `
- valid_program ps = !p q. MEM p ps /\ MEM q ps /\ p <> q ==>
-                     (DISJOINT (set (vreads p)) (set (vwrites q))) /\
-                     (DISJOINT (set (vnwrites p) UNION set (vwrites p))
-                               (set (vwrites q) UNION set (vnwrites q)))`;
+ valid_ps_for_module vars p q <=>
+  (!x. ((~MEM x vars /\ MEM x (vreads p)) ==> ~MEM x (vwrites q))) /\
+  (!x. MEM x (vwrites p) ==> ~MEM x (vwrites q))`;
 
 val valid_ps_for_module_tl = Q.store_thm("valid_ps_for_module_tl",
- `!vars p ps. valid_ps_for_module vars (p::ps) ==>
-              valid_ps_for_module vars ps`,
- rw [valid_ps_for_module_def] \\ metis_tac []);
+ `!vars p ps. all_idx (valid_ps_for_module vars) (p::ps) ==>
+              all_idx (valid_ps_for_module vars) ps`,
+ rw [all_idx_def, valid_ps_for_module_def] \\
+ first_x_assum (qspecl_then [`SUC i`, `SUC j`] mp_tac) \\
+ simp []);
 
 val valid_ps_for_module_tl2 = Q.store_thm("valid_ps_for_module_tl2",
- `!vars p1 p2 ps. valid_ps_for_module vars (p1::p2::ps) ==>
-                  valid_ps_for_module vars (p1::ps)`,
- once_rewrite_tac [valid_ps_for_module_def] \\ rpt strip_tac \\
- last_x_assum (qspecl_then [`p`, `q`] assume_tac) \\ metis_tac [MEM]);
-
-(*
-val valid_ps_for_module_tl_vwrites_NAMECOLL = Q.store_thm("valid_ps_for_module_tl_vwrites_NAMECOLL",
- `!ps p var vars.
-  MEM var (vwrites p) /\ ALL_DISTINCT (p::ps) /\ valid_ps_for_module vars (p::ps) ==>
-  EVERY (\p. ¬MEM var (vwrites p)) ps`,
- Induct >- rw [valid_ps_for_module_def] \\ rpt strip_tac \\
- last_x_assum drule \\ impl_tac
- >- (CONJ_TAC
-    >- fs []
-    \\ match_mp_tac valid_ps_for_module_tl2 \\ asm_exists_tac \\ fs [])
- \\ pop_assum mp_tac \\ rewrite_tac [valid_ps_for_module_def] \\
-    disch_then (qspecl_then [`p`, `h`] assume_tac) \\ fs []);
-*)
+ `!vars p1 p2 ps. all_idx (valid_ps_for_module vars) (p1::p2::ps) ==>
+                  all_idx (valid_ps_for_module vars) (p1::ps)`,
+ simp [all_idx_def, valid_ps_for_module_def] \\ rpt strip_tac' \\
+ Cases_on `i`
+  >- (Cases_on `j` \\ fs [] \\ first_x_assum (qspecl_then [`0`, `SUC (SUC n)`] mp_tac) \\ fs [])
+  \\ (Cases_on `j` \\ fs []
+      >- (first_x_assum (qspecl_then [`SUC (SUC n)`, `0`] mp_tac) \\ fs [])
+      \\ (first_x_assum (qspecl_then [`SUC (SUC n)`, `SUC (SUC n')`] mp_tac) \\ fs [])));
 
 val valid_ps_for_module_tl_vreads = Q.store_thm("valid_ps_for_module_tl_vreads",
  `!h ps p var vars.
-   valid_ps_for_module vars (h::ps) /\ MEM p ps /\ p <> h /\
+   all_idx (valid_ps_for_module vars) (h::ps) /\ MEM p ps /\
    MEM var (vreads p) /\ ~MEM var vars ==> ~MEM var (vwrites h)`,
- rewrite_tac [valid_ps_for_module_def] \\ rpt strip_tac \\ last_x_assum (qspecl_then [`p`, `h`] mp_tac) \\
- impl_tac >- fs [] \\ strip_tac \\ metis_tac []);
+ rewrite_tac [all_idx_def, valid_ps_for_module_def] \\ rpt strip_tac' \\
+ imp_res_tac MEM_EL \\
+ last_x_assum (qspecl_then [`SUC n'`, `0`] mp_tac) \\ fs []);
 
 val valid_ps_for_module_tl_vwrites = Q.store_thm("valid_ps_for_module_tl_vwrites",
  `!h ps p var vars.
-   valid_ps_for_module vars (h::ps) /\ MEM p ps /\ p <> h /\
+   all_idx (valid_ps_for_module vars) (h::ps) /\ MEM p ps /\
    MEM var (vwrites p) ==> ~MEM var (vwrites h)`,
- rewrite_tac [valid_ps_for_module_def] \\ rpt strip_tac \\ last_x_assum (qspecl_then [`p`, `h`] mp_tac) \\
- impl_tac >- fs [] \\ strip_tac \\ metis_tac []);
+ rewrite_tac [all_idx_def, valid_ps_for_module_def] \\ rpt strip_tac' \\
+ imp_res_tac MEM_EL \\
+ last_x_assum (qspecl_then [`SUC n'`, `0`] mp_tac) \\ fs []);
 
 val relM_relS = Q.store_thm("relM_relS",
  `!s env. relM s env ==> relS s <| vars := env; nbq := [] |>`,
@@ -499,12 +461,12 @@ val mstep_untainted_state = Q.store_thm("mstep_untainted_state",
                     vnwrites p = [] /\
                     cvar_writes_cond vars p /\
                     cvar_writes_cond2 vars p) /\
-  ALL_DISTINCT ps /\
+  ALL_DISTINCT ps /\ (* <-- TODO: No longer needed *)
 
   (* Conditions on the environment *)
   relS s ver_s /\
   relS_fextv fextv fext /\
-  valid_ps_for_module vars ps /\
+  all_idx (valid_ps_for_module vars) ps /\
 
   (!p. MEM p ps ==>
   (!var. MEM var (vreads p) \/ MEM var (vwrites p) ==>
@@ -577,12 +539,12 @@ val mstep_commit_lift_EvalSs = Q.store_thm("mstep_commit_lift_EvalSs",
                     vnwrites p = [] /\
                     cvar_writes_cond vars p /\
                     cvar_writes_cond2 vars p) /\
-  ALL_DISTINCT ps /\
+  ALL_DISTINCT ps /\ (* <-- TODO: No longer needed *)
 
   (* Conditions on the environment *)
   relM s vs /\
   relS_fextv fextv fext /\
-  valid_ps_for_module vars ps
+  all_idx (valid_ps_for_module vars) ps
   ==>
   ?vs'. mstep_commit fextv (MAP (intro_cvars vars) ps) vs = INR vs' /\
         (!p. MEM p ps ==>
@@ -632,5 +594,47 @@ val mstep_commit_intro_cvars_no_writes = Q.store_thm("mstep_commit_intro_cvars_n
   mget_var vs' var = mget_var vs var`,
  rw [mstep_commit_def] \\ drule_strip sum_map_INR \\ drule_strip mstep_intro_cvars_no_writes \\
  fs [get_nbq_var_def, sum_map_def, get_var_def, mget_var_def]);
+
+(** For computing valid_ps_for_module **)
+
+val all_idx_order_def = Define `
+ all_idx_order P ps =
+  !i j. 0 <= i /\ i < LENGTH ps /\ 0 <= j /\ j < LENGTH ps /\ i < j ==>
+        let p = EL i ps;
+            q = EL j ps in
+         P p q /\ P q p`;
+
+val all_idx_all_idx_order = Q.store_thm("all_idx_all_idx_order",
+ `!xs P. all_idx P xs <=> all_idx_order P xs`,
+ rpt gen_tac \\ eq_tac \\ rw [all_idx_def, all_idx_order_def] \\
+ Cases_on `i < j` \\ fs []);
+
+val comp_idx_iter_help_def = Define `
+ (comp_idx_iter_help P x [] = T) /\
+ (comp_idx_iter_help P x (y::ys) <=> P x y /\ P y x /\
+                                     comp_idx_iter_help P x ys)`;
+
+val comp_idx_iter_def = Define `
+ (comp_idx_iter P [] = T) /\
+ (comp_idx_iter P (x::xs) <=> comp_idx_iter_help P x xs /\ comp_idx_iter P xs)`;
+
+val comp_idx_iter_tl = Q.store_thm("comp_idx_iter_tl",
+ `!xs x P. comp_idx_iter P (x::xs) ==> comp_idx_iter P xs`,
+ rw [comp_idx_iter_def]);
+
+val comp_idx_iter_help_EL = Q.store_thm("comp_idx_iter_help_EL",
+ `!xs x n P. comp_idx_iter_help P x xs /\ n < LENGTH xs ==> P x (EL n xs) /\ P (EL n xs) x`,
+ Induct \\ rw [comp_idx_iter_help_def] \\
+ Cases_on `n` \\ fs []);
+
+val comp_idx_iter_all_idx = Q.store_thm("comp_idx_iter_all_idx",
+ `!P xs. comp_idx_iter P xs ==> all_idx P xs`,
+ rewrite_tac [all_idx_all_idx_order] \\
+ gen_tac \\ Induct >- rw [all_idx_order_def] \\ rpt strip_tac \\
+ last_x_assum mp_tac \\ impl_tac >- fs [comp_idx_iter_def] \\ disch_tac \\
+ simp [all_idx_order_def] \\ rpt strip_tac' \\
+ Cases_on `i`
+ >- (Cases_on `j` \\ fs [comp_idx_iter_def, comp_idx_iter_help_EL])
+ \\ Cases_on `j` \\ fs [all_idx_order_def]);
 
 val _ = export_theory();

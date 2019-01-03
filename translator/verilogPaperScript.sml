@@ -1,6 +1,10 @@
 open hardwarePreamble;
 
-open sumExtraTheory verilogTheory verilogTranslatorTheory;
+open sumExtraTheory verilogTheory verilogTranslatorTheory moduleTranslatorTheory;
+
+open pred_setTheory;
+
+open dep_rewrite;
 
 val _ = new_theory "verilogPaper";
 
@@ -123,5 +127,123 @@ val EvalS'_EvalS = Q.store_thm("EvalS'_EvalS",
     fs [sum_map_def] \\ rveq \\ fs [pstate_rw, relS_rw])
  \\ pop_assum (qspec_then `<| nbq := Δ |>` strip_assume_tac) \\
     simp [prun'_def, sum_map_def, relS_rw]);
+
+(* Cleaner module translator things *)
+
+val valid_program_pred_def = Define `
+ valid_program_pred p q <=>
+  (DISJOINT (set (vreads p)) (set (vwrites q))) /\
+  (DISJOINT (set (vnwrites p) UNION set (vwrites p))
+            (set (vwrites q) UNION set (vnwrites q)))`;
+
+val valid_program_def = Define `
+ valid_program ps = all_idx valid_program_pred ps`;
+
+val valid_ps_for_module_set_def = Define `
+ valid_ps_for_module_set vars p q <=>
+  DISJOINT ((set (vreads p)) DIFF (set vars)) (set (vwrites q)) /\
+  DISJOINT (set (vwrites p)) (set (vwrites q))`;
+
+val valid_ps_for_module_set_valid_ps_for_module =
+ Q.store_thm("valid_ps_for_module_set_valid_ps_for_module",
+ `valid_ps_for_module_set = valid_ps_for_module`,
+ rpt (match_mp_tac EQ_EXT \\ gen_tac) \\ eq_tac \\
+ rw [valid_ps_for_module_set_def, valid_ps_for_module_def, DISJOINT_ALT]);
+
+val vreads_intro_cvars = Q.store_thm("vreads_intro_cvars",
+ `!p vars. vreads (intro_cvars vars p) = vreads p`,
+ recInduct vreads_ind \\ rpt conj_tac \\ rw [intro_cvars_def, vreads_def]
+ >- (every_case_tac \\ fs [] \\
+    Induct_on `cs` \\ rw [] \\ pairarg_tac \\ fs [] \\ pairarg_tac \\ fs [] \\ metis_tac [])
+ \\ every_case_tac \\ fs [vreads_def]);
+
+val union_diff_comm = Q.store_thm("union_diff_comm",
+ `!a b c. (a UNION b) DIFF c = (a DIFF c) UNION (b DIFF c)`,
+ rw [DIFF_DEF] \\ match_mp_tac EQ_EXT \\ rw [] \\ metis_tac []);
+
+val bin_op_lem = Q.prove(
+ `!f a b c d. a = c /\ b = d ==> f a b = f c d`,
+ rw []);
+
+val vwrites_intro_cvars = Q.store_thm("vwrites_intro_cvars",
+ `!p vars. set (vwrites (intro_cvars vars p)) = set (vwrites p) DIFF set vars`,
+ recInduct vwrites_ind \\ rpt conj_tac \\ rw [intro_cvars_def, vwrites_def]
+ >- (match_mp_tac EQ_EXT \\ rw [] \\ metis_tac [])
+ >- (match_mp_tac EQ_EXT \\ rw [] \\ metis_tac [])
+ >- (rewrite_tac [union_diff_comm] \\ match_mp_tac bin_op_lem \\ reverse conj_tac
+     >- (every_case_tac \\ fs [])
+     \\ Induct_on `cs` \\ fs [] \\ rw [] \\
+        rewrite_tac [union_diff_comm] \\ match_mp_tac bin_op_lem \\ conj_tac
+        >- (pairarg_tac \\ fs [] \\ pairarg_tac \\ fs [] \\ metis_tac [])
+        \\ metis_tac [])
+ \\ every_case_tac \\ fs [vwrites_def] \\ Cases_on `e` \\ TRY (Cases_on `e'`) \\
+    fs [evwrites_def, get_assn_var_def]);
+
+val vnwrites_intro_cvars = Q.store_thm("vnwrites_intro_cvars",
+ `!p vars.
+   set (vnwrites (intro_cvars vars p)) =
+   set (vnwrites p) UNION (set (vwrites p) INTER set vars)`,
+ recInduct vnwrites_ind \\ rpt conj_tac \\ rw [intro_cvars_def, vnwrites_def, vwrites_def]
+ >- (match_mp_tac EQ_EXT \\ rw [] \\ metis_tac [])
+ >- (match_mp_tac EQ_EXT \\ rw [] \\ metis_tac [])
+ >- (Induct_on `cs` >- (rw [] \\ every_case_tac \\ fs []) \\
+    rw [] \\ PairCases_on `h` \\ fs [] \\
+    qpat_x_assum `_ ==> _` mp_tac \\ impl_tac >- metis_tac [] \\
+    strip_tac \\ simp [] \\
+    pop_assum (fn th => simp [GSYM UNION_ASSOC, th]) \\
+    every_case_tac \\ fs [] \\ match_mp_tac EQ_EXT \\ rw [] \\ metis_tac [])
+ \\ every_case_tac \\ fs [vnwrites_def] \\ match_mp_tac EQ_EXT \\ rw [] \\
+    Cases_on `v0` \\ TRY (Cases_on `e`) \\ fs [get_assn_var_def, evwrites_def] \\
+    metis_tac []);
+
+(* eq in one direction *)
+
+val valid_program_pred_valid_ps_for_module_set =
+ Q.store_thm("valid_program_pred_valid_ps_for_module_set",
+ `!vars p q.
+   valid_program_pred (intro_cvars vars p) (intro_cvars vars q) ==>
+   valid_ps_for_module_set vars p q`,
+ rewrite_tac [valid_program_pred_def, valid_ps_for_module_set_def] \\
+ rpt strip_tac' \\ fs [vreads_intro_cvars, vwrites_intro_cvars, vnwrites_intro_cvars] \\
+ fs [DISJOINT_ALT] \\ rw [] \\ metis_tac []);
+
+val EL_MAP_CONS = Q.prove(
+ `!n x xs. n < LENGTH (x::xs) ==> !f. EL n (f x :: MAP f xs) = f (EL n (x::xs))`,
+ rpt strip_tac \\ rewrite_tac [GSYM MAP] \\ fs [EL_MAP]);
+
+val valid_program_ok = Q.store_thm("valid_program_ok",
+ `!ps vars.
+   valid_program (MAP (intro_cvars vars) ps) ==>
+   all_idx (valid_ps_for_module vars) ps`,
+ rewrite_tac [GSYM valid_ps_for_module_set_valid_ps_for_module] \\
+ Induct \\ rw [valid_program_def, all_idx_def] \\ rw [] \\
+ first_x_assum (qspecl_then [`i`, `j`] mp_tac) \\ (impl_tac >- simp []) \\
+ fs [EL_MAP_CONS, valid_program_pred_valid_ps_for_module_set]);
+
+(* eq in other direction, need to assume no non-blocking writes (as in actual development) *)
+
+val valid_ps_for_module_set_valid_program_pred =
+ Q.store_thm("valid_ps_for_module_set_valid_program_pred",
+ `!vars p q.
+   valid_ps_for_module_set vars p q /\ vnwrites p = [] /\ vnwrites q = [] ==>
+   valid_program_pred (intro_cvars vars p) (intro_cvars vars q)`,
+ rewrite_tac [valid_program_pred_def, valid_ps_for_module_set_def] \\
+ rpt strip_tac' \\ fs [vreads_intro_cvars, vwrites_intro_cvars, vnwrites_intro_cvars] \\
+ fs [DISJOINT_ALT] \\ rw [] \\ metis_tac []);
+
+val valid_program_ok_rev = Q.store_thm("valid_program_ok_rev",
+ `!ps vars.
+   EVERY (\p. vnwrites p = []) ps /\
+   all_idx (valid_ps_for_module vars) ps ==>
+   valid_program (MAP (intro_cvars vars) ps)`,
+ rewrite_tac [GSYM valid_ps_for_module_set_valid_ps_for_module] \\
+ Induct \\ rw [valid_program_def, all_idx_def] \\ rw [] \\
+ first_x_assum (qspecl_then [`i`, `j`] mp_tac) \\ (impl_tac >- simp []) \\ strip_tac \\
+ simp [EL_MAP_CONS] \\ match_mp_tac valid_ps_for_module_set_valid_program_pred \\
+ simp [] \\ fs [EVERY_EL] \\ Cases_on `i` \\ Cases_on `j` \\ fs []);
+
+(* For printing *)
+val valid_program_print = save_thm("valid_program_print",
+ valid_program_def |> REWRITE_RULE [all_idx_def, valid_program_pred_def]);
 
 val _ = export_theory ();
