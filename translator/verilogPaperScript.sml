@@ -16,6 +16,9 @@ The theory also replaces the (currently, two-field) record type used for interme
 with a pair, because a pair looks cleaner in the paper.
 *)
 
+val erun'_def = Define `
+ erun' fext s e = erun fext <| vars := FST s; nbq := SND s |> e`;
+
 val prun'_def = Define `
  prun' fext sp p = sum_map (\sp'. (sp'.vars, sp'.nbq))
                            (prun fext <| vars := FST sp; nbq := SND sp |> p)`;
@@ -99,7 +102,7 @@ val mrun'_mrun = Q.store_thm("mrun'_mrun",
  Induct_on `n` \\
  rw [mrun'_def, mrun_def, mstep_commit'_mstep_commit, sum_bind_as_case]);
 
-(* Cleaner EvalS variant *)
+(* Cleaner Eval and EvalS variants *)
 
 val relS'_def = Define `
  relS' s Γ <=> relS s <| vars := Γ |>`;
@@ -112,6 +115,22 @@ val relS_rw = Q.prove(
 val pstate_rw = Q.prove(
  `!vars ver_s. <|vars := vars; nbq := ver_s.nbq|> = ver_s with vars := vars`,
  rw [pstate_component_equality]);
+
+(* Eval *)
+
+val Eval'_def = Define `
+ Eval' fext s Γ P e =
+  !fextv Δ. relS' s Γ /\ relS_fextv fextv fext ==>
+   ?v. erun' fextv (Γ, Δ) e = INR v /\ P v`;
+
+val Eval'_Eval = Q.store_thm("Eval'_Eval",
+ `!fext s Γ P e. Eval' fext s Γ P e <=> Eval fext s Γ P e`,
+ rw [Eval'_def, Eval_def, relS'_def, relS_rw, erun'_def] \\ eq_tac \\
+ rpt strip_tac \\ drule_first
+ >- (first_x_assum (qspec_then `ver_s.nbq` strip_assume_tac) \\ fs [pstate_rw])
+ \\ first_x_assum (qspec_then `<| nbq := Δ |>` strip_assume_tac) \\ simp []);
+
+(* EvalS *)
 
 val EvalS'_def = Define `
  EvalS' fext s Γ hp vp <=>
