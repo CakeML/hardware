@@ -1,2 +1,2 @@
 INCLUDES = .. \
-           ../example
+           ../ag32
