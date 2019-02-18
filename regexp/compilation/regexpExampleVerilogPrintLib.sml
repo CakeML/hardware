@@ -30,6 +30,8 @@ fun toVerilogListInit name l =
  l
  |> mapi (fn i => fn e => name ^ "[" ^ (Int.toString i) ^ "] = " ^ e);
 
+regexp_res here is from regexpExampleScript.sml:
+
  regexp_res
  |> #final
  |> vectorToList
