@@ -75,7 +75,7 @@ val EvalS_get_hol_prog = rand o rator;
 val check_inv_fail = ref T;
 
 fun check_inv_err name tm result tm2 = let
-  in if tm2 = tm then result else let
+  in if identical tm2 tm then result else let
     val _ = (check_inv_fail := tm)
     val _ = (show_types_verbosely := true)
     val _ = print ("\n\nTranslation failed at '" ^ name ^ "'\n\ntarget:\n\n")
@@ -346,13 +346,13 @@ fun hol2hardware_exp s tm =
     val (f, arg) = dest_comb tm
   in
     (* SUBCASE: State selector? *)
-    if arg = s then
+    if identical arg s then
       case lookup_same f Eval_Vars of
           SOME result => SPEC s result
         | NONE => raise UnableToTranslate (tm, "Unknown state projection")
 
     (* SUBCASE: External read? *)
-    else if arg = fext_tm then
+    else if identical arg fext_tm then
       case lookup_same f Eval_InputVars of
           SOME result => SPEC s result
         | NONE => raise UnableToTranslate (tm, "Unknown fext projection")
@@ -740,7 +740,7 @@ and hol2hardware_body_impl s tm =
   (* CASE: Do nothing *)
   (* TODO: Is this what we want? Probably? *)
   else if is_var tm then
-    if tm = s then
+    if identical tm s then
       SPEC s EvalS_Skip
     else
       raise UnableToTranslate (tm, "Unknown state var")
@@ -768,7 +768,7 @@ and hol2hardware_body_impl s tm =
         end
 
       | NONE =>
-        if arg = s then
+        if identical arg s then
           (* val base_thms = lookup_same fupd update_base_thms |> valOf *)
           case lookup_same fupd update_base_thms of
               SOME base_thms =>
@@ -899,7 +899,7 @@ in
     if same_const is_max T then
       (FullMatch, MATCH_MP EvalS_Case_ARB (LIST_CONJ [word_t_val, v_Eval, ft_Eval]))
     else if same_const is_max F then (* <-- assume the case ends with a match all *)
-      if fb = s then let
+      if identical fb s then let
         val result = MATCH_MP EvalS_Case_catch_all_NONE (LIST_CONJ [v_Eval, ft_Eval])
         val result = ISPEC condr result
       in

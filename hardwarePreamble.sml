@@ -67,6 +67,10 @@ fun EVAL_PROVE tm = EVAL tm |> EQT_ELIM;
 fun lookup x nil = failwith "Unknown key"
   | lookup x ((k, v) :: ls) = if x = k then v else lookup x ls;
 
+(* lookup from for terms *)
+fun lookup_term x nil = failwith "Unknown term"
+  | lookup_term x ((k, v) :: ls) = if identical x k then v else lookup_term x ls;
+
 (* lookup from assoc list based on key sameness *)
 fun lookup_same x nil = NONE
   | lookup_same x ((k, v) :: ls) = if same_const x k then SOME v else lookup_same x ls;

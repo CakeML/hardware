@@ -47,7 +47,7 @@ local
         val var = get_var var
       in
         (* TODO: Special handling for this for now *)
-        if same_const WORD_tm pred andalso v = ``0w:word32`` then
+        if same_const WORD_tm pred andalso v ~~ ``0w:word32`` then
           (var, "0")
         else
           raise UnableToTranslate (spec, "Too general WORD_ARRAY expression for current implementation")

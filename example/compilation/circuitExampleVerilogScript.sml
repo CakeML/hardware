@@ -37,7 +37,7 @@ fun mget_var_init_tac (g as (tms, tm)) = let
   val (mget_var_tm, pred_tm) = tm |> boolSyntax.dest_exists |> snd |> dest_conj
   val prg = pred_tm |> rator |> rand |> rand |> strip_comb |> fst
   val var = mget_var_tm |> lhs |> rand
-  val res = lookup prg prg_to_trans
+  val res = lookup_term prg prg_to_trans
 in
   (first_x_assum (strip_assume_tac o SIMP_RULE (srw_ss()) [] o SPEC (fst res)) \\
   pop_assum (mp_tac o (CONV_RULE (LAND_CONV EVAL)) o SPEC var)) g

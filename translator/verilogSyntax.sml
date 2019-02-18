@@ -118,10 +118,10 @@ val (WORD_tm, mk_WORD, dest_WORD, is_WORD) = op2 "WORD"
 val (WORD_ARRAY_tm, mk_WORD_ARRAY, dest_WORD_ARRAY, is_WORD_ARRAY) = op3 "WORD_ARRAY"
 
 val VBool_t_tm = ``VBool_t``;
-fun is_VBool_t tm = tm = VBool_t_tm;
+val is_VBool_t = identical VBool_t_tm;
 
 val VArray_t_tm = ``VArray_t``;
-fun is_VArray_t tm = is_comb tm andalso (rator tm) = VArray_t_tm;
+fun is_VArray_t tm = is_comb tm andalso identical (rator tm) VArray_t_tm;
 fun dest_VArray_t tm = tm |> rand |> dest_list |> fst;
 val num_ty = ``:num``;
 fun mk_VArray_t is = mk_comb (VArray_t_tm, listSyntax.mk_list (map numSyntax.mk_numeral is, num_ty));
