@@ -9,8 +9,8 @@ val _ = new_theory "wordcountVerilogProof";
 val wc_spec_def = Define`
   wc_spec input output <=>
       output = explode (
-        (concat [mlnum$toString (LENGTH (TOKENS isSpace input)); strlit " ";
-                 mlnum$toString (LENGTH (splitlines input)); strlit "\n"]))`;
+        (concat [toString (LENGTH (TOKENS isSpace input)); strlit " ";
+                 toString (LENGTH (splitlines input)); strlit "\n"]))`;
 
 val wordcount_ag32_next_verilog_lem = Q.prove(
  `!vstep fext ms input.
