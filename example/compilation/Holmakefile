@@ -1,3 +1,4 @@
 INCLUDES = .. \
            ../.. \
-           ../../translator
+           ../../translator \
+	   ../../compiler

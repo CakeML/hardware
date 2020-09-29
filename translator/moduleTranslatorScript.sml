@@ -15,7 +15,7 @@ val _ = new_theory "moduleTranslator";
 
 val relM_var_def = Define `
  relM_var hol_s (vs:envT) var a accessf =
-  (?v. mget_var vs var = INR v /\ a (accessf hol_s) v)`;
+  (?v. sum_alookup vs var = INR v /\ a (accessf hol_s) v)`;
 
 fun build_relM_var (name, accessf) = let
   val nameHOL = fromMLstring name
@@ -44,8 +44,8 @@ val relMtypes_def =
  |> (fn tm => Define `relMtypes = ^tm`);
 
 val lift_fext_vars =
- zip (TypeBase.fields_of fext_ty)
-     (TypeBase.accessors_of fext_ty |> map (rator o lhs o concl o SPEC_ALL))
+ zip (TypeBase.fields_of fext_ty |> map (fn (f, info) => (f, #ty info)))
+     (TypeBase.accessors_of fext_ty |> map (rator o lhs o snd o strip_forall o concl))
  |> filter (fn ((name, _), _) => not (mem name model_fext_vars));
 
 val lift_fext_others =
@@ -74,27 +74,18 @@ val lift_fext_relS_fextv_fext = Q.store_thm("lift_fext_relS_fextv_fext",
 
 (** Introduce non-blocking writes **)
 
-val get_assn_var_def = Define `
- (get_assn_var (Var vname) = SOME vname) /\
- (get_assn_var (ArrayIndex (Var vname) _) = SOME vname) /\
- (get_assn_var (ArraySlice (Var vname) _ _ _) = SOME vname) /\
- (get_assn_var _  = NONE)`;
-
 val intro_cvars_def = tDefine "intro_cvars" `
  (intro_cvars vars (Seq rp lp) = Seq (intro_cvars vars rp) (intro_cvars vars lp)) /\
  (intro_cvars vars (IfElse exp tp fp) = IfElse exp (intro_cvars vars tp)
                                                    (intro_cvars vars fp)) /\
- (intro_cvars vars (Case exp cases def) =
-  Case exp
+ (intro_cvars vars (Case ty exp cases def) =
+  Case ty exp
        (MAP (\(cond, p). (cond, (intro_cvars vars p))) cases)
        (OPTION_MAP (intro_cvars vars) def)) /\
  (intro_cvars vars (BlockingAssign lhs rhs) =
-  case get_assn_var lhs of
-      SOME name =>
-      if MEM name vars
-      then NonBlockingAssign lhs rhs
-      else BlockingAssign lhs rhs
-    | NONE => BlockingAssign lhs rhs) /\
+  if MEM (evwrites lhs) vars
+  then NonBlockingAssign lhs rhs
+  else BlockingAssign lhs rhs) /\
  (intro_cvars _ p = p)`
 
  (WF_REL_TAC `measure (vprog_size o SND)` \\ rw [] \\
@@ -129,8 +120,8 @@ val vwrites_intro_cvars_eq = Q.store_thm("vwrites_intro_cvars_eq",
        qexists_tac `(y0, intro_cvars vars y1)` \\ simp [] \\
        qexists_tac `(y0, y1)` \\ simp [])
     \\ Cases_on `def` \\ fs [])
- \\ Cases_on `lhs` \\ fs [get_assn_var_def, vwrites_def, evwrites_def] \\
-    TRY (Cases_on `e`) \\ rw [get_assn_var_def, vwrites_def, evwrites_def] \\
+ \\ Cases_on `lhs` \\ fs [vwrites_def, evwrites_def] \\
+    TRY (Cases_on `e`) \\ rw [vwrites_def, evwrites_def] \\
     Cases_on `var = s` \\ simp []);
 
 val not_vwrites_intro_cvars = Q.store_thm("not_vwrites_intro_cvars",
@@ -161,8 +152,8 @@ val vnwrites_intro_cvars_eq = Q.store_thm("vnwrites_intro_cvars_eq",
        qexists_tac `(y0, intro_cvars vars y1)` \\ simp [] \\
        qexists_tac `(y0, y1)` \\ simp [])
     \\ (Cases_on `def` \\ fs []))
- \\ Cases_on `lhs` \\ fs [get_assn_var_def, vnwrites_def, evwrites_def] \\
-    TRY (Cases_on `e`) \\ rw [get_assn_var_def, vnwrites_def, evwrites_def] \\
+ \\ Cases_on `lhs` \\ fs [vnwrites_def, evwrites_def] \\
+    TRY (Cases_on `e`) \\ rw [vnwrites_def, evwrites_def] \\
     Cases_on `var = s` \\ simp []);
 
 val not_vnwrites_intro_cvars = Q.store_thm("not_vnwrites_intro_cvars",
@@ -190,8 +181,7 @@ val prun_intro_cvars_same_after3 = Q.store_thm("prun_intro_cvars_same_after3",
  `!fext ver_s vars p ver_s'.
    prun fext ver_s (intro_cvars vars p) = INR ver_s' /\ vnwrites p = [] ==>
    !var. ~MEM var vars ==> get_nbq_var ver_s' var = get_nbq_var ver_s var`,
-  rpt strip_tac \\ `~MEM var (vnwrites p)` by simp [] \\
-  metis_tac [vnwrites_intro_cvars_eq, prun_same_after]);
+  rpt strip_tac \\ drule_strip prun_same_after \\ fs [vnwrites_intro_cvars_eq]);
 
 (** valid_ps_for_module **)
 
@@ -246,7 +236,7 @@ val valid_ps_for_module_tl_vwrites = Q.store_thm("valid_ps_for_module_tl_vwrites
 
 val relM_relS = Q.store_thm("relM_relS",
  `!s env. relM s env ==> relS s <| vars := env; nbq := [] |>`,
- rw [relM_def, relS_def, relM_var_def, mget_var_def, relS_var_def, get_var_def] \\ fs []);
+ rw [relM_def, relS_def, relM_var_def, sum_alookup_def, relS_var_def, get_var_def] \\ fs []);
 
 (*
 val no_writes_before_read_exp_def = Define `
@@ -303,8 +293,8 @@ val cvar_writes_cond_def = tDefine "cvar_writes_cond" `
   (EVERY (\var. MEM var (vwrites p) ==> ~MEM var (vreads q)) vars /\
   cvar_writes_cond vars p /\ cvar_writes_cond vars q)) /\
  (cvar_writes_cond vars (IfElse _ p q) = (cvar_writes_cond vars p /\ cvar_writes_cond vars q)) /\
- (cvar_writes_cond vars (Case _ cs d) = (EVERY (\(_, p). cvar_writes_cond vars p) cs /\
-                                         case d of SOME dp => cvar_writes_cond vars dp | NONE => T)) /\
+ (cvar_writes_cond vars (Case _ _ cs d) = (EVERY (\(_, p). cvar_writes_cond vars p) cs /\
+                                           case d of SOME dp => cvar_writes_cond vars dp | NONE => T)) /\
  (cvar_writes_cond _ _ = T)`
 
  (WF_REL_TAC `measure (vprog_size o SND)` \\ rw [] \\
@@ -316,8 +306,8 @@ val cvar_writes_cond2_def = tDefine "cvar_writes_cond2" `
   (EVERY (\var. ~(MEM var (vwrites p) /\ MEM var (vwrites q))) vars /\
   cvar_writes_cond2 vars p /\ cvar_writes_cond2 vars q)) /\
  (cvar_writes_cond2 vars (IfElse _ p q) = (cvar_writes_cond2 vars p /\ cvar_writes_cond2 vars q)) /\
- (cvar_writes_cond2 vars (Case _ cs d) = (EVERY (\(_, p). cvar_writes_cond2 vars p) cs /\
-                                         case d of SOME dp => cvar_writes_cond2 vars dp | NONE => T)) /\
+ (cvar_writes_cond2 vars (Case _ _ cs d) = (EVERY (\(_, p). cvar_writes_cond2 vars p) cs /\
+                                            case d of SOME dp => cvar_writes_cond2 vars dp | NONE => T)) /\
  (cvar_writes_cond2 _ _ = T)`
 
  (WF_REL_TAC `measure (vprog_size o SND)` \\ rw [] \\
@@ -327,6 +317,7 @@ val Abbrev_SYM = Q.store_thm("Abbrev_SYM",
  `!x y. Abbrev (x = y) <=> Abbrev (y = x)`,
  metis_tac [markerTheory.Abbrev_def]);
 
+(* TODO: Very slow and a little outdated w.r.t. semantics
 val prun_untainted_state = Q.store_thm("prun_untainted_state",
  `!vars fext ver_s p ver_s' ver_s''.
   prun fext ver_s p = INR ver_s' /\
@@ -409,8 +400,8 @@ val prun_untainted_state = Q.store_thm("prun_untainted_state",
 
  >- (* BlockingAssign *)
  (fs [intro_cvars_def, prun_def, vwrites_def, vnwrites_def, vreads_def] \\
- imp_res_tac sum_bind_INR \\ fs [sum_bind_def, prun_bassn_def] \\
- imp_res_tac sum_for_INR \\ fs [sum_for_def, sum_map_def] \\
+ imp_res_tac sum_bind_INR_old \\ fs [sum_bind_def, prun_bassn_def] \\
+ imp_res_tac sum_for_INR_old \\ fs [sum_for_def, sum_map_def] \\
 
  (* TODO: Can probably be done in better order: *)
  `erun fext ver_s'' rhs = erun fext s rhs` by metis_tac [erun_cong] \\
@@ -429,8 +420,8 @@ val prun_untainted_state = Q.store_thm("prun_untainted_state",
  fs [evreads_def, evwrites_def, get_var_cleanup])
 
  \\ (* NonBlockingAssign *)
- fs [prun_def] \\ imp_res_tac sum_bind_INR \\ fs [sum_bind_def, prun_nbassn_def] \\
- imp_res_tac sum_for_INR \\ fs [sum_for_def, sum_map_def] \\ rveq \\
+ fs [prun_def] \\ imp_res_tac sum_bind_INR_old \\ fs [sum_bind_def, prun_nbassn_def] \\
+ imp_res_tac sum_for_INR_old \\ fs [sum_for_def, sum_map_def] \\ rveq \\
  drule assn_INR \\ strip_tac \\ rveq \\
  fs [vnwrites_def, evwrites_def]);
 
@@ -441,7 +432,7 @@ val relS_with_same_vars = Q.store_thm("relS_with_same_vars",
 val pstate_vars_cleanup = Q.store_thm("pstate_vars_cleanup",
  `!(ver_s:pstate). ver_s with vars := ver_s.vars = ver_s`,
  rw [pstate_component_equality]);
-
+*)
 val mstep_no_writes = Q.store_thm("mstep_no_writes",
  `!ps fext var vars ver_s ver_s'.
   EVERY (\p. ~MEM var (vwrites p)) ps /\
@@ -450,9 +441,9 @@ val mstep_no_writes = Q.store_thm("mstep_no_writes",
   get_var ver_s' var = get_var ver_s var /\
   get_nbq_var ver_s' var = get_nbq_var ver_s var`,
  Induct >- rw [mstep_def, sum_foldM_def] \\
- rpt gen_tac \\ strip_tac \\ fs [mstep_unfold1] \\
+ rpt gen_tac \\ strip_tac \\ fs [mstep_step] \\
  metis_tac [prun_intro_cvars_same_after]);
-
+(*
 val mstep_untainted_state = Q.store_thm("mstep_untainted_state",
  `!vars fext ps fextv ver_s ver_s' s Penv.
   Penv ver_s.vars /\
@@ -485,7 +476,7 @@ val mstep_untainted_state = Q.store_thm("mstep_untainted_state",
               else get_var ver_s'' var = get_var ver_s_p var /\
                    get_nbq_var ver_s'' var = get_nbq_var ver_s' var)))`,
  ntac 2 gen_tac \\ Induct >- rw [mstep_def, sum_foldM_def] \\
- simp [mstep_unfold1] \\ Ho_Rewrite.ONCE_REWRITE_TAC [MEM_disj_impl] \\ rpt strip_tac \\ fs [] \\
+ simp [mstep_step] \\ Ho_Rewrite.ONCE_REWRITE_TAC [MEM_disj_impl] \\ rpt strip_tac \\ fs [] \\
  CONV_TAC (DEPTH_CONV LEFT_AND_EXISTS_CONV) \\
 
  first_x_assum drule \\ simp [EvalS_def] \\ imp_res_tac relS_with_same_vars \\
@@ -527,7 +518,7 @@ val mrun_intro_cvars_same_after2 = Q.store_thm("mrun_intro_cvars_same_after2",
    mstep fext (MAP (intro_cvars vars) ps) ver_s = INR ver_s' /\ MEM var vars ==>
    get_var ver_s' var = get_var ver_s var`,
  Induct >- rw [mstep_def, sum_foldM_def] \\
- rw [mstep_unfold1] \\ metis_tac [prun_intro_cvars_same_after2]);
+ rw [mstep_step] \\ metis_tac [prun_intro_cvars_same_after2]);
 
 (* mstep_untainted_state is very general because otherwise the induction does not work,
    this thm is a simpler version that is what we actually need in practice *)
@@ -561,19 +552,21 @@ val mstep_commit_lift_EvalSs = Q.store_thm("mstep_commit_lift_EvalSs",
  drule_first \\ simp [mget_var_append, mget_var_get_var, mget_var_get_nbq_var] \\
  pop_assum mp_tac \\ EVERY_CASE_TAC \\ fs [get_nbq_var_def] \\
  drule_strip mrun_intro_cvars_same_after2 \\ drule_strip prun_get_var_INL \\ metis_tac []);
-
+*)
 (* From mstep_commit to mrun *)
 
+(* Work because step does not depend on fbits *)
 val mstep_commit_mrun = Q.store_thm("mstep_commit_mrun",
- `!n vs ps fextv step tys.
+ `!n vs ps fextv fbits step (*tys*).
    relM (step 0) vs /\
-   vars_has_type vs tys /\
-   (!n vs. relM (step n) vs /\ vars_has_type vs tys ==>
-           ?vs'. mstep_commit (fextv n) ps vs = INR vs' /\ relM (step (SUC n)) vs')
+   (*vars_has_type vs tys /\*)
+   (!n vs fbits fbits'.
+     relM (step n) vs (*/\ vars_has_type vs tys*) ==>
+     ?vs' fbits'. mstep_commit (fextv n) fbits ps vs = INR (vs', fbits') /\ relM (step (SUC n)) vs')
    ==>
-   ?vs'. mrun fextv ps vs n = INR vs' /\ relM (step n) vs'`,
- Induct_on `n` >- rw [mrun_def] \\ rpt strip_tac \\ drule_last \\
- drule_strip vars_has_type_mrun \\ simp [mrun_unfold1]);
+   ?vs' fbits'. mrun fextv fbits ps vs n = INR (vs', fbits') /\ relM (step n) vs'`,
+ Induct >- rw [mrun_def] \\ rpt strip_tac \\ drule_last \\
+ (*drule_strip vars_has_type_mrun \\*) simp [mrun_step] \\ metis_tac []);
 
 (* Useful for variables never written to *)
 val mstep_intro_cvars_no_writes = Q.store_thm("mstep_intro_cvars_no_writes",
@@ -582,18 +575,18 @@ val mstep_intro_cvars_no_writes = Q.store_thm("mstep_intro_cvars_no_writes",
   EVERY (\p. ~MEM var (vwrites p)) ps /\
   EVERY (\p. vnwrites p = []) ps /\
   get_nbq_var ver_s var = INL UnknownVariable ==>
-  mget_var (ver_s'.nbq ++ ver_s'.vars) var = get_var ver_s var`,
- rw [mget_var_def, alistTheory.ALOOKUP_APPEND] \\ drule mstep_no_writes \\
+  sum_alookup (ver_s'.nbq ++ ver_s'.vars) var = get_var ver_s var`,
+ rw [sum_alookup_def, alistTheory.ALOOKUP_APPEND] \\ drule mstep_no_writes \\
  rpt (disch_then drule) \\ EVERY_CASE_TAC \\ fs [get_var_def, get_nbq_var_def]);
 
 val mstep_commit_intro_cvars_no_writes = Q.store_thm("mstep_commit_intro_cvars_no_writes",
- `!fext ps var vars vs vs'.
-  mstep_commit fext (MAP (intro_cvars vars) ps) vs = INR vs' /\
+ `!fext fbits fbits' ps var vars vs vs'.
+  mstep_commit fext fbits (MAP (intro_cvars vars) ps) vs = INR (vs', fbits') /\
   EVERY (\p. ~MEM var (vwrites p)) ps /\
   EVERY (\p. vnwrites p = []) ps ==>
-  mget_var vs' var = mget_var vs var`,
- rw [mstep_commit_def] \\ drule_strip sum_map_INR \\ drule_strip mstep_intro_cvars_no_writes \\
- fs [get_nbq_var_def, sum_map_def, get_var_def, mget_var_def]);
+  sum_alookup vs' var = sum_alookup vs var`,
+ rw [mstep_commit_def] \\ drule_strip sum_map_INR_old \\ drule_strip mstep_intro_cvars_no_writes \\
+ fs [get_nbq_var_def, sum_map_def, get_var_def, sum_alookup_def]);
 
 (** For computing valid_ps_for_module **)
 

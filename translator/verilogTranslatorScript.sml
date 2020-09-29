@@ -102,22 +102,16 @@ val prun_bassn_works_WORD = Q.store_thm("prun_bassn_works_WORD",
    WORD w1 vnew /\
    get_var s var = INR vold /\
    WORD w2 vold ==>
-   prun_bassn fext s (Var var) vnew = INR (set_var s var vnew)`,
- rpt strip_tac \\ simp [prun_bassn_def, assn_def, sum_bind_def] \\
- (* UGLY: Want to split directly on if in some sense, know its true... *)
- REVERSE TOP_CASE_TAC >- metis_tac [same_shape_WORD] \\
- simp [sum_for_def, sum_map_def]);
+   prun_bassn fext s (NoIndexing var) vnew = INR (set_var s var vnew)`,
+ rw [prun_bassn_def, assn_def, sum_bind_def, sum_for_def, sum_map_def]);
 
 val prun_bassn_works_BOOL = Q.store_thm("prun_bassn_works_BOOL",
  `!fext s b1 vnew b2 vold var.
    BOOL b1 vnew /\
    get_var s var = INR vold /\
    BOOL b2 vold ==>
-   prun_bassn fext s (Var var) vnew = INR (set_var s var vnew)`,
- rpt strip_tac \\ simp [prun_bassn_def, assn_def, sum_bind_def] \\
- (* UGLY: Want to split directly on if in some sense, know its true... *)
- REVERSE TOP_CASE_TAC >- metis_tac [same_shape_BOOL] \\
- simp [sum_for_def, sum_map_def]);
+   prun_bassn fext s (NoIndexing var) vnew = INR (set_var s var vnew)`,
+ rw [prun_bassn_def, assn_def, sum_bind_def, sum_for_def, sum_map_def]);
 
 (** prun_bassn_type_pred things, used in e.g. EvalS_Let **)
 
@@ -130,19 +124,15 @@ val prun_bassn_type_pred_def = Define `
    var_has_type_old env name type_pred /\
    type_pred arg newv
    ==>
-   prun_bassn fext (ver_s with vars := env) (Var name) newv = INR (ver_s with vars := (name, newv) :: env)`;
+   prun_bassn fext (ver_s with vars := env) (NoIndexing name) newv =
+   INR (ver_s with vars := (name, newv) :: env)`;
 
 val prun_bassn_type_pred_ALL = Q.store_thm("prun_bassn_type_pred_ALL",
- `prun_bassn_type_pred BOOL /\ prun_bassn_type_pred WORD /\ prun_bassn_type_pred (WORD_ARRAY WORD)`,
+ `prun_bassn_type_pred BOOL /\ prun_bassn_type_pred WORD(* /\ prun_bassn_type_pred (WORD_ARRAY WORD)*)`,
  rpt CONJ_TAC \\
  rw [prun_bassn_type_pred_def, var_has_type_old_def, var_has_value_def, get_var_def,
      Eval_def, erun_def, prun_bassn_def, assn_def] \\
- res_tac \\
-
- imp_res_tac same_shape_BOOL \\
- imp_res_tac same_shape_WORD \\
- imp_res_tac same_shape_WORD_ARRAY_WORD \\
-
+ (*res_tac \\*)
  fs [set_var_def, sum_bind_def, sum_for_def, sum_map_def]);
 
 val prun_bassn_type_pred_BOOL = Q.store_thm("prun_bassn_type_pred_BOOL",
@@ -153,9 +143,9 @@ val prun_bassn_type_pred_WORD = Q.store_thm("prun_bassn_type_pred_WORD",
  `prun_bassn_type_pred WORD`,
  rw [prun_bassn_type_pred_ALL]);
 
-val prun_bassn_type_pred_WORD_ARRAY = Q.store_thm("prun_bassn_type_pred_WORD_ARRAY",
+(*val prun_bassn_type_pred_WORD_ARRAY = Q.store_thm("prun_bassn_type_pred_WORD_ARRAY",
  `prun_bassn_type_pred (WORD_ARRAY WORD)`,
-  rw [prun_bassn_type_pred_ALL]);
+  rw [prun_bassn_type_pred_ALL]);*)
 
 (** Eval thms and hol2hardware_exp **)
 
@@ -206,9 +196,8 @@ val Eval_BOOL_bbop = Q.store_thm("Eval_BOOL_bbop",
    Eval fext s env (BOOL b1) v1 /\
    Eval fext s env (BOOL b2) v2 ==>
    Eval fext s env (BOOL (b1 /\ b2)) (BBOp v1 And v2) /\
-   Eval fext s env (BOOL (b1 = b2)) (BBOp v1 Equal v2) /\
-   Eval fext s env (BOOL (b1 <> b2)) (BBOp v1 NotEqual v2) /\
-   Eval fext s env (BOOL (b1 \/ b2)) (BBOp v1 Or v2)`,
+   Eval fext s env (BOOL (b1 \/ b2)) (BBOp v1 Or v2) /\
+   Eval fext s env (BOOL (b1 = b2)) (BBOp v1 Equal v2)`,
  rw [Eval_def, erun_def, BOOL_def, sum_bind_def, erun_bbop_def]);
 
 val Eval_BOOL_And = Q.store_thm("Eval_BOOL_And",
@@ -225,12 +214,12 @@ val Eval_BOOL_Equal = Q.store_thm("Eval_BOOL_Equal",
    Eval fext s env (BOOL (b1 = b2)) (BBOp v1 Equal v2)`,
  rw [Eval_BOOL_bbop]);
 
-val Eval_BOOL_NotEqual = Q.store_thm("Eval_BOOL_NotEqual",
+(*val Eval_BOOL_NotEqual = Q.store_thm("Eval_BOOL_NotEqual",
  `!s b1 v1 b2 v2.
    Eval fext s env (BOOL b1) v1 /\
    Eval fext s env (BOOL b2) v2 ==>
    Eval fext s env (BOOL (b1 <> b2)) (BBOp v1 NotEqual v2)`,
- rw [Eval_BOOL_bbop]);
+ rw [Eval_BOOL_bbop]);*)
 
 val Eval_BOOL_Or = Q.store_thm("Eval_BOOL_Or",
  `!s b1 v1 b2 v2.
@@ -264,7 +253,7 @@ val Eval_WORD_abop = Q.store_thm("Eval_WORD_abop",
  rw [Eval_def, erun_def, WORD_def] \\ res_tac \\
  fs [sum_bind_def, sum_for_def, sum_map_def,
      ver2v_w2ver, v2ver_def, w2ver_def,
-     erun_abop_def, same_shape_w2ver, band_w2v, bor_w2v, bxor_w2v]);
+     erun_abop_def, band_w2v, bor_w2v, bxor_w2v]);
 
 val Eval_WORD_And = Q.store_thm("Eval_WORD_And",
  `!s w1 v1 w2 v2.
@@ -289,46 +278,32 @@ val Eval_WORD_Xor = Q.store_thm("Eval_WORD_Xor",
 
 val HD_MAP = Q.store_thm("HD_MAP",
  `!l f. l <> [] ==> HD (MAP f l) = f (HD l)`,
- Induct \\ rw []);
+ Cases \\ rw []);
 
-(* Rename: *)
-val lem1 = Q.prove(
- `!w. K (HD (MAP VBool (w2v w))) = VBool o K (HD (w2v w))`,
- rw [w2v_not_empty, HD_MAP]);
-
-val lem2 = Q.prove(
+val HD_w2v = Q.prove(
  `!w. HD (w2v w) <=> word_msb w`,
  rw [word_msb_def, w2v_def] \\ Cases_on `dimindex(:'a)` >- fs [] \\ simp [HD_GENLIST]);
 
-val lem3 = Q.prove(
- `K (VBool F) = VBool o K F`,
- rw []);
-
-val erun_shift_ShiftArithR_ShiftLogicalR_lift = Q.store_thm("erun_shift_ShiftArithR_ShiftLogicalR_lift",
- `!w1 w2.
-    erun_shift ShiftArithR (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 >>~ w2)) /\
-    erun_shift ShiftLogicalR (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 >>>~ w2))`,
-  rw [erun_shift_def, word_asr_bv_def, word_asr_def, word_lsr_bv_def, word_lsr_def] \\
- rewrite_tac [lem1, lem3, GSYM MAP_GENLIST, GSYM MAP_TAKE, GSYM MAP_APPEND] \\
-
- match_mp_tac MAP_CONG \\ rw [] \\
-
+Theorem erun_shift_ShiftArithR_ShiftLogicalR_lift:
+ !w1 w2.
+ erun_shift ShiftArithR (w2v w1) (w2n w2) = w2v (w1 >>~ w2) /\
+ erun_shift ShiftLogicalR (w2v w1) (w2n w2) = w2v (w1 >>>~ w2)
+Proof
+ rw [erun_shift_def, word_asr_bv_def, word_asr_def, word_lsr_bv_def, word_lsr_def] \\
  match_mp_tac EL_all_eq \\ rw [el_w2v, FCP_BETA] \\
+ rw [EL_APPEND_EQN, rich_listTheory.EL_TAKE, HD_w2v] \\
+ Cases_on `w2n w2 < n + 1` \\ rw [el_w2v]
+QED
 
- rw [EL_APPEND_EQN, rich_listTheory.EL_TAKE, lem2] \\
- Cases_on `w2n w2 < n + 1` \\ rw [el_w2v])
-
-val erun_shift_ShiftLogicalL_lift = Q.store_thm("erun_shift_ShiftLogicalL_lift",
- `!w1 w2. erun_shift ShiftLogicalL (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 <<~ w2))`,
+Theorem erun_shift_ShiftLogicalL_lift:
+ !w1 w2. erun_shift ShiftLogicalL (w2v w1) (w2n w2) = w2v (w1 <<~ w2)
+Proof
  rw [erun_shift_def, word_lsl_bv_def, word_lsl_def] \\
  rw [ver_fixwidth_def, PAD_LEFT, PAD_RIGHT] \\
-
- rewrite_tac [lem3, GSYM MAP_GENLIST, GSYM MAP_DROP, GSYM MAP_APPEND] \\
- match_mp_tac MAP_CONG \\ rw [] \\
-
  match_mp_tac EL_all_eq \\
  rw [rich_listTheory.DROP_APPEND, el_w2v, FCP_BETA, EL_APPEND_EQN] \\
- fs [rich_listTheory.EL_DROP, el_w2v]);
+ fs [rich_listTheory.EL_DROP, el_w2v]
+QED
 
 val Eval_WORD_shift = Q.store_thm("Eval_WORD_shift",
   `!s w1 v1 w2 v2.
@@ -338,10 +313,10 @@ val Eval_WORD_shift = Q.store_thm("Eval_WORD_shift",
     Eval fext s env (WORD (w1 <<~ w2)) (Shift v1 ShiftLogicalL v2) /\
     Eval fext s env (WORD (w1 >>>~ w2)) (Shift v1 ShiftLogicalR v2)`,
  rw [Eval_def, erun_def] \\ drule_first \\ drule_first \\
- fs [sum_bind_def, sum_for_def, sum_map_def,
-     WORD_def, get_1dim_VArray_data_def,
+ fs [sum_bind_def, sum_for_def, sum_map_def, get_VArray_data_def,
+     WORD_def, (*get_1dim_VArray_data_def,*)
      w2ver_def, ver2v_def, ver2n_def, v2n_w2v, sum_mapM_ver2bool_VBool,
-     w2v_not_empty, EVERY_isVBool_MAP_VBool,
+     w2v_not_empty, (*EVERY_isVBool_MAP_VBool,*)
 
      erun_shift_ShiftArithR_ShiftLogicalR_lift,
      erun_shift_ShiftLogicalL_lift]);
@@ -378,9 +353,10 @@ val Eval_WORD_arith = Q.store_thm("Eval_WORD_arith",
  rw [Eval_def, erun_def, WORD_def] \\ res_tac \\ PURE_REWRITE_TAC [GSYM WORD_NEG_MUL] \\
  rw [sum_bind_def, sum_map_def,
      w2ver_def, ver2n_def, n2ver_def, v2ver_def, ver2v_def, v2n_w2v,
-     same_shape_w2ver, ver_mapVArray_def, sum_mapM_VBool, ver_liftVArray_def, erun_arith_def,
+     ver_mapVArray_def, sum_mapM_VBool, ver_liftVArray_def, erun_arith_def,
+     ver_fixwidth_fixwidth,
 
-     (* new thms: *) w2v_n2w, ver_fixwidth_fixwidth_MAP,
+     (* new thms: *) w2v_n2w, (*ver_fixwidth_fixwidth_MAP,*)
 
      word_mod_def,
 
@@ -427,16 +403,17 @@ val Eval_WORD_cmp = Q.store_thm("Eval_WORD_cmp",
    Eval fext s env (WORD w1) v1 /\
    Eval fext s env (WORD w2) v2 ==>
    Eval fext s env (BOOL (w1 = w2)) (Cmp v1 ArrayEqual v2) /\
-   Eval fext s env (BOOL (w1 <> w2)) (Cmp v1 ArrayNotEqual v2) /\
+   (*Eval fext s env (BOOL (w1 <> w2)) (Cmp v1 ArrayNotEqual v2) /\*)
    Eval fext s env (BOOL (w1 < w2)) (Cmp v1 LessThan v2) /\
    Eval fext s env (BOOL (w1 <+ w2)) (Cmp v1 LowerThan v2) /\
    Eval fext s env (BOOL (w1 <= w2)) (Cmp v1 LessThanOrEqual v2) /\
    Eval fext s env (BOOL (w1 <=+ w2)) (Cmp v1 LowerThanOrEqual v2)`,
  rw [Eval_def, erun_def, erun_cmp_def,
-     WORD_def, BOOL_def, same_shape_w2ver, w2ver_bij, ver2n_w2ver,
+     WORD_def, BOOL_def, w2ver_bij, ver2n_w2ver,
      sum_bind_def, sum_for_def, sum_map_def]
+ >- simp [get_VArray_data_def, w2ver_def, sum_bind_def, w2v_bij]
  \\ TRY (simp [ver_msb_w2ver, WORD_LT, WORD_LE, sum_bind_def, sum_map_def] \\ NO_TAC)
- \\ (Cases_on_word `w1` \\ Cases_on_word `w2` \\ simp [w2n_n2w, word_lo_n2w, word_ls_n2w]));
+ \\ Cases_on_word `w1` \\ Cases_on_word `w2` \\ simp [w2n_n2w, word_lo_n2w, word_ls_n2w]);
 
 val Eval_WORD_Equal = Q.store_thm("Eval_WORD_Equal",
  `!s w1 v1 w2 v2.
@@ -445,12 +422,12 @@ val Eval_WORD_Equal = Q.store_thm("Eval_WORD_Equal",
    Eval fext s env (BOOL (w1 = w2)) (Cmp v1 ArrayEqual v2)`,
  rw [Eval_WORD_cmp]);
 
-val Eval_WORD_NotEqual = Q.store_thm("Eval_WORD_NotEqual",
+(*val Eval_WORD_NotEqual = Q.store_thm("Eval_WORD_NotEqual",
  `!s w1 v1 w2 v2.
    Eval fext s env (WORD w1) v1 /\
    Eval fext s env (WORD w2) v2 ==>
    Eval fext s env (BOOL (w1 <> w2)) (Cmp v1 ArrayNotEqual v2)`,
- rw [Eval_WORD_cmp]);
+ rw [Eval_WORD_cmp]);*)
 
 val Eval_WORD_LessThan = Q.store_thm("Eval_WORD_LessThan",
  `!s w1 v1 w2 v2.
@@ -484,12 +461,12 @@ val Eval_word_bit = Q.store_thm("Eval_word_bit",
  `!s n (w:'a word) varexp.
     Eval fext s env (WORD w) varexp ==>
     is_vervar varexp /\ n < dimindex (:'a) ==>
-    Eval fext s env (BOOL (word_bit n w)) (ArrayIndex varexp [Const (n2ver n)])`,
+    Eval fext s env (BOOL (word_bit n w)) (ArrayIndex varexp 0 (Const (n2ver n)))`,
  Cases_on `varexp` \\ rw [is_vervar_def, Eval_def, erun_def, WORD_def] \\ res_tac \\
  rw [sum_bind_def, sum_mapM_def, erun_def, sum_map_def, ver2n_n2ver, w2ver_def,
      get_array_index_def, sum_revEL_def] \\
  bitstringLib.Cases_on_v2w `w` \\
- fs [w2v_v2w, BOOL_def, sum_bind_def, EL_MAP, bit_v2w, testbit, sum_EL_EL]);
+ fs [w2v_v2w, BOOL_def, sum_bind_def, sum_map_def, EL_MAP, bit_v2w, testbit, sum_EL_EL]);
 
 val Eval_word_extract_help = Q.store_thm("Eval_word_extract_help",
  `!v h l. h >= l /\ h < LENGTH v ==> TAKE (h − l + 1) (DROP (LENGTH v − (h + 1)) v) = DROP (LENGTH v − SUC h) (TAKE (LENGTH v − l) v)`,
@@ -500,12 +477,11 @@ val Eval_word_extract = Q.store_thm("Eval_word_extract",
    Eval fext s env (WORD w) varexp ==>
    is_vervar varexp /\ h >= l /\ h < dimindex (:'a) /\ h - l + 1 = dimindex (:'b) /\
    dimindex (:'a) >= dimindex (:'b) ==>
-   Eval fext s env (WORD (((h >< l) w):'b word)) (ArraySlice varexp [] h l)`,
+   Eval fext s env (WORD (((h >< l) w):'b word)) (ArraySlice varexp h l)`,
  Cases_on `varexp` \\ rw [is_vervar_def, Eval_def, erun_def, WORD_def, sum_bind_def] \\
  ntac 2 (pop_assum kall_tac) (* <-- just cleanup *) \\
 
  rw [w2ver_def, get_array_slice_def] \\ rewrite_tac [GSYM MAP_DROP, GSYM MAP_TAKE] \\
- match_mp_tac MAP_CONG \\
  bitstringLib.Cases_on_v2w `w` \\
  fs [word_extract_v2w, word_bits_v2w, w2v_v2w, w2w_v2w, field_def, shiftr_def] \\
  fs [fixwidth_def, zero_extend_def, PAD_LEFT] \\ metis_tac [Eval_word_extract_help]);
@@ -514,11 +490,9 @@ val WORD_VArray_empty = Q.store_thm("WORD_VArray_empty",
  `!w. ~(WORD w (VArray []))`,
  rw [WORD_def, w2ver_def, w2v_not_empty]);
 
-val WORD_get_1dim_VArray_data = Q.store_thm("WORD_get_1dim_VArray_data",
- `!vs w. WORD w (VArray vs) ==> get_1dim_VArray_data (VArray vs) = INR vs`,
- rw [get_1dim_VArray_data_def]
- >- (Cases_on `vs` \\ fs [WORD_VArray_empty])
- \\ fs [WORD_def, w2ver_def, EVERY_isVBool_MAP_VBool]);
+val WORD_get_VArray_data = Q.store_thm("WORD_get_VArray_data",
+ `!vs w. WORD w (VArray vs) ==> get_VArray_data (VArray vs) = INR vs`,
+ rw [get_VArray_data_def]);
 
 val Eval_word_concat = Q.store_thm("Eval_word_concat",
  `!s (lw:'a word) (rw:'b word) lexp rexp.
@@ -530,9 +504,9 @@ val Eval_word_concat = Q.store_thm("Eval_word_concat",
    Eval fext s env (WORD ((lw @@ rw):'c word)) (ArrayConcat lexp rexp)`,
  rw [Eval_def] \\ rpt drule_first \\ simp [erun_def, sum_bind_def] \\
  Cases_on `res` >- fs [WORD_def, w2ver_def] \\
- drule_strip WORD_get_1dim_VArray_data \\
+ drule_strip WORD_get_VArray_data \\
  Cases_on `res'` >- fs [WORD_def, w2ver_def] \\
- drule_strip WORD_get_1dim_VArray_data \\
+ drule_strip WORD_get_VArray_data \\
  simp [sum_bind_def, sum_for_def, sum_map_def, word_concat_def] \\
 
  Cases_on_v2w `lw` \\ Cases_on_v2w `rw` \\
@@ -546,20 +520,16 @@ val MAP_PAD_LEFT = Q.store_thm("MAP_PAD_LEFT",
 val Eval_resize_tac =
  rw [BOOL_def, WORD_def, Eval_def, erun_def, erun_resize_def] \\
  first_x_assum drule \\ strip_tac \\
- rw [sum_bind_def, sum_map_def, get_1dim_VArray_data_def, ver_to_VArray_def, isVBool_def,
-       w2ver_def, EVERY_isVBool_MAP_VBool,
-       w2v_not_empty, w2v_w2w, w2v_v2w,
-       fixwidth_def, zero_extend_def, MAP_PAD_LEFT, MAP_DROP];
+ rw [sum_bind_def, sum_map_def, get_VArray_data_def, ver_to_VArray_def, isVBool_def,
+     w2ver_def, (*EVERY_isVBool_MAP_VBool,*)
+     w2v_not_empty, w2v_w2w, w2v_v2w,
+     fixwidth_def, zero_extend_def, MAP_PAD_LEFT, MAP_DROP];
 
 val Eval_w2w = Q.store_thm("Eval_w2w",
  `!s (w:'a word) e.
    Eval fext s env (WORD w) e ==>
    Eval fext s env (WORD ((w2w w):'b word)) (Resize e ZeroExtend (dimindex (:'b)))`,
  Eval_resize_tac);
-
-val HD_MAP = Q.store_thm("HD_MAP",
- `!l f. l <> [] ==> HD (MAP f l) = f (HD l)`,
- Cases \\ rw []);
 
 val GENLIST_NIL = Q.store_thm("GENLIST_NIL",
  `!f n. GENLIST f n = [] <=> n = 0`,
@@ -589,12 +559,10 @@ val Eval_sw2sw = Q.store_thm("Eval_sw2sw",
  (* TODO: Generalize tactic *)
  Eval_resize_tac \\
  simp [w2v_def, sw2sw] \\
- DEP_REWRITE_TAC [HD_MAP] \\ conj_tac >- rw [GENLIST_NIL] \\
- simp [PAD_LEFT_MAP] \\ match_mp_tac MAP_CONG \\ simp [PAD_LEFT] \\
+ simp [PAD_LEFT] \\
  DEP_REWRITE_TAC [HD_GENLIST_alt] \\ simp [] \\
  `!i. 0 < i + dimindex (:'a)` by (gen_tac \\ assume_tac DIMINDEX_GT_0 \\ DECIDE_TAC) \\ simp [] \\
- pop_assum (fn _ => ALL_TAC) \\
- simp [GENLIST_APPEND_alt, word_msb_def] \\ match_mp_tac GENLIST_CONG \\ rw [f_equals2]);
+ simp [GENLIST_APPEND_alt, word_msb_def, GENLIST_FUN_EQ] \\ rw [f_equals2]);
 
 val Eval_v2w = Q.store_thm("Eval_v2w",
  `!s b e.
@@ -611,7 +579,7 @@ val Eval_InlineIf = Q.store_thm("Eval_InlineIf",
    Eval fext s env (a (if c then l else r)) (InlineIf cexp lexp rexp)`,
  rw [BOOL_def, Eval_def, erun_def, sum_bind_def, get_VBool_data_def]);
 
-val Eval_WORD_ARRAY_indexing = Q.store_thm("Eval_WORD_ARRAY_indexing",
+(*val Eval_WORD_ARRAY_indexing = Q.store_thm("Eval_WORD_ARRAY_indexing",
  `!s a wa var i iexp.
    Eval fext s env (WORD_ARRAY a wa) (Var var) /\
    Eval fext s env (WORD i) iexp ==>
@@ -640,7 +608,7 @@ val Eval_WORD_ARRAY_indexing2 = Q.store_thm("Eval_WORD_ARRAY_indexing2",
 
  every_case_tac \\ fs [] \\
  first_x_assum (qspec_then `j` assume_tac) \\
- fs [get_array_index_def, sum_bind_def]);
+ fs [get_array_index_def, sum_bind_def]);*)
 
 val Eval_neg = Q.store_thm("Eval_neg",
  `!s b bexp.
@@ -690,7 +658,7 @@ val EVERY_sum_revEL = Q.store_thm("EVERY_sum_revEL",
     metis_tac [sum_revEL_APPEND_EQN, rich_listTheory.CONS_APPEND]);
 
 (* WORD_ARRAY unfolded once here *)
-val WORD_ARRAY_EVERY_same_shape = Q.store_thm("WORD_ARRAY_EVERY_same_shape",
+(*val WORD_ARRAY_EVERY_same_shape = Q.store_thm("WORD_ARRAY_EVERY_same_shape",
  `!l (lw:'a word -> 'b word) (vw:'b word).
    LENGTH l <= dimword (:'a) /\ (!i. sum_revEL (w2n i) l = INR (w2ver (lw i))) ==>
    EVERY (λe. same_shape (w2ver vw) e) l`,
@@ -717,7 +685,7 @@ val prun_bassn_correct = Q.store_thm("prun_bassn_correct",
  drule set_index_correct \\ disch_then (qspec_then `w2ver vw` mp_tac) \\ impl_tac
  >- (match_mp_tac WORD_ARRAY_EVERY_same_shape \\ fs [] \\ metis_tac [])
  \\ strip_tac \\ rfs [sum_for_def, sum_map_def] \\
-    qexists_tac `l'` \\ rw [get_var_set_var]);
+    qexists_tac `l'` \\ rw [get_var_set_var]);*)
 
 (** EvalS thms **)
 
@@ -740,12 +708,12 @@ val EvalS_Let = Q.store_thm("EvalS_Let",
   Eval fext s env (a arg) arg_exp /\
   (!v. a arg v ==> EvalS fext s ((name, v) :: env) (f arg) f_exp) ==>
   var_has_type_old env name a ==>
-  EvalS fext s env (LET f arg) (Seq (BlockingAssign (Var name) arg_exp) f_exp)`,
+  EvalS fext s env (LET f arg) (Seq (BlockingAssign (NoIndexing name) (SOME arg_exp)) f_exp)`,
  rw [EvalS_def, Eval_def, prun_Seq] \\ rw [prun_def] \\
  first_x_assum drule \\ strip_tac \\ fs [sum_bind_def, prun_bassn_type_pred_def] \\
  res_tac \\ simp [] \\
  first_x_assum (qspec_then `res` mp_tac) \\ impl_tac >- rw [] \\
- rw [sum_bind_def, relS_not_state_var]);
+ rw [sum_bind_def, sum_map_def, relS_not_state_var, prun_assn_rhs_def]);
 
 val var_has_value_env_new_var = Q.store_thm("var_has_value_env_new_var",
  `!var var' v a exp env.
@@ -813,12 +781,12 @@ val EvalS_EvalS = Q.store_thm("EvalS_EvalS",
 
 (* Note: Works for any program q rather than just ARB, but we only ever need ARB *)
 val EvalS_Case_ARB = Q.store_thm("EvalS_Case_ARB",
- `!s x_max (x:'a word) xv p pv.
+ `!s x_max (x:'a word) xv p pv ty.
    x_max = UINT_MAXw /\
    Eval fext s env (WORD x) xv /\
    EvalS fext s env p pv ==>
    x_max <=+ x  ==>
-   EvalS fext s env (if x = x_max then p else ARB) (Case xv [(Const (w2ver x_max), pv)] NONE)`,
+   EvalS fext s env (if x = x_max then p else ARB) (Case ty xv [(Const (w2ver x_max), pv)] NONE)`,
  rpt strip_tac \\ rveq \\ TOP_CASE_TAC
  >- (fs [EvalS_def, Eval_def, prun_def, erun_def, WORD_def] \\ rpt strip_tac \\ res_tac \\
      simp [sum_bind_def])
@@ -834,44 +802,44 @@ val word_ls_0 = Q.store_thm("word_ls_0",
 
 (* Accumulate thm for _Case_ARB *)
 val EvalS_Case_ARB_new_case = Q.store_thm("EvalS_Case_ARB_new_case",
- `!s xbound_new xbound (x:'a word) xv p pv q cs defl.
+ `!s xbound_new xbound (x:'a word) xv p pv q cs defl ty.
    (xbound = xbound_new + 1w) /\
    Eval fext s env (WORD x) xv /\
-   (xbound <=+ x ==> EvalS fext s env q (Case xv cs defl)) /\
+   (xbound <=+ x ==> EvalS fext s env q (Case ty xv cs defl)) /\
    EvalS fext s env p pv ==>
 
    (xbound_new <=+ x ==>
    EvalS fext s env (if x = xbound_new then p else q)
-                    (Case xv ((Const (w2ver xbound_new), pv)::cs) defl))`,
+                    (Case ty xv ((Const (w2ver xbound_new), pv)::cs) defl))`,
  rw [EvalS_def, Eval_def, WORD_def, prun_def, erun_def] \\ res_tac \\
  simp [sum_bind_def, w2ver_bij] \\
  `xbound_new <+ x` by WORD_DECIDE_TAC \\
  fs [word_lo_word_ls_plus1]);
 
 val EvalS_Case_catch_all_new_case = Q.store_thm("EvalS_Case_catch_all_new_case",
- `!s xval x xv p pv q qv cs defl.
+ `!s xval x xv p pv q qv cs defl ty.
    Eval fext s env (WORD x) xv /\
-   EvalS fext s env q (Case xv cs defl) /\
+   EvalS fext s env q (Case ty xv cs defl) /\
    EvalS fext s env p pv ==>
    EvalS fext s env (if x = xval then p else q)
-                    (Case xv ((Const (w2ver xval), pv)::cs) defl)`,
+                    (Case ty xv ((Const (w2ver xval), pv)::cs) defl)`,
  rw [Eval_def, EvalS_def, erun_def, prun_def] \\ rpt drule_first \\ fs [sum_bind_def, WORD_def, w2ver_bij]);
 
 (* Refactor? *)
 val EvalS_Case_catch_all_SOME_help = Q.prove(
- `!s xval x xv p pv.
+ `!s xval x xv p pv ty.
    Eval fext s env (WORD x) xv /\
    EvalS fext s env p pv ==>
-   EvalS fext s env p (Case xv [] (SOME pv))`,
+   EvalS fext s env p (Case ty xv [] (SOME pv))`,
  rw [EvalS_def, prun_def]);
 
 val EvalS_Case_catch_all_SOME = Q.store_thm("EvalS_Case_catch_all_SOME",
- `!s xval x xv p pv q qv.
+ `!s xval x xv p pv q qv ty.
    Eval fext s env (WORD x) xv /\
    EvalS fext s env p pv /\
    EvalS fext s env q qv ==>
    EvalS fext s env (if x = xval then p else q)
-                    (Case xv [(Const (w2ver xval), pv)] (SOME qv))`,
+                    (Case ty xv [(Const (w2ver xval), pv)] (SOME qv))`,
  metis_tac [EvalS_Case_catch_all_SOME_help, EvalS_Case_catch_all_new_case]);
 
 val EvalS_Skip = Q.store_thm("EvalS_Skip",
@@ -879,11 +847,11 @@ val EvalS_Skip = Q.store_thm("EvalS_Skip",
  rw [EvalS_def, prun_def]);
 
 val EvalS_Case_catch_all_NONE = Q.store_thm("EvalS_Case_catch_all_NONE",
- `!s xval x xv p pv.
+ `!s xval x xv p pv ty.
    Eval fext s env (WORD x) xv /\
    EvalS fext s env p pv ==>
    EvalS fext s env (if x = xval then p else s)
-                    (Case xv [(Const (w2ver xval), pv)] NONE)`,
+                    (Case ty xv [(Const (w2ver xval), pv)] NONE)`,
  rpt gen_tac \\ qspec_then `s` mp_tac EvalS_Skip \\ rw [Eval_def, EvalS_def, prun_def] \\
  rpt drule_first \\ rw [sum_bind_def, erun_def] \\ fs [WORD_def, w2ver_bij]);
 
@@ -895,7 +863,7 @@ val bit_field_insert_lemma2 = Q.prove(
  `!l a b. TAKE (LENGTH a) l = a /\ DROP (LENGTH a) l = b ==> l = a ++ b`,
  metis_tac [TAKE_DROP]);
 
-val prun_set_slice_bit_field_insert = Q.store_thm("prun_set_slice_bit_field_insert",
+(*val prun_set_slice_bit_field_insert = Q.store_thm("prun_set_slice_bit_field_insert",
  `!wold wnew vold vnew hb lb.
    WORD (wold:'a word) (VArray vold) /\
    WORD (wnew:'b word) (VArray vnew) /\ dimindex(:'b) = hb + 1 − lb /\
@@ -913,6 +881,15 @@ val prun_set_slice_bit_field_insert = Q.store_thm("prun_set_slice_bit_field_inse
 
  TRY conj_tac \\ match_mp_tac EL_all_eq \\ rw [] \\
  DEP_REWRITE_TAC [rich_listTheory.EL_TAKE,rich_listTheory.EL_DROP] \\
- simp [el_w2v, word_modify_def, fcpTheory.FCP_BETA]);
+ simp [el_w2v, word_modify_def, fcpTheory.FCP_BETA]);*)
+
+Theorem WORD_fcp_update_revLUPDATE:
+ !(w : 'a word) i b. i < dimindex(:'a) ==> WORD ((i :+ b) w) (VArray (revLUPDATE b i (w2v w)))
+Proof
+ rw [WORD_def, w2ver_def, w2v_def, revLUPDATE_def, LUPDATE_GENLIST, GENLIST_FUN_EQ] \\
+ rewrite_tac [fcpTheory.FCP_APPLY_UPDATE_THM, combinTheory.APPLY_UPDATE_THM] \\ simp [] \\
+ qmatch_goalsub_abbrev_tac ‘COND c1 _ _ = _’ \\ qmatch_goalsub_abbrev_tac ‘_ = COND c2 _ _’ \\
+ qsuff_tac ‘c1 = c2’ >- simp [] \\ unabbrev_all_tac \\ decide_tac
+QED
 
 val _ = export_theory();

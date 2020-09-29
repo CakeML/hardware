@@ -113,13 +113,13 @@ fun get_prun_bassn_type_pred tm =
     in
       if tname = "bool" then
         prun_bassn_type_pred_BOOL
-      else if tname = "fun" then let
+      (*else if tname = "fun" then let
         val (alpha', beta') = dom_rng ty
         val alpha' = dest_word_type alpha'
         val beta' = dest_word_type beta'
       in
         INST_TYPE [ alpha |-> alpha', beta |-> beta' ] prun_bassn_type_pred_WORD_ARRAY
-      end else if is_word_type ty then
+      end*) else if is_word_type ty then
         INST_TYPE [ alpha |-> dest_word_type ty ] prun_bassn_type_pred_WORD
       else
         raise UnableToTranslateTy (ty, "no prun_bassn_type_pred for type")
@@ -161,8 +161,8 @@ val Eval_InputVars = map (fn (name, accessf) => (accessf, build_Eval_InputVar (n
 
 (*val foo = Eval_InputVars |> hd |> snd |> Q.SPEC `s`*)
 
-val Eval_T = SPEC ``T`` Eval_bool;
-val Eval_F = SPEC ``F`` Eval_bool;
+val Eval_T = SPEC T Eval_bool;
+val Eval_F = SPEC F Eval_bool;
 
 val builtin_binops = [
   Eval_BOOL_And, Eval_BOOL_Equal, Eval_BOOL_Or,
@@ -174,8 +174,7 @@ val builtin_binops = [
   Eval_WORD_Minus, Eval_WORD_Plus, Eval_WORD_Times,
 
   Eval_WORD_Equal, Eval_WORD_LessThan, Eval_WORD_LowerThan,
-  Eval_WORD_LessThanOrEqual, Eval_WORD_LowerThanOrEqual
-  ]
+  Eval_WORD_LessThanOrEqual, Eval_WORD_LowerThanOrEqual]
   |> map (fn th => (th |> SPEC_ALL |> UNDISCH |> concl
                        |> Eval_get_pred_exp |> strip_comb |> fst, th));
 
@@ -186,13 +185,6 @@ fun dest_builtin_binop tm = let
   val (ss, ii) = match_term x p
   val th = INST ss (INST_TYPE ii th)
   in (p, l, r, th) end handle HOL_ERR _ => failwith "Not a builtin operator";
-
-(* TODO: Move? *)
-fun EVAL_MP th = let
-  val ant = th |> concl |> dest_imp |> fst |> EVAL_PROVE
-in
-  MP th ant
-end;
 
 (* Translator for pure expressions (exp) *)
 fun hol2hardware_exp s tm =
@@ -240,7 +232,7 @@ fun hol2hardware_exp s tm =
     val arg = dest_neg tm
   in
     (* Special case for ArrayNotEqual *)
-    if is_eq arg then let
+    (*if is_eq arg then let
       val (argl, argr) = dest_eq arg
       val thl = hol2hardware_exp s argl
       val thr = hol2hardware_exp s argr
@@ -249,7 +241,7 @@ fun hol2hardware_exp s tm =
       val result = MATCH_MP eval_thm (CONJ thl thr)
     in
       check_inv_Eval "neg" tm result
-    end else let
+    end else*) let
       val th = hol2hardware_exp s arg
     in
       MATCH_MP Eval_neg th
@@ -307,7 +299,7 @@ fun hol2hardware_exp s tm =
     ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
   end
 
-  (* CASE: zero extend? (Almost identical to w2w.) *)
+  (* CASE: sign extend? (Almost identical to w2w.) *)
   else if is_sw2sw tm then let
     val (arg, out_dim) = dest_sw2sw tm
     val in_dim = dim_of arg
@@ -358,7 +350,7 @@ fun hol2hardware_exp s tm =
         | NONE => raise UnableToTranslate (tm, "Unknown fext projection")
 
     (* SUBCASE: Array indexing? Just assume it is for now... TODO *)
-    else let
+    (*else let
       (* Strips state var as well... *)
       val (f, args) = strip_comb tm
       val f = mk_comb (f, hd args)
@@ -371,10 +363,10 @@ fun hol2hardware_exp s tm =
          1 => MATCH_MP Eval_WORD_ARRAY_indexing precond
        | 2 => MATCH_MP Eval_WORD_ARRAY_indexing2 precond
        | _ => raise UnableToTranslate (tm, "Unsupported indexing")
-    end
+    end*)
 
-    (*else
-      raise UnableToTranslate (tm, "Unknown comb case, not state projection")*)
+    else
+      raise UnableToTranslate (tm, "Unknown comb case, not state projection")
   end
 
   else raise UnableToTranslate (tm, "Unknown case");
@@ -404,22 +396,22 @@ fun build_update_base_stmt field fupd pred =
    ``!s env w exp.
       T /\
       Eval fext s env (^pred w) exp ==>
-      EvalS fext s env (^fupd (K w) s) (BlockingAssign (Var ^field_str) exp)``
+      EvalS fext s env (^fupd (K w) s) (BlockingAssign (NoIndexing ^field_str) (SOME exp))``
   end;
 
 fun update_base_tac field =
  rw [Eval_def, EvalS_def, prun_def] \\ drule_first \\ drule_strip (relSs field) \\
 
- imp_res_tac same_shape_BOOL \\
+ (*imp_res_tac same_shape_BOOL \\
  imp_res_tac same_shape_WORD \\
  imp_res_tac same_shape_WORD_ARRAY_BOOL \\
  imp_res_tac same_shape_WORD_ARRAY_WORD \\
- imp_res_tac same_shape_WORD_ARRAY_WORD_ARRAY_WORD \\
+ imp_res_tac same_shape_WORD_ARRAY_WORD_ARRAY_WORD \\*)
 
- simp [sum_bind_def, prun_bassn_def, assn_def, sum_for_def, sum_map_def] \\
+ simp [sum_bind_def, prun_assn_rhs_def, prun_bassn_def, assn_def, sum_for_def, sum_map_def] \\
  fs [relS_def, relS_var_def, get_var_cleanup];
 
-fun build_slice_update_base_stmt field field_type fupd facc =
+(*fun build_slice_update_base_stmt field field_type fupd facc =
   let
     val field_str = fromMLstring field
     val beta_size = dest_word_type field_type
@@ -453,7 +445,7 @@ fun slice_update_base_tac field =
  disch_then (fn th => DEP_REWRITE_TAC [th]) \\
  simp [sum_map_def] \\
 
- fs [relS_def, relS_var_def, get_var_cleanup] \\ simp [WORD_def, w2ver_def];
+ fs [relS_def, relS_var_def, get_var_cleanup] \\ simp [WORD_def, w2ver_def];*)
 
 val update_base_thms =
  zip updates accessors
@@ -463,17 +455,26 @@ val update_base_thms =
               val pred = field_type |> predicate_for_type_ty
               val base_thm = [prove (build_update_base_stmt field fupd pred,
                                      update_base_tac field)]
-              val slice_thm = if same_const pred WORD_tm
+              val slice_thm = (*if same_const pred WORD_tm
                               then [prove (build_slice_update_base_stmt field field_type fupd facc,
                                            slice_update_base_tac field)]
-                              else []
+                              else*) []
             in (fupd, append slice_thm base_thm) end);
+
+(* E.g., s with PC := 0w is a update.
+   We know that everything is in this list, but these are not always the thm we want to use! *)
+fun is_update tm =
+  let
+    val update = tm |> rator |> rator
+  in
+    lookup_same update update_base_thms |> isSome
+  end;
 
 (* Need special thms for WORD_ARRAY updates, because we have += on the rhs *)
 
 (* Add base update thms of special form, simply assume that other form not used *)
 
-fun build_WORD_ARRAY_update_base_stmt vname projf updatef = let
+(*fun build_WORD_ARRAY_update_base_stmt vname projf updatef = let
   val vnameHOL = fromMLstring vname
 in
   ``!s env i ie v ve.
@@ -562,7 +563,7 @@ val WORD_ARRAY_update_base_thms =
           [prove (build_WORD_ARRAY_slice_update_base_stmt name projf updf,
                   WORD_ARRAY_slice_update_base_tac name),
            prove (build_WORD_ARRAY_update_base_stmt name projf updf,
-                  WORD_ARRAY_update_base_tac name)]));
+                  WORD_ARRAY_update_base_tac name)]));*)
 
 (* A note about the order of writing to fields:
 
@@ -587,7 +588,7 @@ in
     Eval fext s env (^pred w) exp /\
     EvalS fext s env f fv ==>
     EVERY (\var. ~MEM var (vwrites fv)) (evreads exp) ==>
-    EvalS fext s env (^fupd (K w) f) (Seq fv (BlockingAssign (Var ^var_str) exp))``
+    EvalS fext s env (^fupd (K w) f) (Seq fv (BlockingAssign (NoIndexing ^var_str) (SOME exp)))``
 end;
 
 val update_step_lem = Q.prove(
@@ -600,7 +601,7 @@ val update_step_lem = Q.prove(
 fun update_step_tac var =
  rw [EVERY_MEM, Eval_def, EvalS_def, prun_def] \\
  drule_first \\ drule_first \\ drule_strip update_step_lem \\
- simp [sum_bind_def] \\
+ simp [sum_bind_def, sum_map_def, prun_assn_rhs_def] \\
  drule_strip (prun_bassn_works_for var) \\
  drule_strip (relSs var) \\
  rpt (disch_then drule) \\
@@ -612,14 +613,50 @@ val update_step_thms =
  |> map (fn ((field, fupd), _) => (fupd, prove (build_update_step_stmt field fupd,
                                                 update_step_tac field)));
 
-(* E.g., s with PC := 0w is a update.
-   We know that everything is in this list, but these are not always the thm we want to use! *)
-fun is_update tm =
-  let
-    val update = tm |> rator |> rator
-  in
-    lookup_same update update_base_thms |> isSome
-  end;
+(* New: *)
+
+(*fun build_bit_update_step_stmt field fupd fproj = let
+ val var = fromMLstring field
+ val field_size = fproj |> type_of |> dom_rng |> snd |> dest_word_type
+in
+ ``!s f fv env w exp.
+    i < dimindex(:'a) /\
+    Eval fext s env (BOOL w) exp /\
+    EvalS fext s env f fv ==>
+    EVERY (\var. ~MEM var (vwrites fv)) (evreads exp) ==>
+    EvalS fext s env (^fupd (K ((i :+ w) (^fproj f))) f)
+                     (Seq fv (BlockingAssign (Indexing ^var 0 (Const (n2ver i))) (SOME exp)))``
+ |> inst [ alpha |-> field_size ]
+end;*)
+
+fun build_bit_update_stmt field fupd fproj = let
+ val var = fromMLstring field
+ val field_size = fproj |> type_of |> dom_rng |> snd |> dest_word_type
+in
+ ``!s i env w exp.
+    i < dimindex(:'a) /\
+    Eval fext s env (BOOL w) exp ==>
+    EvalS fext s env (^fupd (K ((i :+ w) (^fproj s))) s)
+                     (BlockingAssign (Indexing ^var 0 (Const (n2ver i))) (SOME exp))``
+ |> inst [ alpha |-> field_size ]
+end;
+
+fun bit_update_tac field =
+ rw [EVERY_MEM, Eval_def, EvalS_def, prun_def] \\
+ drule_first \\
+ drule_strip (relSs field) \\
+ fs [BOOL_def, WORD_def, w2ver_def] \\ rveq \\
+ simp [sum_bind_def, sum_map_def, sum_for_def, prun_assn_rhs_def, prun_bassn_def, assn_def, erun_def, ver2n_n2ver,
+       get_use_nbq_var_def, get_VArray_data_def, get_VBool_data_def] \\
+ DEP_REWRITE_TAC [prun_set_var_index_ok_idx] \\ simp [length_w2v, sum_map_def] \\
+ fs [relS_def, relS_var_def, get_var_set_var] \\
+ simp [WORD_fcp_update_revLUPDATE];
+
+val bit_update_thms =
+ zip updates accessors
+ |> filter (fn (_, (_, facc)) => (facc |> type_of |> dom_rng |> snd |> is_word_type))
+ |> map (fn ((field, fupd), (_, fproj)) => (fupd, prove (build_bit_update_stmt field fupd fproj,
+                                                         bit_update_tac field)));
 
 fun inst_EvalS_env s v th = let
 (*  val () = (print "\n"; print_term v; print "\n"; print_thm th; thm_fail := th)*)
@@ -731,7 +768,7 @@ end
 
 and hol2hardware_body_impl s tm =
   (* CASE: Case on word type *)
-  if is_literal_case tm then let
+  (*if is_literal_case tm then let
     val result = hol2hardware_case_body s tm
   in
     check_inv_EvalS "case" tm result
@@ -739,7 +776,7 @@ and hol2hardware_body_impl s tm =
 
   (* CASE: Do nothing *)
   (* TODO: Is this what we want? Probably? *)
-  else if is_var tm then
+  else*) if is_var tm then
     if identical tm s then
       SPEC s EvalS_Skip
     else
@@ -749,10 +786,10 @@ and hol2hardware_body_impl s tm =
   else if is_update tm then let
     val (fupd_arg, arg) = dest_comb tm
     val (fupd, Kval) = dest_comb fupd_arg
-    val (Kfun, newval) = dest_comb Kval
+    val (_, newval) = dest_comb Kval
   in
     (* val SOME base_thms = lookup_same fupd WORD_ARRAY_update_base_thms *)
-    case lookup_same fupd WORD_ARRAY_update_base_thms of
+    (*case lookup_same fupd WORD_ARRAY_update_base_thms of
         (* TODO: assumes everything is base here... also assumes structure... probably ok for Ag32 *)
         (* TODO: do we check that we are using the correct state variable here? no? *)
         SOME base_thms =>
@@ -767,10 +804,22 @@ and hol2hardware_body_impl s tm =
           MATCH_MP th (CONJ precond_eval_th precond_th)
         end
 
-      | NONE =>
+      | NONE =>*)
         if identical arg s then
           (* val base_thms = lookup_same fupd update_base_thms |> valOf *)
-          case lookup_same fupd update_base_thms of
+          if is_fcp_update newval then
+           case lookup_same fupd bit_update_thms of
+             SOME th => let
+              val th = PART_MATCH (EvalS_get_hol_prog o snd o dest_imp) th tm
+              val (precond_eval, precond) = th |> concl |> dest_imp |> fst |> dest_conj
+              val precond_eval_th = EVAL_PROVE precond_eval
+              val precond_th = precond |> Eval_get_pred_exp |> hol2hardware_exp s
+             in
+              MATCH_MP th (CONJ precond_eval_th precond_th)
+             end
+           | NONE => failwith "Impossible: Missing base update thm?"
+          else
+           case lookup_same fupd update_base_thms of
               SOME base_thms =>
               let
                 val th = first_PART_MATCH (EvalS_get_hol_prog o snd o dest_imp) base_thms tm
@@ -841,7 +890,7 @@ and hol2hardware_body_impl s tm =
   else
     raise UnableToTranslate (tm, "Unknown case")
 
-and hol2hardware_case_body s tm = let
+(*and hol2hardware_case_body s tm = let
     val (body, v) = dest_literal_case tm
     (* TODO: Should work as no other variable should be called v in body? *)
     val (v_inner, body) = dest_abs body
@@ -914,7 +963,7 @@ in
     else
       raise UnableToTranslate (tm, "Failed to evaluate bound, something is wrong")
   end
-end;
+end;*)
 
 (*
 Testing:
@@ -942,7 +991,7 @@ in
 end;
 
 (* TODO: WORD_ARRAY *)
-fun vars_has_type_cleanup th = let
+(*fun vars_has_type_cleanup th = let
   val th = th
    |> DISCH_ALL
    (* Might do too much: *)
@@ -955,7 +1004,7 @@ fun vars_has_type_cleanup th = let
    |> (fn tm => ``vars_has_type env ^tm``)
 in
  prove (mk_imp (newhyp, th |> concl), simp [vars_has_type_def, DISCH_ALL th]) |> UNDISCH_ALL
-end;
+end;*)
 
 (*
 Testing:
@@ -983,5 +1032,19 @@ fun hol2hardware_named thm =
     hol2hardware def
   end;
 *)
+
+(* Translate initial state -> declarations *)
+
+fun state_to_decls s =
+ s |> TypeBase.dest_record |> snd
+   |> map (fn (var, v) =>
+            let
+             val ty = v |> type_of
+            in
+             pairSyntax.list_mk_pair [verty_for_type ty,
+                                      fromMLstring var,
+                                      optionSyntax.mk_some (mk_comb (hol2ver_for_type ty, v))]
+            end)
+   |> (fn l => listSyntax.mk_list (l, “:(vertype # string # verilog$value option)”));
 
 end

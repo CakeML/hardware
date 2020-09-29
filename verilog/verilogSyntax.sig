@@ -18,8 +18,8 @@ sig
   val is_ShiftLogicalL : term -> bool
   val is_ShiftLogicalR : term -> bool
 
-  val is_ArrayEqual : term -> bool
-  val is_ArrayNotEqual : term -> bool
+  (*val is_ArrayEqual : term -> bool
+  val is_ArrayNotEqual : term -> bool*)
   val is_LessThan : term -> bool
   val is_LowerThan : term -> bool
   val is_LessThanOrEqual : term -> bool
@@ -43,8 +43,8 @@ sig
   val Var_tm : term
   val dest_ABOp : term -> term * term * term
   val dest_Arith : term -> term * term * term
-  val dest_ArrayIndex : term -> term * term
-  val dest_ArraySlice : term -> term * term * term * term
+  val dest_ArrayIndex : term -> term * term * term
+  val dest_ArraySlice : term -> term * term * term
   val dest_ArrayConcat : term -> term * term
   val dest_BBOp : term -> term * term * term
   val dest_BUOp : term -> term * term
@@ -71,8 +71,8 @@ sig
   val is_Var : term -> bool
   val mk_ABOp : term * term * term -> term
   val mk_Arith : term * term * term -> term
-  val mk_ArrayIndex : term * term -> term
-  val mk_ArraySlice : term * term * term * term -> term
+  val mk_ArrayIndex : term * term * term -> term
+  val mk_ArraySlice : term * term * term -> term
   val mk_ArrayConcat : term * term -> term
   val mk_BBOp : term * term * term -> term
   val mk_BUOp : term * term -> term
@@ -97,7 +97,7 @@ sig
   val NonBlockingAssign_tm : term
   val Seq_tm : term
   val dest_BlockingAssign : term -> term * term
-  val dest_Case : term -> term * term * term
+  val dest_Case : term -> term * term * term * term
   val dest_IfElse : term -> term * term * term
   val dest_NonBlockingAssign : term -> term * term
   val dest_Seq : term -> term * term
@@ -107,7 +107,7 @@ sig
   val is_NonBlockingAssign : term -> bool
   val is_Seq : term -> bool
   val mk_BlockingAssign : term * term -> term
-  val mk_Case : term * term * term -> term
+  val mk_Case : term * term * term * term -> term
   val mk_IfElse : term * term * term -> term
   val mk_NonBlockingAssign : term * term -> term
   val mk_Seq : term * term -> term
@@ -147,6 +147,6 @@ sig
   val is_VBool_t : term -> bool
 
   val is_VArray_t : term -> bool
-  val dest_VArray_t : term -> term list
-  val mk_VArray_t : Arbnum.num list -> term
+  val dest_VArray_t : term -> term
+  val mk_VArray_t : Arbnum.num -> term
 end

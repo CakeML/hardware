@@ -52,7 +52,7 @@ fun verty_for_type ty =
   in
     if tname = "bool" then
       VBool_t_tm
-    else if tname = "fun" then let
+    (*else if tname = "fun" then let
       val (args, res) = strip_fun ty
       val args = map (curry Arbnumcore.pow Arbnumcore.two o dest_numeric_type o dest_word_type) args
       val res = if res = bool then
@@ -61,10 +61,10 @@ fun verty_for_type ty =
                   [res |> dest_word_type |> dest_numeric_type]
     in
       mk_VArray_t (args @ res)
-    end else if is_word_type ty then let
+    end*) else if is_word_type ty then let
       val n = ty |> dest_word_type |> dest_numeric_type
     in
-      mk_VArray_t [n]
+      mk_VArray_t n
     end else
     raise UnableToTranslateTy (ty, "unknown type")
   end

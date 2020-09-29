@@ -1,13 +1,13 @@
 open hardwarePreamble;
 
-open moduleTranslatorTheory;
+(*open moduleTranslatorTheory;
 
 open verilogTranslatorLib verilogLiftLib;
-open circuitExampleTheory;
+open circuitExampleTheory;*)
 
 val _ = new_theory "circuitExampleVerilog";
 
-val _ = prefer_num ();
+(*val _ = prefer_num ();
 
 (* TODO: Duplication *)
 fun intro_cvars_for_prog prog =
@@ -140,6 +140,6 @@ R_trans |> vprog_print |> print
 (** Another example for the paper **)
 
 val word_xor_1_2 = save_thm("word_xor_1_2",
- hol2hardware_exp (mk_var ("s", state_ty)) ``word_xor (1w:word8) 2w``);
+ hol2hardware_exp (mk_var ("s", state_ty)) ``word_xor (1w:word8) 2w``);*)
 
 val _ = export_theory ();

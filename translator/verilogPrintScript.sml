@@ -4,6 +4,7 @@ open verilogTheory;
 
 val _ = new_theory "verilogPrint";
 
+(*
 val buop_print_def = Define `
  buop_print Not = "!"`;
 
@@ -33,5 +34,6 @@ val type_print_def = Define `
 
 val var_type_print_def = Define `
  var_type_print xs = MAP (\(var, ty). type_print ty ++ " " ++ var) xs`;
+*)
 
 val _ = export_theory ();

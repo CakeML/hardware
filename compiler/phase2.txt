@@ -1,0 +1,168 @@
+(** Phase 2 **)
+
+(* TODO: Should this guarantee that some value is actually present in venv? Currently does not.
+         Maybe follows from venv being "well-typed" in some sense? *)
+val same_env_outregs_def = Define `
+ same_env_outregs outregs venv cenv =
+  !var vv. cget_var venv var = INR vv /\ MEM var outregs ==>
+   ?cv. cget_var cenv (RegVar var) = INR cv /\ same_value vv cv`;
+
+val used_reg_cell_inp_def = Define `
+ (used_reg_cell_inp reg (ConstInp v) = F) /\
+ (used_reg_cell_inp reg (VarInp (RegVar var)) <=> reg = var) /\
+ (used_reg_cell_inp reg (VarInp (NetVar n)) = F)`;
+
+val used_reg_cell_def = Define `
+ (used_reg_cell reg (Cell1 _ _ in1) = used_reg_cell_inp reg in1) /\
+ (used_reg_cell reg (Cell2 _ _ in1 in2) <=> used_reg_cell_inp reg in2 \/
+                                            used_reg_cell_inp reg in1) /\
+ (used_reg_cell reg (CellMux _ c in1 in2) <=> used_reg_cell_inp reg c \/
+                                              used_reg_cell_inp reg in1 \/
+                                              used_reg_cell_inp reg in2)`;
+
+val used_reg_def = Define `
+ used_reg reg cells = EXISTS (used_reg_cell reg) cells`;
+
+Theorem same_env_outregs_subset:
+ !outregs2 outregs1 venv cenv.
+   (!e. MEM e outregs2 ==> MEM e outregs1) /\
+   same_env_outregs outregs1 venv cenv ==>
+   same_env_outregs outregs2 venv cenv
+Proof
+ Induct \\ rw [same_env_outregs_def] \\ fs []
+QED
+
+val MEM_MAP_ProgramVar = Q.prove(
+ `!xs x. MEM (ProgramVar x) (MAP ProgramVar xs) = MEM x xs`,
+ Induct \\ rw []);
+
+Theorem cell_run_step_remove_regs:
+ !cell cells regs env1 env1' env2 P.
+  cell_run env1 cell = INR env1' /\
+  (!var. circuit_reads (Circuit (cell::cells) regs) var ==> P var) /\
+  (!var. P var ==> cget_var env2 var = cget_var env1 var) ==>
+  ?env2'. cell_run env2 cell = INR env2' /\
+          !var. P var ==> cget_var env2' var = cget_var env1' var
+Proof
+ Cases \\ TRY (rename1 `Cell1 cellt _ _` \\ Cases_on `cellt`) \\ TRY (rename1 `Cell2 cellt _ _ _` \\ Cases_on `cellt`) \\
+ rw [cell_run_def, cell1_CBool_store_def, cell1_CBool_def, cell2_CBool_store_def, cell2_CBool_def,
+     cellMux_CBool_store_def, cellMux_CBool_def,
+     circuit_reads_def, circuit_reads_cells_def, cell_has_input_def,
+     sum_bind_INR] \\
+ rpt (rename1 `cell_inp_run env1 c` \\ Cases_on `c` \\ fs [cell_inp_run_def]) \\ rveq \\
+ fs [cget_var_cset_var, cell_input_is_var_def]
+QED
+
+Theorem cell_run_remove_regs:
+ !cells regs env1 env1' env2 P.
+  sum_foldM cell_run env1 cells = INR env1' /\
+  (!var. circuit_reads (Circuit cells regs) var ==> P var) /\
+  (!var. P var ==> cget_var env2 var = cget_var env1 var) ==>
+  ?env2'. sum_foldM cell_run env2 cells = INR env2' /\
+          !var. P var ==> cget_var env2' var = cget_var env1' var
+Proof
+ Induct \\ rw [sum_foldM_def, sum_bind_INR] \\
+ drule_strip cell_run_step_remove_regs \\ simp [] \\
+ drule_first \\ disch_then (qspecl_then [`regs`, `env2'`, `P`] mp_tac) \\ impl_tac
+ >- (fs [circuit_reads_def, circuit_reads_cells_def] \\ metis_tac []) \\
+ simp []
+QED
+
+Theorem reg_run_remove_regs:
+ !regs cells P old_env1 env1 env1' old_env2 env2.
+  sum_foldM (reg_run old_env1) env1 regs = INR env1' /\
+  (!var. circuit_reads (Circuit cells regs) var ==> P var) /\
+  (!var. P var ==> cget_var env2 var = cget_var env1 var) /\
+  (!var. P var ==> cget_var old_env2 var = cget_var old_env1 var) ==>
+  ?env2'. sum_foldM (reg_run old_env2) env2 (FILTER (P o ProgramVar o FST) regs) = INR env2' /\
+          !var. P var ==> cget_var env2' var = cget_var env1' var
+Proof
+ Induct >- rw [sum_foldM_def] \\ Cases \\ fs [sum_foldM_def, sum_bind_INR, circuit_reads_def, circuit_reads_regs_def, MEM_disj_impl] \\
+ rw [sum_foldM_INR] \\ fs [reg_run_def, sum_bind_INR] \\
+
+ rename1 `cell_inp_run old_env1 inp` \\ Cases_on `inp` \\ fs [cell_inp_run_def, cell_input_is_var_def] \\ rveq \\
+ drule_last \\ qmatch_goalsub_abbrev_tac `sum_foldM (reg_run old_env2) new_env _` \\
+ disch_then (qspecl_then [`old_env2`, `new_env`] mp_tac) \\ unabbrev_all_tac \\
+ (impl_tac >- (simp [cget_var_cset_var] \\ metis_tac [])) \\ simp []
+QED
+
+Theorem compiler_p2_correct_help:
+ !n cells regs regs' P env env'.
+  circuit_run (Circuit cells regs) env n = INR env' /\
+  (regs' = FILTER (P o ProgramVar o FST) regs) /\
+  (!var. circuit_reads (Circuit cells regs) var ==> P var) ==>
+  ?env''. circuit_run (Circuit cells regs') env n = INR env'' /\
+          (!var. P var ==> cget_var env'' var = cget_var env' var)
+Proof
+ simp [] \\ Induct \\ rw [circuit_run_def, sum_bind_INR] \\ drule_first \\ simp [] \\
+ fs [circuit_step_def, sum_bind_INR] \\
+ drule_strip cell_run_remove_regs \\ simp [] \\
+ drule_strip reg_run_remove_regs \\ simp []
+QED
+
+Theorem used_regs_regs_correct:
+ !regs reg. MEM reg (FOLDR used_regs_regs [] regs) <=> circuit_reads_regs regs (ProgramVar reg)
+Proof
+ Induct >- rw [circuit_reads_regs_def] \\ Cases \\ rw [circuit_reads_regs_def, used_regs_regs_def] \\
+ Cases_on `r` >- rw [add_used_regs_inp_def, cell_input_is_var_def] \\
+ Cases_on `v` \\ rw [add_used_regs_inp_def, cell_input_is_var_def] \\ metis_tac []
+QED
+
+Theorem used_regs_cells_correct:
+ !cells reg. MEM reg (FOLDR used_regs_cells [] cells) <=> circuit_reads_cells cells (ProgramVar reg)
+Proof
+ Induct >- rw [circuit_reads_cells_def] \\ Cases \\
+ rw [circuit_reads_cells_def, used_regs_cells_def, cell_has_input_def, cell_output_def] \\
+ Cases_on `c0` \\ TRY (Cases_on `c1`) \\ TRY (Cases_on `c`) \\
+ (* This is terrible: *)
+ rpt (TRY (rename1 `VarInp var` \\ Cases_on `var`) \\ rw [add_used_regs_inp_def, cell_input_is_var_def] \\ TRY (metis_tac []))
+QED
+
+Theorem used_regs_correct_lem1:
+ !regs reg acc.
+  MEM reg (FOLDR used_regs_regs acc regs) <=>
+  MEM reg (FOLDR used_regs_regs [] regs) \/ MEM reg acc
+Proof
+ Induct >- rw [] \\ Cases \\ rw [used_regs_regs_def] \\ Cases_on `r` \\ 
+ rewrite_tac [add_used_regs_inp_def] >- metis_tac [] \\
+ Cases_on `v` \\ rewrite_tac [add_used_regs_inp_def, MEM] \\ metis_tac []
+QED
+
+Theorem used_regs_correct_lem2:
+ !cells regs reg.
+  MEM reg (FOLDR used_regs_regs (FOLDR used_regs_cells [] cells) regs) <=>
+  circuit_reads_cells cells (ProgramVar reg) \/ circuit_reads_regs regs (ProgramVar reg)
+Proof
+ metis_tac [used_regs_correct_lem1, used_regs_cells_correct, used_regs_regs_correct]
+QED
+
+val used_regs_spec_def = Define `
+ used_regs_spec (Circuit cells regs) outregs var <=>
+  circuit_reads (Circuit cells regs) var \/ MEM var (MAP ProgramVar outregs)`;
+
+Theorem used_regs_correct:
+ !cells regs outregs.
+  used_regs cells regs outregs = FILTER (used_regs_spec (Circuit cells regs) outregs o ProgramVar o FST) regs
+Proof
+ rw [used_regs_def, rich_listTheory.FILTER_EQ, FUN_EQ_THM] \\ pairarg_tac \\
+ rw [used_regs_spec_def, circuit_reads_def, MEM_MAP_ProgramVar, used_regs_correct_lem2]
+QED
+
+Theorem MEM_outregs_used_regs_spec:
+ !var outregs cells regs. MEM var outregs ==> used_regs_spec (Circuit cells regs) outregs (ProgramVar var)
+Proof
+ rw [used_regs_spec_def, MEM_MAP_ProgramVar]
+QED
+
+Theorem compiler_p2_correct:
+ !cir n outregs cenv cenv' venv.
+  circuit_run cir cenv n = INR cenv' /\
+  same_env venv cenv' ==>
+  ?cenv''. circuit_run (compile_p2 cir outregs) cenv n = INR cenv'' /\
+           same_env_outregs outregs venv cenv''
+Proof
+ Cases \\ rw [compile_p2_def, remove_unused_regs_def] \\ drule_strip compiler_p2_correct_help \\
+ disch_then (qspecl_then [`used_regs l l0 outregs`, `used_regs_spec (Circuit l l0) outregs`] mp_tac) \\
+ impl_tac >- rw [used_regs_correct, used_regs_spec_def] \\ strip_tac \\
+ fs [same_env_def, same_env_outregs_def, MEM_outregs_used_regs_spec]
+QED

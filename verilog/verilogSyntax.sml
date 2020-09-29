@@ -34,12 +34,13 @@ val is_ShiftLogicalL = same_const ShiftLogicalL_tm;
 val ShiftLogicalR_tm = ``ShiftLogicalR``;
 val is_ShiftLogicalR = same_const ShiftLogicalR_tm;
 
-
+(*
 val ArrayEqual_tm = ``ArrayEqual``;
 val is_ArrayEqual = same_const ArrayEqual_tm;
 
 val ArrayNotEqual_tm = ``ArrayNotEqual``;
 val is_ArrayNotEqual = same_const ArrayNotEqual_tm;
+*)
 
 val LessThan_tm = ``LessThan``;
 val is_LessThan = same_const LessThan_tm;
@@ -61,8 +62,8 @@ val is_SignExtend = same_const SignExtend_tm;
 val (Const_tm, mk_Const, dest_Const, is_Const) = op1 "Const"
 val (Var_tm, mk_Var, dest_Var, is_Var) = op1 "Var"
 val (InputVar_tm, mk_InputVar, dest_InputVar, is_InputVar) = op1 "InputVar"
-val (ArrayIndex_tm, mk_ArrayIndex, dest_ArrayIndex, is_ArrayIndex) = op2 "ArrayIndex"
-val (ArraySlice_tm, mk_ArraySlice, dest_ArraySlice, is_ArraySlice) = op4 "ArraySlice"
+val (ArrayIndex_tm, mk_ArrayIndex, dest_ArrayIndex, is_ArrayIndex) = op3 "ArrayIndex"
+val (ArraySlice_tm, mk_ArraySlice, dest_ArraySlice, is_ArraySlice) = op3 "ArraySlice"
 val (ArrayConcat_tm, mk_ArrayConcat, dest_ArrayConcat, is_ArrayConcat) = op2 "ArrayConcat"
 val (InlineIf_tm, mk_InlineIf, dest_InlineIf, is_InlineIf) = op3 "InlineIf"
 val (BUOp_tm, mk_BUOp, dest_BUOp, is_BUOp) = op2 "BUOp"
@@ -89,7 +90,7 @@ val is_Skip = same_const Skip_tm;
 
 val (Seq_tm, mk_Seq, dest_Seq, is_Seq) = op2 "Seq"
 val (IfElse_tm, mk_IfElse, dest_IfElse, is_IfElse) = op3 "IfElse"
-val (Case_tm, mk_Case, dest_Case, is_Case) = op3 "Case"
+val (Case_tm, mk_Case, dest_Case, is_Case) = op4 "Case"
 val (BlockingAssign_tm, mk_BlockingAssign, dest_BlockingAssign, is_BlockingAssign) = op2 "BlockingAssign"
 val (NonBlockingAssign_tm, mk_NonBlockingAssign, dest_NonBlockingAssign, is_NonBlockingAssign) = op2 "NonBlockingAssign"
 
@@ -122,8 +123,8 @@ val is_VBool_t = identical VBool_t_tm;
 
 val VArray_t_tm = ``VArray_t``;
 fun is_VArray_t tm = is_comb tm andalso identical (rator tm) VArray_t_tm;
-fun dest_VArray_t tm = tm |> rand |> dest_list |> fst;
+val dest_VArray_t = rand;
 val num_ty = ``:num``;
-fun mk_VArray_t is = mk_comb (VArray_t_tm, listSyntax.mk_list (map numSyntax.mk_numeral is, num_ty));
+fun mk_VArray_t i = mk_comb (VArray_t_tm, numSyntax.mk_numeral i);
 
 end

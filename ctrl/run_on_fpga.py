@@ -326,6 +326,8 @@ def main():
                 #    print_debug_char((w >> 8*2) & 0xFF)
                 #    print_debug_char((w >> 8*3) & 0xFF)
 
+            sys.stdout.flush()
+
             # Respond to interrupt
             core_ctrl.write(_CORE_CTRL_REG_INTERRUPT_ACK, 0)
             idev.write(bytes([0, 0, 0, 1]))

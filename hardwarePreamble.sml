@@ -1,11 +1,11 @@
 structure hardwarePreamble = struct
 
-(* Basic *)
+(* basic *)
 open HolKernel Parse boolLib bossLib BasicProvers;
 
 (* Additional *)
 open listTheory wordsTheory;
-open numLib wordsLib;
+open numLib wordsLib mp_then;
 
 (* Project libraries *)
 open hardwareMiscTheory;
@@ -18,8 +18,9 @@ prefer_num ();
 
 (* Borrowed from cakeml: *)
 val rveq = rpt BasicProvers.VAR_EQ_TAC;
-val match_exists_tac = part_match_exists_tac (hd o strip_conj);
-val asm_exists_tac = first_assum (match_exists_tac o concl);
+val asm_exists_tac = goal_assum drule;
+val asm_exists_any_tac = goal_assum (first_assum o mp_then Any mp_tac);
+
 (* *)
 
 fun drule_strip_tac (g as (tms, tm)) = let
@@ -63,9 +64,17 @@ fun filter_by_list l filterl =
 
 fun EVAL_PROVE tm = EVAL tm |> EQT_ELIM;
 
-(* TODO: is it fail we want to call here? *)
+fun EVAL_MP th = let
+  val ant = th |> concl |> dest_imp |> fst |> EVAL_PROVE
+in
+  MP th ant
+end;
+
 fun lookup x nil = failwith "Unknown key"
   | lookup x ((k, v) :: ls) = if x = k then v else lookup x ls;
+
+fun lookup_opt x [] = NONE
+  | lookup_opt x ((k, v) :: ls) = if x = k then SOME v else lookup_opt x ls;
 
 (* lookup from for terms *)
 fun lookup_term x nil = failwith "Unknown term"

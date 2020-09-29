@@ -142,7 +142,7 @@ val EvalS'_EvalS = Q.store_thm("EvalS'_EvalS",
  `!fext s Γ hp vp. EvalS' fext s Γ hp vp <=> EvalS fext s Γ hp vp`,
  rw [EvalS'_def, EvalS_def, relS'_def, relS_rw] \\ eq_tac \\ rpt strip_tac \\ drule_first
  >- (pop_assum (qspec_then `ver_s.nbq` strip_assume_tac) \\
-    fs [prun'_def] \\ drule_strip sum_map_INR \\
+    fs [prun'_def] \\ drule_strip sum_map_INR_old \\
     fs [sum_map_def] \\ rveq \\ fs [pstate_rw, relS_rw])
  \\ pop_assum (qspec_then `<| nbq := Δ |>` strip_assume_tac) \\
     simp [prun'_def, sum_map_def, relS_rw]);
