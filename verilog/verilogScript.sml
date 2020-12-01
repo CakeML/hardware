@@ -678,8 +678,6 @@ val prun_set_slice_def = Define `
    else
     INL InvalidIndex`;
 
-(* The use_nbq flag only makes sense if we only consider programs that do not write both blockingly and
-   non-blockingly to the same array. *)
 val assn_def = Define ‘
  (assn _ s use_nbq (NoIndexing vname) rhse = INR (vname, rhse)) /\
 
@@ -742,6 +740,16 @@ val prun_def = Define `
  (prun fext s (BlockingAssign lhs rhs) = sum_bind (prun_assn_rhs fext s lhs rhs)
                                                   (λ(s, v). prun_bassn fext s lhs v)) /\
 
+ (* Note that we for the semantics of non-blocking assignments assume that we never
+    write both blockingly and non-blockingly to the same array.
+
+    If we would be interested in programs with such mixed assignments, then we would
+    have to keep track of indexes more carefully (i.e. make the semantics more complicated).
+    For our purposes this assumption is fine, but when the semantics is used in other
+    contexts this assumption might need re-evaluation.
+
+    If the above assumption does not hold, non-blocking writes will overwrite all blocking writes
+    (regardless of if indexes overlap or not). *)
  (prun fext s (NonBlockingAssign lhs rhs) = sum_bind (prun_assn_rhs fext s lhs rhs)
                                                      (λ(s, v). prun_nbassn fext s lhs v))`;
 
