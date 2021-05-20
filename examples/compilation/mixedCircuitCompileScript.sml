@@ -2,7 +2,7 @@ open hardwarePreamble;
 
 open mixedCircuitTheory;
 
-open newTranslatorLib compileLib RTLPrintLib;
+open translatorLib compileLib RTLPrintLib;
 
 val _ = new_theory "mixedCircuitCompile";
 

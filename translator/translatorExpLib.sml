@@ -1,4 +1,4 @@
-structure newTranslatorExpLib =
+structure translatorExpLib =
 struct
 
 open hardwarePreamble;
@@ -7,8 +7,8 @@ open stringSyntax;
 
 open verilogTheory verilogTypeTheory;
 
-open newTranslatorTheory;
-open newTranslatorCoreLib;
+open translatorTheory;
+open translatorCoreLib;
 
 (* Needed for proving tstate stuff: *)
 open sumExtraTheory verilogMetaTheory;

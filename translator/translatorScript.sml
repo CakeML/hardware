@@ -7,9 +7,9 @@ open oracleTheory sumExtraTheory verilogTheory verilogMetaTheory verilogTypeTheo
 
 open stringSyntax;
 
-open newTranslatorCoreLib;
+open translatorCoreLib;
 
-val _ = new_theory "newTranslator";
+val _ = new_theory "translator";
 
 Definition mk_circuit_def:
  (mk_circuit sstep cstep s fext 0 = cstep (fext 0) s s) ∧

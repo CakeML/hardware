@@ -1,6 +1,6 @@
 open hardwarePreamble;
 
-open newTranslatorTheory newTranslatorCoreLib;
+open translatorTheory translatorCoreLib;
 
 open blastLib;
 

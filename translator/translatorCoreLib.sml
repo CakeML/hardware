@@ -1,4 +1,4 @@
-structure newTranslatorCoreLib =
+structure translatorCoreLib =
 struct
 
 open hardwarePreamble;

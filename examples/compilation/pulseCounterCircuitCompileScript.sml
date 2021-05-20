@@ -2,7 +2,7 @@ open hardwarePreamble;
 
 open pulseCounterCircuitTheory;
 
-open newTranslatorLib compileLib;
+open translatorLib compileLib;
 
 val _ = new_theory "pulseCounterCircuitCompile";
 

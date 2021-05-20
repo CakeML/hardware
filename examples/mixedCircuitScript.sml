@@ -1,6 +1,6 @@
 open hardwarePreamble;
 
-open newTranslatorTheory newTranslatorCoreLib;
+open translatorTheory translatorCoreLib;
 
 val _ = new_theory "mixedCircuit";
 

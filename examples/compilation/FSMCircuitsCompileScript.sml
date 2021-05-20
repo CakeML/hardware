@@ -2,7 +2,7 @@ open hardwarePreamble;
 
 open FSMCircuitsTheory;
 
-open newTranslatorLib compileLib RTLPrintLib;
+open translatorLib compileLib RTLPrintLib;
 
 val _ = new_theory "FSMCircuitsCompile";
 

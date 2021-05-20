@@ -4,7 +4,7 @@ Verilog development and verification project for HOL4
 
 The formal Verilog semantics is located in the directory `verilog`.
 
-The verified Verilog synthesis tool Lutsig is located in the `compiler` directory. The (latest) proof-producing code generator is located in `newTranslator`.
+The verified Verilog synthesis tool Lutsig is located in the `compiler` directory. The proof-producing Verilog code generator is located in `translator`.
 
 Some examples on how to use Lutsig and the code generator in practice are available in the `examples` directory. There is also a test-suite for Lutsig available, based on unverified parsing of Verilog text files, in the `verilog_parser` directory.
 

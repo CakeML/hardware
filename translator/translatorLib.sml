@@ -1,12 +1,12 @@
-structure newTranslatorLib =
+structure translatorLib =
 struct
 
 open hardwarePreamble;
 
 open verilogTheory;
 
-open newTranslatorTheory;
-open newTranslatorCoreLib newTranslatorExpLib newTranslatorStmLib;
+open translatorTheory;
+open translatorCoreLib translatorExpLib translatorStmLib;
 
 (* Test:
 open avgCircuitTheory;
