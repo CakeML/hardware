@@ -2,12 +2,12 @@ open hardwarePreamble;
 
 open verilogTheory verilogTypeTheory;
 
-open fullCompilerTheory TechMapLib BetterLECLib RTLPrintLib;
+open compileLib RTLPrintLib;
 
 val _ = new_theory "loop";
 
 Definition const8_def:
- const8 n = Const $ n2VArray 32 n (* <-- NOTE: currently 32 here instead of 8 *)
+ const8 n = Const $ n2VArray 8 n (* <-- OLD NOTE: currently 32 here instead of 8 *)
 End
 
 Definition controll_state_update_def:
@@ -62,61 +62,20 @@ Definition loop_process_state_def:
 End
 
 Definition loop_module_def:
- loop_module = Module
-  [("reg_7", VArray_t 1); ("reg_8", VArray_t 1)]
-  ([(VArray_t 1, "finish", NONE); (VArray_t 32, "ret", NONE)] ++
-   MAP (λreg. (VArray_t 32, reg, NONE)) ["reg_4"; "reg_2"; "state"; "reg_1"; "reg_3"])
-  [loop_process_controll; loop_process_state]
+ loop_module =
+ <| fextty := [("reg_7", VArray_t 1); ("reg_8", VArray_t 1)];
+    decls := [("finish", <| output := T; type := VArray_t 1; init := NONE |>);
+              ("ret", <| output := T; type := VArray_t 8; init := NONE |>)] ++
+             MAP (λreg. (reg, <| output := F; type := VArray_t 8; init := NONE |>))
+                 ["reg_4"; "reg_2"; "state"; "reg_1"; "reg_3"];
+    ffs := [loop_process_controll; loop_process_state];
+    combs := [] |>
 End
 
-(*EVAL “typecheck loop_module”*)
+val (circuit, circuit_correct) = compile loop_module_def;
 
-(* val c = Timer.startRealTimer (); *)
-val compile_result = EVAL “compile ["finish"; "ret"] loop_module”;
-(* val () = c |> Timer.checkRealTimer |> Time.toString |> print; *)
-val circuit = compile_result |> concl |> rhs |> sumSyntax.dest_inr |> fst;
-val newnl = tech_map circuit;
+Theorem loop_circuit_correct = circuit_correct;
 
-val (extenv, regs, nl) = dest_Circuit circuit;
-
-Definition loop_extenv_def:
- loop_extenv = ^extenv
-End
-
-Definition loop_regs_def:
- loop_regs = ^regs
-End
-
-Definition nl_hi_def:
- nl_hi = ^nl
-End
-
-Definition nl_low_def:
- nl_low = ^newnl
-End
-
-Definition loop_circuit_def:
- loop_circuit = Circuit loop_extenv loop_regs nl_low
-End
-
-(* val th = betterlec loop_extenv_def loop_regs_def nl_hi_def nl_low_def; *)
-
-(*
-
-loop_circuit_def |> REWRITE_RULE [loop_extenv_def, loop_regs_def, nl_low_def] |> concl |> rhs
-                 |> print_Circuit |> writeFile "loop_luts.sv";
-
-unblast_regs "ret" 32;
-unblast_regs "state" 32;
-
- output logic[7:0] state,
- output finish,
- output logic[7:0] ret
-
-assign state = {state0, state1, state2, state3, state4, state5, state6, state7};
-assign finish = finish0;
-assign ret = {ret0, ret1, ret2, ret3, ret4, ret5, ret6, ret7};
-
-*)
+(* print_Circuit (circuit |> concl |> rhs) |> print *)
 
 val _ = export_theory ();

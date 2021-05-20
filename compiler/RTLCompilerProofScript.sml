@@ -84,7 +84,7 @@ Proof
 QED
 
 Theorem cget_net_var_NONE_cget_net:
- !si var. cget_net_var si var = NONE ==> cget_net si var = VarInp (RegVar var 0) NONE
+ !si var. cget_net_var si var = NONE ==> cget_net si var = VarInp (RegVar var 0) NoIndexing
 Proof
  rw [cget_net_def]
 QED
@@ -173,7 +173,7 @@ val same_fext_def = Define `
  same_fext vfext rtlfext <=> !n var. sum_same_value (vfext n var) (rtlfext n var)`;
 
 Theorem same_fext_same_fext_n:
- !n vfext rtlfext. same_fext vfext rtlfext ==> same_fext_n (vfext n) (rtlfext n)
+ !vfext rtlfext. same_fext vfext rtlfext ⇔ (∀n. same_fext_n (vfext n) (rtlfext n))
 Proof
  rw [same_fext_def, same_fext_n_def]
 QED
@@ -192,6 +192,18 @@ QED
 
 val si_lt_def = Define `
  si_lt si n <=> !var inp. cget_net_var si var = SOME inp ==> cell_input_lt inp n`;
+
+Triviality OPTION_ALL_alt:
+ ∀P x. OPTION_ALL P x ⇔ (∀x'. x = SOME x' ⇒ P x')
+Proof
+ gen_tac \\ Cases \\ simp []
+QED
+
+Theorem si_lt_alt:
+ ∀si n. si_lt si n ⇔ ∀var. OPTION_ALL (λinp. cell_input_lt inp n) (cget_net_var si var)
+Proof
+ simp [si_lt_def, OPTION_ALL_alt]
+QED
 
 (* Properties *)
 
@@ -231,7 +243,7 @@ Theorem cell_input_lt_neq_VarInp:
   cell_input_lt inp min /\ min <= n ==>
   inp <> VarInp (NetVar n) idx
 Proof
- Cases \\ rw [cell_input_lt_def] \\ Cases_on `v` \\ fs [var_lt_def]
+ Cases \\ rw [cell_input_lt_def] \\ Cases_on `n` \\ fs [var_lt_def]
 QED
 
 Theorem si_lt_not_eq_border_NetVar:
@@ -257,7 +269,7 @@ val same_state_nbsi_def = Define `
   (!var vv. sum_alookup nbq var = INR vv ==>
             ?cv. cell_inp_run fext cenv (cget_net si var) = INR cv /\ same_value vv cv) /\
   (!var err. sum_alookup nbq var = INL err ==>
-             cell_inp_run fext cenv (cget_net si var) = cell_inp_run fext cenv (VarInp (RegVar var 0) NONE))`;
+             cell_inp_run fext cenv (cget_net si var) = cell_inp_run fext cenv (VarInp (RegVar var 0) NoIndexing))`;
 
 val writes_ok_sis_def = Define `
  writes_ok_sis ps cs <=>
@@ -278,6 +290,12 @@ Proof
  EVAL_TAC
 QED
 
+Theorem HD_cset_net:
+ ∀si k v. si_wf si ⇒ [HD (cset_net si k v)] = cset_net [HD si] k v
+Proof
+ Cases \\ rw [si_wf_def, cset_net_def]
+QED
+
 Theorem si_wf_cset_net:
  !si k inp. si_wf si ==> si_wf (cset_net si k inp)
 Proof
@@ -294,6 +312,13 @@ Theorem si_wf_cons_hd:
  !b bs. si_wf (b::bs) ==> si_wf [b]
 Proof
  rw [si_wf_def]
+QED
+
+(* Variant of si_wf_cons_hd *)
+Theorem si_wf_HD:
+ ∀si. si_wf si ⇒ si_wf [HD si]
+Proof
+ Cases \\ rw [si_wf_def]
 QED
 
 Theorem cget_net_var_cset_net:
@@ -530,7 +555,7 @@ QED
 Theorem si_sound_cset_var_cset_net:
  !fext EE E cenv si tmpnum var v t t'.
  si_sound fext EE E cenv si /\ si_wf si /\ si_lt si tmpnum /\ E var = SOME t /\ same_type t t' /\ rtltype_v v t' ==>
- si_sound fext EE E (cset_var cenv (NetVar tmpnum) v) (cset_net si var (VarInp (NetVar tmpnum) NONE))
+ si_sound fext EE E (cset_var cenv (NetVar tmpnum) v) (cset_net si var (VarInp (NetVar tmpnum) NoIndexing))
 Proof
  rw [si_sound_def, cget_net_var_cset_net] \\ every_case_tac >- (rw [cell_inp_run_cset_var] \\ rpt asm_exists_tac) \\
  fs [si_lt_def] \\ rpt drule_first \\ Cases_on ‘inp’ \\ fs [cell_inp_run_def, cget_var_cset_var] \\
@@ -568,7 +593,7 @@ Theorem si_complete_cset_var_cset_net:
  !fext E cenv si tmpnum var v t t'.
  si_complete fext E cenv si /\ si_wf si /\ si_lt si tmpnum /\
  E var = SOME t /\ same_type t t' /\ rtltype_v v t' ==>
- si_complete fext E (cset_var cenv (NetVar tmpnum) v) (cset_net si var (VarInp (NetVar tmpnum) NONE))
+ si_complete fext E (cset_var cenv (NetVar tmpnum) v) (cset_net si var (VarInp (NetVar tmpnum) NoIndexing))
 Proof
  rw [si_complete_def, cget_net_cset_net] \\ rw [] \\ fs [cell_inp_run_cset_var] \\ rpt asm_exists_tac \\ 
  metis_tac [cell_inp_run_cset_var_cget_net, arithmeticTheory.LESS_EQ_REFL]
@@ -611,24 +636,29 @@ QED
 val cstate_progress_def = Define `
  cstate_progress cs cs' <=> cs.tmpnum <= cs'.tmpnum`;
 
-val si_progress_def = Define `
- si_progress si si' <=> LENGTH si' = LENGTH si /\ TL si' = TL si`;
+Definition si_progress_def:
+ si_progress si si' <=>
+ LENGTH si' = LENGTH si /\
+ TL si' = TL si ∧
+ (∀var. IS_SOME (cget_net_var [HD si] var) ⇒ IS_SOME (cget_net_var [HD si'] var))
+End
 
 val sis_progress_def = Define `
  sis_progress cs cs' <=> si_progress cs.bsi cs'.bsi /\ si_progress cs.nbsi cs'.nbsi`;
 
 (* Properties *)
 
-Theorem si_progress_singleton:
+(*Theorem si_progress_singleton:
  !si b1. si_progress [b1] si <=> ?b2. si = [b2]
 Proof
  Cases \\ rw [si_progress_def]
-QED
+QED*)
 
 Theorem si_progress_cset_net:
- !si k v. si_progress si (cset_net si k v)
+ !si k v. si_wf si ⇒ si_progress si (cset_net si k v)
 Proof
- rw [si_progress_def, LENGTH_cset_net, TL_cset_net]
+ rw [si_progress_def, LENGTH_cset_net, TL_cset_net, cget_net_var_cset_net] \\
+ Cases_on ‘si’ \\ fs [si_wf_def, cget_net_var_def, cset_net_def, lookup_insert] \\ rw []
 QED
 
 Theorem cstate_progress_trans:
@@ -678,6 +708,46 @@ Proof
  \\ drule_strip oracle_bits_cong \\ simp []
 QED
      
+Triviality pull_exists_imp_rhs:
+ ∀a b. (a ⇒ ∃n. b n) ⇔ ∃n. a ⇒ b n
+Proof
+ metis_tac []
+QED
+
+Theorem prun_fbits_alt:
+ !fext vs p. ?n. ∀vs'.
+ prun fext vs p = INR vs' ==>
+  vs'.fbits = shift_seq n vs.fbits /\
+  (!fbits. init_seq_eq vs.fbits fbits n ==> prun fext (vs with fbits := fbits) p = INR (vs' with fbits := shift_seq n fbits))
+Proof
+ recInduct prun_ind \\ rw [prun_def]
+ >- (qexists_tac `0` \\ rw [pstate_component_equality, shift_seq_0])
+ >- (simp [sum_bind_INR] \\
+     last_x_assum (qspec_then ‘OUTR (prun fext s p0)’ strip_assume_tac) \\
+     qexists_tac `n + n'` \\ rpt strip_tac' \\ drule_first \\ fs [] \\
+     conj_tac >- rfs [shift_seq_add] \\ rpt strip_tac \\
+     first_x_assum (qspec_then `fbits` mp_tac) \\ impl_tac >- fs [init_seq_eq_def] \\ strip_tac \\
+     asm_exists_tac \\ first_x_assum (qspec_then `shift_seq n fbits` mp_tac) \\
+     impl_tac >- simp [init_seq_eq_shift_seq] \\ simp [shift_seq_add])
+ >- (fs [sum_bind_INR] \\ qexists_tac ‘if (OUTR (get_VBool_data (OUTR (erun fext s c)))) then n else n'’ \\
+     rpt strip_tac' \\ simp [] \\ IF_CASES_TAC \\ fs [erun_fbits])
+ >- (fs [sum_bind_INR] \\ 
+     first_x_assum (qspecl_then [‘OUTR (erun fext s e)’, ‘OUTR (erun fext s ccond)’]
+                                (strip_assume_tac o Ho_Rewrite.REWRITE_RULE [pull_exists_imp_rhs])) \\
+     qexists_tac ‘if OUTR (erun fext s e) = OUTR (erun fext s ccond) then n else n'’ \\
+     rpt strip_tac' \\ fs [] \\ FULL_CASE_TAC \\ gvs [erun_fbits])
+ >- (qexists_tac `0` \\ simp [shift_seq_0])
+ \\ (Cases_on ‘rhs’ \\ fs [prun_assn_rhs_def, sum_bind_INR, sum_map_INR, erun_fbits] \\ rveq
+    >- (Cases_on ‘lhs’ \\ fs [prun_assn_lhs_prev_def, prun_bassn_def, prun_nbassn_def] \\ 
+        qexists_tac ‘verlength (OUTR $ get_var s s')’ \\ rpt strip_tac' \\ pairarg_tac \\
+        fs [assn_def, sum_for_INR] \\ drule_strip nd_reset_fbits \\
+        simp [set_var_fbits, set_nbq_var_fbits, get_var_fbits] \\ rpt strip_tac \\
+        pairarg_tac \\ drule_strip nd_reset_cong \\ drule_strip nd_reset_fbits \\ imp_res_tac nd_reset_const \\
+        simp [sum_for_INR, set_var_def, set_nbq_var_def, pstate_component_equality])
+    \\ qexists_tac ‘0’ \\ rpt strip_tac' \\ gvs [prun_bassn_def, prun_nbassn_def, sum_for_INR] \\
+       pairarg_tac \\ gvs [assn_fbits, set_var_fbits, set_nbq_var_fbits, shift_seq_0])
+QED
+
 Theorem prun_fbits:
  !fext vs p vs'.
  prun fext vs p = INR vs' ==>
@@ -685,63 +755,87 @@ Theorem prun_fbits:
   vs'.fbits = shift_seq n vs.fbits /\
   (!fbits. init_seq_eq vs.fbits fbits n ==> prun fext (vs with fbits := fbits) p = INR (vs' with fbits := shift_seq n fbits))
 Proof
- recInduct prun_ind \\ rw [prun_def]
- >- (qexists_tac `0` \\ rw [pstate_component_equality, shift_seq_0])
- >- (fs [sum_bind_INR] \\ rpt drule_first \\ qexists_tac `n + n'` \\ rpt strip_tac' \\
-    conj_tac >- rfs [shift_seq_add] \\ rpt strip_tac \\
-    last_x_assum (qspec_then `fbits` mp_tac) \\ impl_tac >- fs [init_seq_eq_def] \\ strip_tac \\
-    asm_exists_tac \\ first_x_assum (qspec_then `shift_seq n fbits` mp_tac) \\
-    impl_tac >- simp [init_seq_eq_shift_seq] \\ simp [shift_seq_add])
- >- (fs [sum_bind_INR] \\ every_case_tac \\ drule_first \\ qexists_tac `n` \\ simp [erun_fbits])
- >- (fs [sum_bind_INR] \\ every_case_tac \\ rveq \\ drule_first \\ qexists_tac `n` \\ simp [erun_fbits])
- >- (qexists_tac `0` \\ simp [shift_seq_0])
- \\ (Cases_on ‘rhs’ \\ fs [prun_assn_rhs_def, sum_bind_INR, sum_map_INR, erun_fbits] \\ rveq
-    >- (Cases_on ‘lhs’ \\ fs [prun_assn_lhs_prev_def, prun_bassn_def, prun_nbassn_def] \\ pairarg_tac \\
-       fs [assn_def, sum_for_INR] \\ drule_strip nd_reset_fbits \\
-       qexists_tac ‘verlength v’ \\ simp [set_var_fbits, set_nbq_var_fbits, get_var_fbits] \\ rpt strip_tac \\
-       pairarg_tac \\ drule_strip nd_reset_cong \\ drule_strip nd_reset_fbits \\ imp_res_tac nd_reset_const \\
-       simp [sum_for_INR, set_var_def, set_nbq_var_def, pstate_component_equality])
-    \\ fs [prun_bassn_def, prun_nbassn_def, sum_for_INR] \\ pairarg_tac \\ rveq \\
-       fs [assn_fbits, set_var_fbits, set_nbq_var_fbits] \\
-       qexists_tac ‘0’ \\ simp [shift_seq_0])
+ metis_tac [prun_fbits_alt]
 QED
 
-Theorem mstep_fbits:
+Theorem pruns_fbits_alt:
+ ∀ps fext s. ?n. ∀s'.
+ sum_foldM (prun fext) s ps = INR s' ==>
+  s'.fbits = shift_seq n s.fbits /\
+  (!fbits. init_seq_eq s.fbits fbits n ==>
+           sum_foldM (prun fext) (s with fbits := fbits) ps = INR (s' with fbits := shift_seq n fbits))
+Proof
+ Induct \\ rw [sum_foldM_def, sum_bind_INR] >- (qexists_tac `0` \\ rw [shift_seq_0]) \\
+ qspecl_then [‘fext’, ‘s’, ‘h’] strip_assume_tac prun_fbits_alt \\
+ last_x_assum (qspecl_then [‘fext’, ‘OUTR (prun fext s h)’] strip_assume_tac) \\
+ qexists_tac `n + n'` \\ rpt strip_tac' \\ fs [shift_seq_add] \\ rpt strip_tac' \\
+ last_x_assum (qspec_then `fbits` mp_tac) \\ impl_tac >- fs [init_seq_eq_def] \\ strip_tac \\ simp [] \\
+ first_x_assum (qspec_then `shift_seq n fbits` mp_tac) \\ simp [init_seq_eq_shift_seq]
+QED
+
+(* was mstep_fbits *)
+Theorem pruns_fbits:
  !ps fext s s'.
- mstep fext ps s = INR s' ==>
+ sum_foldM (prun fext) s ps = INR s' ==>
  ?n.
   s'.fbits = shift_seq n s.fbits /\
-  (!fbits. init_seq_eq s.fbits fbits n ==> mstep fext ps (s with fbits := fbits) = INR (s' with fbits := shift_seq n fbits))
+  (!fbits. init_seq_eq s.fbits fbits n ==>
+           sum_foldM (prun fext) (s with fbits := fbits) ps = INR (s' with fbits := shift_seq n fbits))
 Proof
- rewrite_tac [mstep_def] \\ Induct \\ rw [sum_foldM_def, sum_bind_INR] >- (qexists_tac `0` \\ rw [shift_seq_0]) \\
- drule_first \\ drule_strip prun_fbits \\ qexists_tac `n' + n` \\ simp [shift_seq_add] \\ rpt strip_tac \\
- first_x_assum (qspec_then `fbits` mp_tac) \\ impl_tac >- fs [init_seq_eq_def] \\ strip_tac \\ simp [] \\
- first_x_assum (qspec_then `shift_seq n' fbits` mp_tac) \\ simp [init_seq_eq_shift_seq]
+ metis_tac [pruns_fbits_alt]
 QED
 
-Theorem mstep_commit_fbits:
- !fext fbits fbits' ps vs vs'.
- mstep_commit fext fbits ps vs = INR (vs', fbits') ==>
- ?n.
+Theorem mstep_ffs_fbits_alt:
+ ∀fext fbits ps s. ?n. ∀s' fbits'.
+ mstep_ffs fext fbits ps s = INR (s', fbits') ==>
   fbits' = shift_seq n fbits /\
-  (!fbits''. init_seq_eq fbits fbits'' n ==> mstep_commit fext fbits'' ps vs = INR (vs', shift_seq n fbits''))
+  (!fbits''. init_seq_eq fbits fbits'' n ==>
+             mstep_ffs fext fbits'' ps s = INR (s', shift_seq n fbits''))
 Proof
- rw [mstep_commit_def, sum_map_INR] \\ drule_strip mstep_fbits \\ qexists_tac `n` \\ simp [] \\ rpt strip_tac \\
- first_x_assum (qspec_then `fbits''` mp_tac) \\ simp []
+ rw [mstep_ffs_def] \\ 
+ qmatch_goalsub_abbrev_tac ‘sum_foldM _ init _’ \\
+ qspecl_then [‘ps’, ‘fext’, ‘init’] strip_assume_tac pruns_fbits_alt \\
+ unabbrev_all_tac \\
+ qexists_tac ‘n’ \\ rpt gen_tac \\ simp [sum_bind_INR] \\ strip_tac \\ drule_first \\ fs []
+QED
+
+Theorem mstep_ffs_fbits:
+ ∀fext fbits ps s s' fbits'.
+ mstep_ffs fext fbits ps s = INR (s', fbits') ==>
+ ?n. fbits' = shift_seq n fbits /\
+     (!fbits''. init_seq_eq fbits fbits'' n ==>
+                mstep_ffs fext fbits'' ps s = INR (s', shift_seq n fbits''))
+Proof
+ metis_tac [mstep_ffs_fbits_alt]
 QED
 
 Theorem mrun_fbits:
- !n fext fbits fbits' ps vs vs'.
- mrun fext fbits ps vs n = INR (vs', fbits') ==>
+ !n fext fbits fbits' ffs combs vs vs'.
+ mrun fext fbits ffs combs vs n = INR (vs', fbits') ==>
  ?m.
   fbits' = shift_seq m fbits /\
-  (!fbits''. init_seq_eq fbits fbits'' m ==> mrun fext fbits'' ps vs n = INR (vs', shift_seq m fbits''))
+  (!fbits''. init_seq_eq fbits fbits'' m ==> mrun fext fbits'' ffs combs vs n = INR (vs', shift_seq m fbits''))
 Proof
- Induct \\ rw [mrun_def, sum_bind_INR] >- (qexists_tac `0` \\ rw [shift_seq_0]) \\
- pairarg_tac \\ rveq \\ fs [] \\ drule_first \\ drule_strip mstep_commit_fbits \\
- qexists_tac `m + n'` \\ simp [shift_seq_add] \\ rpt strip_tac' \\
- last_x_assum (qspec_then `fbits''` mp_tac) \\ impl_tac >- fs [init_seq_eq_def] \\ strip_tac \\ simp [] \\
- first_x_assum (qspec_then `shift_seq m fbits''` mp_tac) \\ simp [init_seq_eq_shift_seq]
+ Induct \\ rw [mrun_def, sum_bind_INR, mstep_combs_def, mstep_ffs_def]
+ >- (drule_strip pruns_fbits \\ qexists_tac `n` \\ rw [] \\ fs []) \\
+
+ pairarg_tac \\ rveq \\ drule_first \\ gvs [sum_bind_INR] \\
+ imp_res_tac pruns_fbits \\ fs [] \\
+ qmatch_asmsub_rename_tac ‘init_seq_eq fbits _ n_mrun’ \\
+ qmatch_asmsub_rename_tac ‘init_seq_eq (shift_seq n_mrun fbits) _ n_ffs’ \\
+ qmatch_asmsub_rename_tac ‘init_seq_eq s.fbits _ n_combs’ \\
+
+ qexists_tac `(n_mrun + n_ffs) + n_combs` \\ simp [shift_seq_add] \\ rpt strip_tac' \\
+ last_x_assum (qspec_then `fbits''` mp_tac) \\
+ impl_tac >- fs [init_seq_eq_def] \\ strip_tac \\ simp [] \\
+
+ last_x_assum (qspec_then `shift_seq n_mrun fbits''` mp_tac) \\
+ impl_tac >- fs [init_seq_eq_def, shift_seq_def] \\ strip_tac \\ simp [] \\
+
+ first_x_assum (qspec_then `shift_seq (n_mrun + n_ffs) fbits''` mp_tac) \\
+ impl_tac >- fs [init_seq_eq_def, shift_seq_def] \\ strip_tac \\
+
+ fs [sum_bind_def, shift_seq_add]
 QED
 
 (** Correctness **)
@@ -779,6 +873,14 @@ Theorem cell_input_idx_cell_input_lt:
  cell_input_idx inp i = INR inp' /\ cell_input_lt inp tmpnum ==> cell_input_lt inp' tmpnum
 Proof
  rpt strip_tac \\ drule_strip cell_input_idx_INR \\ fs [cell_input_idx_def] \\
+ rveq \\ fs [cell_input_lt_def]
+QED
+
+Theorem cell_input_slice_cell_input_lt:
+ !inp inp' i1 i2 tmpnum.
+ cell_input_slice inp i1 i2 = INR inp' ∧ cell_input_lt inp tmpnum ⇒ cell_input_lt inp' tmpnum
+Proof
+ rpt strip_tac \\ drule_strip cell_input_slice_INR \\ fs [cell_input_slice_def] \\
  rveq \\ fs [cell_input_lt_def]
 QED
         
@@ -922,6 +1024,17 @@ Proof
  simp [sum_revEL_def, sum_EL_EL, revEL_def, sum_map_def]
 QED
 
+Theorem cell_input_slice_cell_inp_run:
+ !inp inp' i1 i2 fext cenv bs.
+ cell_input_slice inp i1 i2 = INR inp' /\
+ cell_inp_run fext cenv inp = INR $ CArray bs /\
+ i1 < LENGTH bs ∧ i2 ≤ i1 ==>
+ cell_inp_run fext cenv inp' = INR $ CArray $ rev_slice bs i1 i2
+Proof
+ rpt strip_tac \\ drule_strip cell_input_slice_INR \\ fs [cell_input_slice_def] \\ rveq \\
+ fs [cell_inp_run_def, cget_fext_var_def, sum_bind_INR, rev_slice_def]
+QED
+
 Theorem same_fext_n_same_value:
  !fextv fext var vv cv. same_fext_n fextv fext /\ fextv var = INR vv /\ fext var = INR cv ==> same_value vv cv
 Proof
@@ -944,6 +1057,24 @@ Proof
  >- (Cases_on ‘v’ \\ fs [cell_input_idx_def, cell_input_covered_by_extenv_def])
  >- (rename1 ‘ExtInp _ idx’ \\ Cases_on ‘idx’ \\ fs [cell_input_idx_def, cell_input_covered_by_extenv_def])
  \\ rename1 ‘VarInp _ idx’ \\ Cases_on ‘idx’ \\ fs [cell_input_idx_def, cell_input_covered_by_extenv_def]
+QED
+
+Theorem cell_input_idx_cell_input_covered_by_extenv:
+ !inp inp' idx EE.
+ cell_input_idx inp idx = INR inp' /\ cell_input_covered_by_extenv EE inp ==>
+ cell_input_covered_by_extenv EE inp'
+Proof
+ rpt strip_tac \\ drule_strip cell_input_idx_INR \\ fs [cell_input_idx_def] \\ rveq \\
+ fs [cell_input_covered_by_extenv_def]
+QED
+
+Theorem cell_input_slice_cell_input_covered_by_extenv:
+ !inp inp' i1 i2 EE.
+ cell_input_slice inp i1 i2 = INR inp' /\ cell_input_covered_by_extenv EE inp ==>
+ cell_input_covered_by_extenv EE inp'
+Proof
+ rpt strip_tac \\ drule_strip cell_input_slice_INR \\ fs [cell_input_slice_def] \\ rveq \\
+ fs [cell_input_covered_by_extenv_def]
 QED
 
 Theorem cstate_ok_cset_var:
@@ -1034,6 +1165,24 @@ Proof
  simp [sum_bind_INR, ver2n_VArray] \\ rpt strip_tac' \\
  fs [same_state_sis_def, same_state_bsi_def, GSYM get_var_sum_alookup] \\
  drule_first \\ fs [get_array_index_INR] \\ rveq \\ fs [same_value_def])
+
+ >- (* ArraySlice *)
+ (last_x_assum kall_tac \\
+  fs [compile_exp_def, sum_bind_INR] \\ rveq \\
+  fs [netlist_ok_def, netlist_sorted_def, sum_foldM_def, cstate_progress_def, cstate_ok_def] \\
+  rpt conj_tac
+  >- (match_mp_tac cell_input_slice_cell_input_lt \\ asm_exists_tac \\
+      match_mp_tac si_lt_cell_input_lt_cget_net \\ asm_exists_tac)
+  >- (match_mp_tac cell_input_slice_cell_input_covered_by_extenv \\ asm_exists_tac \\
+      match_mp_tac si_sound_cell_input_covered_by_extenv_cget_net \\ asm_exists_tac) \\
+  qpat_x_assum ‘si_complete _ _ _ cs.nbsi’ kall_tac \\  
+  fs [si_complete_def] \\ drule_first \\
+  fs [same_type_cases] \\ rveq \\ fs [rtltype_v_CArray_t] \\ rveq \\
+  drule_strip cell_input_slice_cell_inp_run \\ simp [] \\
+  conj_tac >- simp [rev_slice_def] \\ rpt strip_tac \\
+  fs [erun_def, erun_get_var_def, sum_bind_INR,
+      same_state_sis_def, same_state_bsi_def, GSYM get_var_sum_alookup] \\
+  drule_first \\ fs [get_array_slice_INR] \\ rveq \\ fs [same_value_def, rev_slice_def])
 
  >- (* BUOp *)
  (fs [compile_exp_def, sum_bind_INR, compile_new_name_def, no_array_read_dyn_exp_def] \\
@@ -1501,7 +1650,8 @@ Theorem compile_merge_if_left_correct:
  min <= cs.tmpnum
  ==>
  cs'.bsi = cs.bsi /\ cs'.nbsi = cs.nbsi /\
- (!var. cget_net_var si' var = if var = k then SOME (VarInp (NetVar cs.tmpnum) NONE) else cget_net_var si var) /\
+ (!var. cget_net_var si' var = if var = k then SOME (VarInp (NetVar cs.tmpnum) NoIndexing) else cget_net_var si var) /\
+ IS_SOME (cget_net_var [HD si'] k) ∧
  (*cstate_progress cs cs' <-- too weak here *) cs.tmpnum < cs'.tmpnum /\
  si_progress si si' /\
  muxlist_ok EE cond min cs'.tmpnum bigsi othersi nl' /\
@@ -1515,7 +1665,7 @@ Theorem compile_merge_if_left_correct:
   si_sound fext EE E cenv'' othersi /\ si_complete fext E cenv'' othersi /\
   si_wf si' /\ si_sound fext EE E cenv'' si' /\ si_lt si' cs'.tmpnum /\ si_complete fext E cenv'' si' /\
 
-  cell_inp_run fext cenv'' (VarInp (NetVar cs.tmpnum) NONE) =
+  cell_inp_run fext cenv'' (VarInp (NetVar cs.tmpnum) NoIndexing) =
    (if b then cell_inp_run fext cenv v else cell_inp_run fext cenv (cget_net othersi k)) ∧
 
   (!inp. ~cell_input_is_var inp (NetVar cs.tmpnum) ⇒
@@ -1523,6 +1673,7 @@ Theorem compile_merge_if_left_correct:
 Proof
  simp [compile_merge_if_left_def, compile_new_name_def] \\ rpt strip_tac
  >- rw [cget_net_var_cset_net]
+ >- simp [HD_cset_net, si_wf_HD, cget_net_var_cset_net]
  >- simp [si_progress_cset_net]
  >- (rw [muxlist_ok_append]
     >- (match_mp_tac muxlist_ok_le \\ asm_exists_tac \\ simp [])
@@ -1570,6 +1721,8 @@ Proof
  rw [] \\ Cases_on ‘cget_net si var’ \\ simp [cell_input_is_var_def] \\ metis_tac []
 QED
 
+val Case_option = TypeBase.case_pred_imp_of ``: 'a option`` |> Q.ISPEC `\x : bool. x` |> BETA_RULE;
+
 Theorem foldrWithKey_compile_merge_if_left_correct:
  !bigsi min tblock cond othersi si si' nl nl' cs cs' EE E cenv cenv' b fext.
  foldrWithKey (compile_merge_if_left cond othersi) (cs, si, nl) tblock = (cs', si', nl') /\
@@ -1597,9 +1750,10 @@ Theorem foldrWithKey_compile_merge_if_left_correct:
  muxlist_ok EE cond min cs'.tmpnum bigsi othersi nl' /\
  netlist_sorted nl' ∧
  (?nl''. nl' = nl ++ nl'' /\ muxlist_ok EE cond cs.tmpnum cs'.tmpnum bigsi othersi nl'') /\
- (!var inp. cget_net_var si' var = SOME inp ==>
-            (?inp. cget_net_var [tblock] var = SOME inp) \/
-            (?inp. cget_net_var si var = SOME inp)) /\
+ (!var. (∃inp. cget_net_var si' var = SOME inp) ⇔
+        (?inp. cget_net_var [tblock] var = SOME inp) \/
+        (?inp. cget_net_var si var = SOME inp)) /\
+ (∀var. IS_SOME (cget_net_var [tblock] var) ⇒ IS_SOME (cget_net_var [HD si'] var)) ∧
  ?cenv''.
   sum_foldM (cell_run fext) cenv nl' = INR cenv'' /\
 
@@ -1644,7 +1798,8 @@ Proof
     metis_tac [mux_ok_le, muxlist_ok_le, muxlist_ok_nil,
                arithmeticTheory.LESS_EQ_REFL, arithmeticTheory.LESS_EQ_TRANS,
                arithmeticTheory.LESS_IMP_LESS_OR_EQ])
- >- (rpt strip_tac \\ simp [cget_net_var_Bin_SOME_eq] \\ drule_first \\ metis_tac []) \\
+ >- (simp [cget_net_var_Bin_SOME_eq] \\ metis_tac [])
+ >- (gvs [cget_net_var_Bin_SOME_eq, optionTheory.IS_SOME_EXISTS, si_progress_def] \\ metis_tac []) \\
 
  strip_tac \\ rpt (first_x_assum (qspec_then `var` assume_tac)) \\ TOP_CASE_TAC
 
@@ -1668,7 +1823,7 @@ Proof
 
     \\ imp_res_tac cget_net_var_SOME_cget_net \\ rfs [sum_foldM_append, sum_bind_def] \\
 
-       qspec_then `VarInp (NetVar tblock'_cs.tmpnum) NONE` assume_tac cells_run_unchanged_muxlist_ok \\
+       qspec_then `VarInp (NetVar tblock'_cs.tmpnum) NoIndexing` assume_tac cells_run_unchanged_muxlist_ok \\
        drule_first \\
 
        disch_then (qspec_then `k_cs.tmpnum` mp_tac) \\
@@ -1689,7 +1844,7 @@ QED
 (* Might have some redundant assumptions... the thm stmt is based on the thm for _left, the proof as well *)
 Theorem compile_merge_if_right_correct:
  !cond fallback othersi k v cs si nl cs' si' nl' min bigsi EE E cenv cenv' b fext.
- compile_merge_if_right cond fallback othersi k v (cs, si, nl) = (cs', si' , nl') /\
+ compile_merge_if_right cond fallback othersi k v (cs, si, nl) = (cs', si', nl') /\
 
  muxlist_ok EE cond min cs.tmpnum (othersi ++ fallback) bigsi nl /\
  netlist_sorted nl ∧
@@ -1724,12 +1879,13 @@ Theorem compile_merge_if_right_correct:
     SOME _ => cs' = cs ∧ si' = si ∧ nl' = nl
   | NONE =>
    (!var. cget_net_var si' var =
-          if var = k then SOME (VarInp (NetVar cs.tmpnum) NONE) else cget_net_var si var) /\
+          if var = k then SOME (VarInp (NetVar cs.tmpnum) NoIndexing) else cget_net_var si var) /\
+   IS_SOME (cget_net_var [HD si'] k) ∧
    (* cstate_progress cs cs' <-- too weak here *) cs.tmpnum < cs'.tmpnum /\
 
    (?mcell. nl' = SNOC mcell nl /\ mux_ok EE cond cs.tmpnum cs'.tmpnum (othersi ++ fallback) bigsi mcell) /\
 
-   cell_inp_run fext cenv'' (VarInp (NetVar cs.tmpnum) NONE) =
+   cell_inp_run fext cenv'' (VarInp (NetVar cs.tmpnum) NoIndexing) =
     (if b then cell_inp_run fext cenv (cget_net fallback k) else cell_inp_run fext cenv v) ∧
 
    (!inp. ~cell_input_is_var inp (NetVar cs.tmpnum) ⇒
@@ -1776,6 +1932,7 @@ Proof
  >- metis_tac [si_lt_cset_net_SUC]
  >- metis_tac [si_complete_cset_var_cset_net]
  >- rw [cget_net_var_cset_net]
+ >- rw [cget_net_var_cset_net, si_wf_HD, HD_cset_net]
  >- (rw [mux_ok_def, cell_output_ok_def, mux_input_ok_def] \\
      metis_tac [cget_net_var_SOME_cget_net, cell_input_lt_le, si_lt_def, si_lt_cell_input_lt_cget_net, cget_net_var_NONE_cget_net_append_lem])
  >- (rfs [cell_inp_run_cset_var] \\ rw [])
@@ -1811,9 +1968,10 @@ Theorem foldrWithKey_compile_merge_if_right_correct:
  muxlist_ok EE cond min cs'.tmpnum (tblock::oldsi) bigsi nl' /\
  netlist_sorted nl' ∧
  (?nl''. nl' = nl ++ nl'' /\ muxlist_ok EE cond cs.tmpnum cs'.tmpnum (tblock::oldsi) bigsi nl'') /\
- (!var inp. cget_net_var si' var = SOME inp ==>
-            (?inp. cget_net_var [fblock] var = SOME inp) \/
-            (?inp. cget_net_var si var = SOME inp)) /\
+ (!var. (∃inp. cget_net_var si' var = SOME inp) ⇔
+         (?inp. cget_net_var [tblock] var = NONE ∧ cget_net_var [fblock] var = SOME inp) \/
+         (?inp. cget_net_var si var = SOME inp)) /\
+ (∀var. cget_net_var [tblock] var = NONE ∧ IS_SOME (cget_net_var [fblock] var) ⇒ IS_SOME (cget_net_var [HD si'] var)) ∧
  ?cenv''.
   sum_foldM (cell_run fext) cenv nl' = INR cenv'' /\
 
@@ -1864,7 +2022,9 @@ Proof
                 arithmeticTheory.LESS_EQ_REFL, arithmeticTheory.LESS_EQ_TRANS,
                 arithmeticTheory.LESS_IMP_LESS_OR_EQ])
  >- (rpt strip_tac \\ Cases_on ‘cget_net_var [tblock] k’ \\ fs [] \\ rveq \\
-     simp [cget_net_var_Bin_SOME_eq] \\ drule_first \\ metis_tac []) \\
+     simp [cget_net_var_Bin_SOME_eq] >- metis_tac [] \\
+     eq_tac \\ rw [] \\ gvs [Case_option] \\ metis_tac [])
+ >- (rpt strip_tac \\ gs [cget_net_var_Bin_SOME_eq, optionTheory.IS_SOME_EXISTS, si_progress_def]) \\
 
  strip_tac \\ rpt (first_x_assum (qspec_then `var` assume_tac)) \\ TOP_CASE_TAC
 
@@ -1898,7 +2058,7 @@ Proof
  \\ TOP_CASE_TAC \\ fs [] \\ rveq \\
     imp_res_tac cget_net_var_SOME_cget_net \\ rfs [sum_foldM_append, sum_bind_def] \\
 
-    qspec_then `VarInp (NetVar fblock'_cs.tmpnum) NONE` assume_tac cells_run_unchanged_muxlist_ok \\
+    qspec_then `VarInp (NetVar fblock'_cs.tmpnum) NoIndexing` assume_tac cells_run_unchanged_muxlist_ok \\
     drule_first \\
 
     disch_then (qspec_then `k_cs.tmpnum` mp_tac) \\
@@ -1981,6 +2141,8 @@ Theorem compile_merge_if_correct:
             (?inp. cget_net_var [tblock] var = SOME inp) \/
             (?inp. cget_net_var [fblock] var = SOME inp) \/
             (?inp. cget_net_var si var = SOME inp)) /\
+ (∀var. IS_SOME (cget_net_var [tblock] var) ∨ IS_SOME (cget_net_var [fblock] var) ⇒
+        IS_SOME (cget_net_var [HD si'] var)) ∧
  ?cenv'. sum_foldM (cell_run fext) cenv nl = INR cenv' /\
          cstate_ok fext EE E cs' cenv' /\
          si_wf si' /\ si_lt si' cs'.tmpnum /\ si_sound fext EE E cenv' si' /\ si_complete fext E cenv' si' /\
@@ -2007,11 +2169,12 @@ Proof
  rpt conj_tac
  >- fs [cstate_progress_def]
  >- fs [si_progress_def]
- >- metis_tac [] \\
+ >- metis_tac []
+ >- (rpt strip_tac \\ Cases_on ‘cget_net_var [tblock] var’ \\ fs [si_progress_def, optionTheory.IS_SOME_EXISTS]) \\
  
  gen_tac \\
  rpt (first_x_assum (qspec_then `var` assume_tac)) \\
- Cases_on `cget_net_var [tblock] var` \\ Cases_on `cget_net_var [fblock] var` \\ 
+ Cases_on `cget_net_var [tblock] var` \\ Cases_on `cget_net_var [fblock] var` \\
  imp_res_tac cget_net_cons_NONE \\ imp_res_tac cget_net_cons_SOME \\ fs [] \\
  imp_res_tac cget_net_var_cget_net \\ simp [] \\
  metis_tac [cells_run_unchanged_muxlist_ok_cget_net]
@@ -2086,6 +2249,7 @@ Theorem compile_stmt_correct:
   cstate_progress cs cs' /\
   sis_progress cs cs' /\
   writes_ok_sis ps cs' /\
+  (∀var. MEM var (vwrites p) ⇒ IS_SOME (cget_net_var [HD cs'.bsi] var)) ∧
   netlist_ok EEv cs.tmpnum cs'.tmpnum nl /\
   netlist_sorted nl /\
   ?cenv'. sum_foldM (cell_run rtlfext) cenv nl = INR cenv' /\
@@ -2099,7 +2263,7 @@ Proof
  gen_tac \\ Induct
 
  >- (* Skip *)
- (rw [prun_def, compile_stmt_def] \\
+ (rw [prun_def, compile_stmt_def, vwrites_def] \\
  rw [cstate_progress_def, sis_progress_def, si_progress_def, netlist_ok_def, netlist_sorted_def, sum_foldM_def] \\
  qexists_tac `vs.fbits` \\ rw [pstate_fbits_fbits] \\ simp [])
 
@@ -2113,6 +2277,7 @@ Proof
  >- fs [cstate_progress_def]
  >- fs [sis_progress_def, si_progress_def]
  >- fs [writes_ok_sis_def]
+ >- (fs [sis_progress_def, si_progress_def] \\ metis_tac [])
  >- (fs [cstate_progress_def, netlist_ok_append] \\ 
     conj_tac \\ match_mp_tac netlist_ok_le \\ asm_exists_tac \\ DECIDE_TAC)
  >- metis_tac [netlist_sorted_append] \\
@@ -2184,6 +2349,7 @@ Proof
  >- fs [cstate_progress_def]
  >- rfs [sis_progress_def]
  >- (fs [writes_ok_sis_def] \\ rpt strip_tac \\ drule_first \\ metis_tac [cget_net_var_cons_SOME])
+ >- (gvs [sis_progress_def, si_progress_def] \\ metis_tac [HD])
  >- (fs [netlist_ok_append, cstate_progress_def] \\
      rpt conj_tac \\ match_mp_tac netlist_ok_le \\ asm_exists_tac \\ DECIDE_TAC)
  >- (rpt (match_mp_tac (INST_TYPE [alpha |-> “:vertype”] netlist_sorted_append) \\ rpt asm_exists_any_tac \\
@@ -2265,11 +2431,12 @@ Proof
  (qpat_x_assum `vertype_stmt _ _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_stmt_cases]) \\ rveq \\
  fs [compile_stmt_def, compile_new_name_def, sum_bind_INR, no_array_write_dyn_def, no_array_read_dyn_def] \\
  TRY (pairarg_tac \\ rveq \\ fs [] \\ drule_strip compile_exp_correct) \\ rveq \\
-
+  
  (rpt conj_tac
  >- fs [cstate_progress_def]
- >- (fs [sis_progress_def, si_progress_cset_net] \\ simp [si_progress_def])
+ >- (fs [cstate_ok_def, sis_progress_def, si_progress_cset_net] \\ simp [si_progress_def]) 
  >- (fs [writes_ok_sis_def, vwrites_def, vnwrites_def, evwrites_def, cstate_ok_def, cget_net_var_cset_net] \\ rw [] \\ rw [])
+ >- fs [cstate_ok_def, vwrites_def, evwrites_def, HD_cset_net, cget_net_var_cset_net, si_wf_HD]
  >- fs [netlist_ok_def, cell_ok_def, cell_output_ok_def, cell_covered_by_extenv_def]
  >- fs [netlist_sorted_def, cell_output_def])
 
@@ -2316,9 +2483,10 @@ Proof
  (* Copied from NoIndexing case (except netlist_ok+netlist_sorted case): *)
  (rpt conj_tac
  >- fs [cstate_progress_def]
- >- (fs [sis_progress_def, si_progress_cset_net] \\ simp [si_progress_def])
+ >- (fs [cstate_ok_def, sis_progress_def, si_progress_cset_net] \\ simp [si_progress_def])
  >- (fs [writes_ok_sis_def, vwrites_def, vnwrites_def, evwrites_def, cstate_ok_def,
         cget_net_var_cset_net] \\ rw [] \\ rw [])
+ >- fs [cstate_ok_def, vwrites_def, evwrites_def, HD_cset_net, cget_net_var_cset_net, si_wf_HD]
  >- (simp [netlist_ok_append] \\ conj_tac
      >- (match_mp_tac netlist_ok_le \\ asm_exists_tac \\ simp [])
      \\ fs [netlist_ok_def, cell_ok_def, cell_output_ok_def, cstate_progress_def, cell_covered_by_extenv_def, cstate_ok_def] \\
@@ -2371,15 +2539,13 @@ Proof
  qpat_x_assum `vertype_stmt _ _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_stmt_cases]))
 QED
 
-Theorem compile_stmts_correct_step:
+Theorem compile_stmts_correct_cells_run:
  !ps psall cs cs' nl cenv vfext rtlfext Ev EEv.
  compile_stmts cs ps = INR (cs', nl) /\
 
  memsublist ps psall /\
  writes_ok psall /\
- EVERY (no_array_read_dyn Ev) ps /\
- EVERY (no_array_write_dyn Ev) ps /\
- EVERY no_Case ps /\
+ EVERY (preprocessed Ev) ps /\
  EVERY (vertype_stmt EEv Ev) ps /\
 
  same_fext_n vfext rtlfext /\
@@ -2391,18 +2557,20 @@ Theorem compile_stmts_correct_step:
  cstate_progress cs cs' /\
  sis_progress cs cs' /\
  writes_ok_sis psall cs' /\
+ (∀var. MEM var (FLAT (MAP vwrites ps)) ⇒ IS_SOME (cget_net_var [HD cs'.bsi] var)) ∧
  netlist_ok EEv cs.tmpnum cs'.tmpnum nl /\
  netlist_sorted nl /\
  ?cenv'.
   sum_foldM (cell_run rtlfext) cenv nl = INR cenv' /\
   cstate_ok rtlfext EEv Ev cs' cenv' /\
   !vs. ?fbits.
-   case mstep vfext ps (vs with fbits := fbits) of
+   case sum_foldM (prun vfext) (vs with fbits := fbits) ps of
      INL e => T
    | INR vs' => same_state_sis rtlfext vs cs cenv /\ vertype_env Ev vs ==> same_state_sis rtlfext vs' cs' cenv'
 Proof
+ rewrite_tac [EVERY_preprocessed] \\ (* <-- backwards compat. should probably be moved *)
  Induct
- >- (rw [compile_stmts_def, mstep_def, sum_foldM_def, cstate_progress_def, sis_progress_def, si_progress_def, netlist_ok_def, netlist_sorted_def] \\
+ >- (rw [compile_stmts_def, sum_foldM_def, cstate_progress_def, sis_progress_def, si_progress_def, netlist_ok_def, netlist_sorted_def] \\
      rw [sum_foldM_def] \\ metis_tac [pstate_fbits_fbits]) \\
 
  rpt strip_tac' \\ fs [compile_stmts_def, sum_bind_INR] \\ rpt (pairarg_tac \\ fs [sum_bind_INR]) \\ rveq \\
@@ -2415,21 +2583,22 @@ Proof
  >- fs [cstate_progress_def]
  >- fs [sis_progress_def, si_progress_def]
  >- simp []
+ >- (fs [sis_progress_def, si_progress_def] \\ metis_tac [])
  >- (simp [netlist_ok_append] \\ conj_tac \\ match_mp_tac netlist_ok_le \\ asm_exists_tac \\ fs [cstate_progress_def])
  >- metis_tac [netlist_sorted_append] \\
 
  simp [sum_foldM_append, sum_bind_def] \\
  gen_tac \\ last_x_assum (qspec_then ‘vs’ strip_assume_tac) \\
- pop_assum mp_tac \\ TOP_CASE_TAC >- (qexists_tac ‘fbits’ \\ TOP_CASE_TAC \\ fs [mstep_step] \\ fs []) \\ strip_tac \\
+ pop_assum mp_tac \\ TOP_CASE_TAC >- (qexists_tac ‘fbits’ \\ TOP_CASE_TAC \\ gs [sum_foldM_INR]) \\ strip_tac \\
  drule_strip prun_fbits \\
 
  first_x_assum (qspec_then ‘y’ strip_assume_tac) \\ qexists_tac ‘replace_prefix fbits' fbits n’ \\ pop_assum mp_tac \\
  first_x_assum (qspec_then ‘replace_prefix fbits' fbits n’ mp_tac) \\ 
  simp [init_seq_eq_replace_prefix, shift_seq_replace_prefix] \\ strip_tac \\
 
- TOP_CASE_TAC >- (TOP_CASE_TAC \\ fs [mstep_step] \\ fs [] \\ rfs []) \\ strip_tac \\
+ TOP_CASE_TAC >- (TOP_CASE_TAC \\ gs [sum_foldM_INR]) \\ strip_tac \\
 
- TOP_CASE_TAC \\ fs [mstep_step] \\ fs [] \\ rfs [] \\ rveq \\ strip_tac \\ rpt drule_first \\
+ TOP_CASE_TAC \\ gvs [sum_foldM_INR] \\ strip_tac \\ rpt drule_first \\
  metis_tac [vertype_stmt_prun, vertype_env_fbits]
 QED
 
@@ -2443,6 +2612,44 @@ Proof
  every_case_tac \\ drule_first \\ rfs []
 QED*)
 
+Triviality IS_SOME_cget_net_var_HD:
+ ∀si var. si_wf si ⇒ IS_SOME (cget_net_var [HD si] var) ⇒  IS_SOME (cget_net_var si var)
+Proof
+ Cases \\ rw [si_wf_def, cget_net_var_def] \\ TOP_CASE_TAC \\ fs []
+QED
+
+Theorem regs_ok_compile_regs:
+ !decls pseudos fext EEv Ev s s' cenv cenv'.
+ cstate_ok fext EEv Ev s cenv ∧
+ cstate_ok fext EEv Ev s' cenv' ∧
+ s.tmpnum ≤ s'.tmpnum ∧
+ EVERY (λ(var, data). OPTION_ALL (λv. vertype_v v data.type) data.init) decls ⇒
+ (*(∀var. pseudos ⇒ IS_SOME (cget_net_var [HD s.bsi] var)) ⇒*)
+ regs_ok EEv s.tmpnum s'.tmpnum (compile_regs pseudos s.bsi s'.bsi s'.nbsi decls)
+Proof
+ Induct \\ TRY PairCases \\ fs [compile_regs_def, regs_ok_def, reg_ok_def, compile_reg_def] \\ rpt strip_tac
+ >- (Cases_on ‘h1.init’ \\ fs [has_rtltype_v_correct, rtltype_v_compile_value_compile_type])
+ (*>- (IF_CASES_TAC \\ fs [verilogWriteCheckerTheory.compute_writes_bw_correct, cstate_ok_def, IS_SOME_cget_net_var_HD])*)
+ >- (fs [cstate_ok_def, si_lt_def, OPTION_ALL_alt] \\ every_case_tac \\ rw [] \\ metis_tac [cell_input_lt_le])
+ >- (fs [cstate_ok_def, si_sound_def, OPTION_ALL_alt] \\ every_case_tac \\ rw [] \\ metis_tac [cell_input_lt_le])
+ \\ metis_tac []
+QED
+
+Theorem mem_compile_reg:
+ !decls var pseudos bsi bsi' nbsi.
+ MEM var (MAP reg_name (MAP (compile_reg pseudos bsi bsi' nbsi) decls)) <=> MEM var (MAP FST decls)
+Proof
+ rw [MAP_MAP_o] \\ rw [MEM_MAP] \\ eq_tac \\ rpt strip_tac \\ rveq \\ PairCases_on ‘y’ \\ asm_exists_any_tac \\
+ simp [compile_reg_def] \\ every_case_tac \\ simp [reg_name_def]
+QED
+
+Theorem regs_distinct_compile_regs:
+ !decls pseudos bsi bsi' nbsi.
+ ALL_DISTINCT (MAP FST decls) ==> regs_distinct (compile_regs pseudos bsi bsi' nbsi decls)
+Proof
+ Induct \\ TRY PairCases \\ fs [regs_distinct_def, compile_regs_def, compile_reg_def, reg_name_def, mem_compile_reg]
+QED
+
 Triviality compile_regs_alookup_lem:
  !decls var.
  ~MEM var (MAP (λ(t,var,v). var) decls) ==> ALOOKUP (MAP (λ(ty,var,v). (var,ty)) decls) var = NONE
@@ -2450,55 +2657,75 @@ Proof
  Induct \\ TRY PairCases \\ rw []
 QED
 
-Triviality compile_regs_alookup_lem_SOME:
+(*Triviality compile_regs_alookup_lem_SOME:
  !decls t var v.
  MEM (t, var, v) decls /\ ALL_DISTINCT (MAP (λ(t,var,v). var) decls) ==> ALOOKUP (MAP (λ(ty,var,v). (var,ty)) decls) var = SOME t
 Proof
  Induct \\ TRY PairCases \\ rw [ALOOKUP_def]
  >- (fs [MEM_MAP] \\ first_x_assum (qspec_then ‘(t, h1, v)’ strip_assume_tac) \\ fs [])
  >- drule_first
-QED
+QED*)
 
 Triviality compile_regs_correct_lem:
- !(bsi : si_t list) nbsi fext decls cenvnet cenvreg (EEv : extenvt) Ev.
+ !(bsi : si_t list) bsi' nbsi pseudos fext decls cenvnet cenvreg (EEv : extenvt) Ev.
  Ev_covers_decls Ev decls /\
- ALL_DISTINCT (MAP (λ(t,var,v). var) decls) /\
+ ALL_DISTINCT (MAP FST decls) /\
  si_sound fext EEv Ev cenvnet bsi /\
  si_sound fext EEv Ev cenvnet nbsi ==>
- ?cenv'. sum_foldM (reg_run fext cenvnet) cenvreg (compile_regs bsi nbsi decls) = INR cenv' /\
+ ?cenv'. sum_foldM (reg_run fext cenvnet) cenvreg
+                   (FILTER (λ(var,data). data.reg_type = Reg) (compile_regs pseudos bsi' bsi nbsi decls)) = INR cenv' /\
          (!var varnum.
            if varnum = 0 then
-            (case ALOOKUP (MAP (λ(ty, var, v). (var, ty)) decls) var of
-             SOME ty =>
-              (case cget_net_var nbsi var of
-                 NONE => (case cget_net_var bsi var of
-                            NONE => cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum)
-                          | SOME inp => cget_var cenv' (RegVar var varnum) = cell_inp_run fext cenvnet inp)
-               | SOME inp => cget_var cenv' (RegVar var varnum) = cell_inp_run fext cenvnet inp)
+            (case ALOOKUP decls var of
+             SOME _ =>
+              if member string_cmp var pseudos then
+               cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum)
+              else
+               (case cget_net_var nbsi var of
+                  NONE => (case cget_net_var bsi var of
+                             NONE => cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum)
+                           | SOME inp => cget_var cenv' (RegVar var varnum) = cell_inp_run fext cenvnet inp)
+                | SOME inp => cget_var cenv' (RegVar var varnum) = cell_inp_run fext cenvnet inp)
            | NONE => cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum))
            else
             cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum))
 Proof
- ntac 3 gen_tac \\ Induct \\ TRY PairCases \\
+ ntac 5 gen_tac \\ Induct \\ TRY PairCases \\
  fs [Ev_covers_decls_cons, compile_regs_def, sum_foldM_def, sum_bind_INR] \\
- rw [compile_reg_def, reg_run_def] \\ TOP_CASE_TAC \\ pop_assum mp_tac \\ TOP_CASE_TAC \\ TRY TOP_CASE_TAC
+ simp [compile_reg_def] \\ rpt gen_tac \\
 
- >- (drule_first \\ first_x_assum (qspecl_then [‘cenvreg’] strip_assume_tac) \\
-    asm_exists_tac \\ rw []
-    >- (first_x_assum (qspecl_then [‘h1’, ‘0’] mp_tac) \\ drule_strip compile_regs_alookup_lem \\ simp [])
-    >- (first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [])
-    >- (first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\ simp []))
+ rpt strip_tac' \\ drule_first \\
 
- \\ strip_tac \\ rveq \\ drule_first \\ fs [si_sound_def] \\ drule_first \\
-    fs [sum_bind_INR, has_rtltype_v_correct, alist_to_map_alookup] \\ rveq \\
-    drule_strip same_type_compile_type \\ simp [] \\
-    qmatch_goalsub_abbrev_tac `sum_foldM _ cenvreg' _ = _` \\
-    first_x_assum (qspec_then ‘cenvreg'’ strip_assume_tac) \\
-    qunabbrev_tac ‘cenvreg'’ \\ asm_exists_tac \\ (rw []
-    >- (first_x_assum (qspecl_then [‘h1’, ‘0’] mp_tac) \\ drule_strip compile_regs_alookup_lem \\
-        simp [cget_var_cset_var])
-    >- (first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [cget_var_cset_var])
-    >- (first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\ simp [cget_var_cset_var]))
+ CASE_TAC >- (first_x_assum (qspec_then ‘cenvreg’ strip_assume_tac) \\
+              asm_exists_tac \\ 
+              rpt gen_tac \\ first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\
+              rw [] \\ gs [GSYM ALOOKUP_NONE]) \\
+
+ simp [sum_foldM_def, reg_run_def] \\
+ reverse CASE_TAC >- (fs [si_sound_def] \\ drule_first \\ simp [sum_bind_def, has_rtltype_v_correct] \\
+                      drule_strip same_type_compile_type \\ gvs [] \\ simp [sum_bind_def] \\
+
+                      qmatch_goalsub_abbrev_tac `sum_foldM _ cenvreg' _ = _` \\
+                      first_x_assum (qspec_then ‘cenvreg'’ strip_assume_tac) \\
+                      qunabbrev_tac ‘cenvreg'’ \\ asm_exists_tac \\
+
+                      rpt gen_tac \\ first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\
+                      rw [] \\ gs [cget_var_cset_var, GSYM ALOOKUP_NONE]) \\
+
+ CASE_TAC >- (first_x_assum (qspec_then ‘cenvreg’ strip_assume_tac) \\
+              simp [sum_bind_def] \\
+              rpt gen_tac \\ first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\
+              rw [] \\ gs [GSYM ALOOKUP_NONE]) \\
+
+ fs [si_sound_def] \\ drule_first \\ simp [sum_bind_def, has_rtltype_v_correct] \\
+ drule_strip same_type_compile_type \\ gvs [] \\ simp [sum_bind_def] \\
+
+ qmatch_goalsub_abbrev_tac `sum_foldM _ cenvreg' _ = _` \\
+ first_x_assum (qspec_then ‘cenvreg'’ strip_assume_tac) \\
+ qunabbrev_tac ‘cenvreg'’ \\ asm_exists_tac \\
+
+ rpt gen_tac \\ first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\
+ rw [] \\ gs [cget_var_cset_var, GSYM ALOOKUP_NONE]
 QED
 
 Theorem writes_ok_no_overlap:
@@ -2511,95 +2738,169 @@ Proof
  rw [writes_ok_def, writes_ok_sis_def] \\ metis_tac [optionTheory.option_CLAUSES]
 QED
 
-Theorem regs_ok_compile_regs:
- !decls fext EEv Ev s cenv.
- cstate_ok fext EEv Ev s cenv /\ EVERY (λ(t, var, v). OPTION_ALL (\v. vertype_v v t) v) decls ==>
- regs_ok EEv s.tmpnum (compile_regs s.bsi s.nbsi decls)
+(* back comp. *)
+Triviality Ev_from_decls_not_in_decls:
+ ∀var decls. ALOOKUP decls var = NONE ⇔ (Ev_from_decls decls) var = NONE
 Proof
- Induct \\ TRY PairCases \\ fs [compile_regs_def, regs_ok_def] \\ rw [reg_ok_def, compile_reg_def]
- >- (Cases_on ‘h2’ \\ fs [has_rtltype_v_correct, rtltype_v_compile_value_compile_type])
- >- (fs [cstate_ok_def, si_lt_def] \\ every_case_tac \\ rw [] \\ drule_first)
- >- (fs [cstate_ok_def, si_sound_def] \\ every_case_tac \\ rw [] \\ drule_first)
- \\ drule_first
-QED
-
-Theorem mem_compile_reg:
- !decls var bsi nbsi.
- MEM var (MAP reg_name (MAP (compile_reg bsi nbsi) decls)) <=> MEM var (MAP (λ(t,var,v). var) decls)
-Proof
- rw [MAP_MAP_o] \\ rw [MEM_MAP] \\ eq_tac \\ rpt strip_tac \\ rveq \\ PairCases_on ‘y’ \\ asm_exists_any_tac \\
- simp [compile_reg_def] \\ every_case_tac \\ simp [reg_name_def]
-QED
-
-Theorem regs_distinct_compile_regs:
- !decls bsi nbsi. ALL_DISTINCT (MAP (λ(t,var,v). var) decls) ==> regs_distinct (compile_regs bsi nbsi decls)
-Proof
- Induct \\ TRY PairCases \\ fs [regs_distinct_def, compile_regs_def, compile_reg_def, reg_name_def, mem_compile_reg]
+ simp [Ev_from_decls_def, alist_to_map_alookup, ALOOKUP_MAP]
 QED
 
 Theorem compile_regs_correct:
- !cenvnet cenvreg decls ps nl rtlfext vfext s (EEv : extenvt).
+ !cenvnet cenvreg decls ffs rtlfext s (EEv : extenvt) bsi pseudos.
 
- sum_foldM (cell_run rtlfext) cenvreg nl = INR cenvnet /\ (* <-- overly specific, but easy to drule with *)
+ ALL_DISTINCT (MAP FST decls) /\
+ EVERY (λ(var, data). OPTION_ALL (\v. vertype_v v data.type) data.init) decls /\
+ (* actually cenvreg important, but can resolve this in the proof: *)
+ (!fext. si_complete fext (Ev_from_decls decls) cenvnet [empty]) /\
 
- ALL_DISTINCT (MAP (λ(t,var,v). var) decls) /\
- EVERY (λ(t, var, v). OPTION_ALL (\v. vertype_v v t) v) decls /\
- (!fext. si_complete fext (Ev_from_decls decls) cenvreg [empty]) /\
+ cstate_ok rtlfext EEv (Ev_from_decls decls) s cenvnet ∧ (* only depend on si_sound currently *)
 
- cstate_ok rtlfext EEv (Ev_from_decls decls) s cenvnet /\
+ (* maybe also no non-blocking writes? *)
+ (∀var. member string_cmp var pseudos ⇒ ~MEM var (FLAT (MAP vwrites ffs)) ∧
+                                        ~MEM var (FLAT (MAP vnwrites ffs))) ∧
 
- writes_ok ps /\
- writes_ok_sis ps s ==>
- regs_ok EEv s.tmpnum (compile_regs s.bsi s.nbsi decls) /\
- regs_distinct (compile_regs s.bsi s.nbsi decls) /\
- ?cenv. sum_foldM (reg_run rtlfext cenvnet) cenvreg (compile_regs s.bsi s.nbsi decls) = INR cenv /\
+ writes_ok ffs /\
+ writes_ok_sis ffs s ∧
+ (∀reg i. cget_var cenvreg (RegVar reg i) = cget_var cenvnet (RegVar reg i)) ⇒
+ (*regs_ok EEv s.tmpnum (compile_regs s.bsi s.nbsi decls combs) /\
+ regs_distinct (compile_regs s.bsi s.nbsi decls combs) /\*)
+ ?cenv. sum_foldM (reg_run rtlfext cenvnet) cenvreg
+                  (FILTER (λ(var,data). data.reg_type = Reg) (compile_regs pseudos bsi s.bsi s.nbsi decls)) = INR cenv /\
         (!fext. si_complete fext (Ev_from_decls decls) cenv [empty]) /\
-        (!venv venv'.
-        mstep vfext ps venv = INR venv' /\ (* <-- again, overly specific *)
+        (!venv venv' vfext.
+        (*mstep vfext ffs venv = INR venv' /\ (* <-- again, overly specific *)*)
+        sum_foldM (prun vfext) venv ffs = INR venv' ∧
         venv.nbq = [] /\
         same_state_bsi rtlfext venv'.vars cenvnet s.bsi /\
         same_state_nbsi rtlfext venv'.nbq cenvnet s.nbsi /\
         same_state (venv.nbq ++ venv.vars) cenvreg ==>
         same_state (venv'.nbq ++ venv'.vars) cenv)
 Proof
- rpt strip_tac >- drule_strip regs_ok_compile_regs >- simp [regs_distinct_compile_regs] \\
+ rewrite_tac [cstate_ok_def] \\
 
- fs [cstate_ok_def] \\ 
+ rpt strip_tac \\
  drule_strip Ev_covers_decls_Ev_from_decls \\
- qspecl_then [‘s.bsi’, ‘s.nbsi’] assume_tac compile_regs_correct_lem \\ drule_first \\
- first_x_assum (qspec_then `cenvreg` strip_assume_tac) \\ asm_exists_tac \\
+ qspecl_then [‘s.bsi’, ‘bsi’, ‘s.nbsi’, ‘pseudos’] assume_tac compile_regs_correct_lem \\ drule_first \\
+ first_x_assum (qspecl_then [‘cenvreg’] strip_assume_tac) \\ asm_exists_tac \\
  
  conj_tac >-
  (fs [si_complete_def, cget_net_empty] \\ rpt strip_tac \\
   drule_first \\ first_x_assum (qspec_then ‘fext’ strip_assume_tac) \\
   first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ every_case_tac \\
   fs [cell_inp_run_def] \\ strip_tac \\ rpt asm_exists_tac \\ fs [si_sound_def] \\
-  rpt drule_first \\ fs [sum_bind_def, cget_fext_var_def] \\ metis_tac [same_type_deterministic]) \\
+  rpt drule_first \\ fs [sum_bind_def, cget_fext_var_def] \\ TRY (metis_tac [same_type_deterministic])) \\
 
  drule_strip regs_run_cget_var_NetVar \\
- drule_strip cells_run_cget_var_RegVar \\
+ (*drule_strip cells_run_cget_var_RegVar \\*)
  rpt strip_tac \\ fs [same_state_def, sum_alookup_append] (*, GSYM get_var_sum_alookup, GSYM get_nbq_var_sum_alookup]*) \\
  rpt gen_tac \\ TOP_CASE_TAC \\ strip_tac
 
- >- (fs [same_state_bsi_def] \\ drule_first \\ last_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [] \\ rpt TOP_CASE_TAC
+ >- (fs [same_state_bsi_def] \\ drule_first \\ first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [] \\ rpt TOP_CASE_TAC
     >- (fs [Ev_from_decls_not_in_decls] \\ Cases_on ‘cget_net_var s.bsi var’
        >- (fs [cget_net_def, cell_inp_run_def, sum_bind_INR, cget_fext_var_def] \\ metis_tac [])
        \\ fs [cget_net_def, si_sound_def] \\ drule_first \\ fs [alist_to_map_alookup])
-    >- (fs [cget_net_def, cell_inp_run_def, sum_bind_INR, cget_fext_var_def] \\ metis_tac [])
+    >- (strip_tac \\ drule_first \\ gs [] \\ first_x_assum irule \\ drule_strip pruns_same_after \\
+        fs [EVERY_MEM_MEM_FLAT_MAP, get_var_sum_alookup])
     >- (fs [cget_net_def, cell_inp_run_def, sum_bind_INR, cget_fext_var_def] \\ metis_tac [])
     \\ fs [same_state_nbsi_def] \\ drule_first \\ rfs [cget_net_def] \\
        fs [si_sound_def] \\ drule_first \\
        fs [cell_inp_run_def] \\ qpat_x_assum ‘INR _ = _’ (assume_tac o GSYM) \\ rfs [sum_bind_INR, sum_bind_def, cget_fext_var_def] \\
        strip_tac \\ drule_strip writes_ok_no_overlap \\ drule_first \\ fs [cell_inp_run_def, sum_bind_INR, cget_fext_var_def] \\ rfs [] \\ fs [])
 
- \\ rveq \\ fs [same_state_nbsi_def] \\ drule_first \\ last_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [] \\ rpt TOP_CASE_TAC
+ \\ rveq \\ fs [same_state_nbsi_def] \\ drule_first \\ first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [] \\ rpt TOP_CASE_TAC
     >- (fs [Ev_from_decls_not_in_decls] \\ Cases_on ‘cget_net_var s.nbsi var’
        >- (fs [cget_net_def, cell_inp_run_def, sum_bind_INR, cget_fext_var_def] \\ metis_tac [])
        \\ fs [cget_net_def, si_sound_def] \\ drule_first \\ fs [alist_to_map_alookup])
+    >- (strip_tac \\ drule_first \\ drule_strip pruns_same_after \\
+        gs [EVERY_MEM_MEM_FLAT_MAP, get_nbq_var_sum_alookup])
     >- (fs [cget_net_def, cell_inp_run_def, sum_bind_INR, cget_fext_var_def] \\ metis_tac [])
-    >- (strip_tac \\ drule_strip mrun_get_nbq_var_INR \\ simp [get_nbq_var_sum_alookup, sum_alookup_nil] \\ disch_then drule_strip \\
+    >- (strip_tac \\ drule_strip pruns_get_nbq_var_INR \\ simp [get_nbq_var_sum_alookup, sum_alookup_nil] \\ disch_then drule_strip \\
         fs [writes_ok_sis_def] \\ drule_first \\ fs [writes_ok_def] \\ metis_tac [])
     \\ strip_tac \\ fs [cget_net_def]
+QED
+
+Triviality compile_regs_correct_PseudoRegs_lem:
+ !(bsi : si_t list) bsi' nbsi pseudos fext decls cenvnet cenvreg (EEv : extenvt) Ev.
+ Ev_covers_decls Ev decls /\
+ ALL_DISTINCT (MAP FST decls) /\
+ si_sound fext EEv Ev cenvnet bsi ⇒
+ (*(∀var. MEM var (FLAT (MAP vwrites combs)) ⇒ cget_net_var bsi' var = NONE) ==>*)
+ ?cenv'. sum_foldM (reg_run fext cenvnet)
+                   cenvreg 
+                   (FILTER (λ(var,data). data.reg_type = PseudoReg) (compile_regs pseudos bsi bsi' nbsi decls)) = INR cenv' /\
+         (!var varnum.
+           if varnum = 0 then
+            (case ALOOKUP decls var of
+             SOME _ =>
+              if member string_cmp var pseudos then
+               (case cget_net_var bsi var of
+                  NONE => cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum)
+                | SOME inp => cget_var cenv' (RegVar var varnum) = cell_inp_run fext cenvnet inp)
+              else
+               cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum)
+           | NONE => cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum))
+           else
+            cget_var cenv' (RegVar var varnum) = cget_var cenvreg (RegVar var varnum))
+Proof
+ ntac 5 gen_tac \\ Induct \\ TRY PairCases \\ 
+ simp [compile_regs_def, compile_reg_def, sum_foldM_def, Ev_covers_decls_cons] \\
+ rpt strip_tac' \\ 
+ reverse CASE_TAC >- (drule_first \\
+                      first_x_assum (qspec_then ‘cenvreg’ strip_assume_tac) \\ fs [compile_regs_def] \\ 
+                      rpt gen_tac \\ first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\
+                      rw [] \\ gs [GSYM ALOOKUP_NONE]) \\
+ simp [sum_foldM_INR, reg_run_def] \\
+ TOP_CASE_TAC >- (* duplication *) (drule_last \\
+                                    first_x_assum (qspec_then ‘cenvreg’ strip_assume_tac) \\ fs [compile_regs_def] \\ 
+                                    rpt gen_tac \\ first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\
+                                    rw [] \\ gs [GSYM ALOOKUP_NONE]) \\
+ drule_last \\ fs [si_sound_def] \\ rpt drule_first \\ drule_strip same_type_compile_type \\
+ gvs [sum_bind_def, has_rtltype_v_correct] \\
+ qmatch_goalsub_abbrev_tac ‘sum_foldM _ cenvreg' _’ \\ first_x_assum (qspec_then ‘cenvreg'’ strip_assume_tac) \\
+ unabbrev_all_tac \\ fs [compile_regs_def] \\
+ rpt gen_tac \\ first_x_assum (qspecl_then [‘var’, ‘varnum’] mp_tac) \\
+ rw [] \\ gs [GSYM ALOOKUP_NONE, cget_var_cset_var]
+QED
+
+Theorem compile_regs_correct_PsuedoRegs:
+ !cenv decls combs rtlfext s s' (EEv : extenvt) pseudos.
+ ALL_DISTINCT (MAP FST decls) /\
+ EVERY (λ(var, data). OPTION_ALL (\v. vertype_v v data.type) data.init) decls /\
+ EVERY (vertype_stmt EEv (Ev_from_decls decls)) combs /\
+ 
+ si_sound rtlfext EEv (Ev_from_decls decls) cenv s.bsi ∧
+
+ (!fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ∧
+
+ (∀var. MEM var (FLAT (MAP vwrites combs)) ⇒ member string_cmp var pseudos) ⇒
+
+ (* writes stuff *)
+ (*(∀var. MEM var (FLAT (MAP vwrites combs)) ⇒ cget_net_var s'.bsi var = NONE) ⇒ *)
+ ?cenv'. sum_foldM (reg_run rtlfext cenv) cenv 
+                   (FILTER (λ(var,data). data.reg_type = PseudoReg)
+                           (compile_regs pseudos s.bsi s'.bsi s'.nbsi decls)) = INR cenv' /\
+         (!fext. si_complete fext (Ev_from_decls decls) cenv' [empty]) /\
+         (!venv venv' vfext.
+         sum_foldM (prun vfext) venv combs = INR venv' ∧ (* <-- overly specific (probably?) *)
+         same_state_bsi rtlfext venv'.vars cenv s.bsi /\
+         same_state venv.vars cenv ==>
+         same_state venv'.vars cenv')
+Proof
+ rpt strip_tac \\
+ drule_strip Ev_covers_decls_Ev_from_decls \\
+ qspecl_then [‘s.bsi’, ‘s'.bsi’, ‘s'.nbsi’, ‘pseudos’] assume_tac compile_regs_correct_PseudoRegs_lem \\
+ drule_first \\ first_x_assum (qspecl_then [‘cenv’] strip_assume_tac) \\ asm_exists_tac \\
+ conj_tac >- (fs [si_complete_def, si_sound_def, cget_net_empty, cell_inp_run_def] \\ rpt strip_tac \\
+              drule_first \\ fs [Ev_from_decls_def, alist_to_map_alookup, ALOOKUP_MAP] \\
+              first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [] \\
+              every_case_tac \\ rw [] \\ rpt asm_exists_tac \\ rpt drule_first \\ gvs [] \\ metis_tac []) \\
+ simp [same_state_def, same_state_bsi_def] \\ rpt strip_tac \\ drule_first \\
+ first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [] \\ TOP_CASE_TAC
+ >- (strip_tac \\ fs [GSYM get_var_sum_alookup] \\
+     metis_tac [vertype_stmts_writes, pruns_same_after, Ev_from_decls_not_in_decls, EVERY_MEM_MEM_FLAT_MAP])
+ \\ TOP_CASE_TAC
+ >- (TOP_CASE_TAC \\ fs [cget_net_def, cell_inp_run_def])
+ \\ strip_tac \\ drule_strip pruns_same_after \\ fs [get_var_sum_alookup, EVERY_MEM_MEM_FLAT_MAP] \\ metis_tac []
 QED
 
 Theorem same_state_same_state_bsi:
@@ -2617,123 +2918,312 @@ QED
 Theorem cstate_vertypes_sound_Ev_from_decls:
  !decls. cstate_vertypes_sound (Ev_from_decls decls) decls
 Proof
- rw [cstate_vertypes_sound_def, decls_type_sum_alookup, sum_alookup_INR, Ev_from_decls_def, alist_to_map_alookup]
+ rw [cstate_vertypes_sound_def, decls_type_INR, Ev_from_decls_def] \\ rw [alist_to_map_alookup, ALOOKUP_MAP]
+QED
+
+Triviality same_state_bsi_ffs_lem:
+ sum_foldM (cell_run fext) cenv' nl_ffs = INR cenv'' ∧
+ netlist_ok EEv s_combs.tmpnum s.tmpnum nl_ffs ∧
+ cstate_ok fext EEv (Ev_from_decls decls) s_combs cenv' ∧
+ same_state_sis fext venv s_combs cenv' ⇒
+ same_state_bsi fext venv.vars cenv'' s_combs.bsi
+Proof
+ rw [cstate_ok_def, same_state_sis_def, same_state_bsi_def] \\ drule_first \\
+ imp_res_tac cells_run_unchanged_netlist_ok_cget_net \\ simp []
+QED
+
+Theorem cells_run_same_state:
+ sum_foldM (cell_run fext) s nl = INR s' ∧ same_state cenv s ⇒ same_state cenv s'
+Proof
+ rw [same_state_def] \\ drule_first \\ drule_strip cells_run_cget_var_RegVar \\ simp []
+QED
+
+Theorem cells_run_si_complete_empty:
+ ∀nl fext cenv cenv' Ev.
+ sum_foldM (cell_run fext) cenv nl = INR cenv' ∧
+ (∀fext. si_complete fext Ev cenv [empty]) ⇒
+ (∀fext. si_complete fext Ev cenv' [empty])
+Proof
+ rw [si_complete_def, cget_net_empty, cell_inp_run_def] \\ metis_tac [cells_run_cget_var_RegVar]
+QED
+
+Theorem compile_stmts_correct_step:
+ !decls combs s_combs nl_combs ffs s nl_ffs rtlfext vfext cenv pseudos EEv.
+ let regs = compile_regs pseudos s_combs.bsi s.bsi s.nbsi decls in
+ compile_stmts <| bsi := [empty]; nbsi := [empty]; vertypes := decls; tmpnum := 0 |> combs = INR (s_combs, nl_combs) /\
+ compile_stmts (s_combs with <| bsi := [empty]; nbsi := [empty] |>) ffs = INR (s, nl_ffs) /\
+
+ ALL_DISTINCT (MAP FST decls) /\ (* <-- can say regs_distinct here... *)
+ EVERY (λ(var, data). OPTION_ALL (λv. vertype_v v data.type) data.init) decls /\
+
+ writes_ok combs /\
+ writes_ok ffs ∧
+
+ (∀var. member string_cmp var pseudos ⇒ ~MEM var (FLAT (MAP vwrites ffs)) ∧
+                                        ~MEM var (FLAT (MAP vnwrites ffs))) ∧
+
+ same_fext_n vfext rtlfext /\
+ vertype_fext_n EEv vfext /\
+
+ EVERY (preprocessed (Ev_from_decls decls)) ffs ∧
+ EVERY (vertype_stmt EEv (Ev_from_decls decls)) ffs /\
+
+ EVERY (preprocessed (Ev_from_decls decls)) combs ∧
+ EVERY (vertype_stmt EEv (Ev_from_decls decls)) combs /\
+ 
+ (!fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ∧
+ (∀var. MEM var (FLAT (MAP vwrites combs)) ⇒ member string_cmp var pseudos) ==>
+ s_combs.tmpnum ≤ s.tmpnum ∧
+ netlist_ok EEv 0 s_combs.tmpnum nl_combs ∧
+ netlist_ok EEv s_combs.tmpnum s.tmpnum nl_ffs /\
+ netlist_sorted (nl_combs ++ nl_ffs) /\
+ regs_ok EEv s_combs.tmpnum s.tmpnum regs /\
+ regs_distinct regs /\
+ ?cenv' cenv''.
+  netlist_step rtlfext cenv nl_combs nl_ffs regs = INR cenv' /\
+  (!fext. si_complete fext (Ev_from_decls decls) cenv' [empty]) /\
+  (* since we move the evaluation of reg's inps one step before Verilog: *)
+  sum_foldM (reg_run rtlfext cenv')
+            (cenv' with env := FILTER (is_RegVar o FST) cenv'.env)
+            (FILTER (λ(var,data). data.reg_type = Reg) regs) = INR cenv'' ∧
+  (!fext. si_complete fext (Ev_from_decls decls) cenv'' [empty]) /\ (* <-- might want to move this... *)
+  !venv. ?fbits.
+   case mstep_combs vfext fbits combs venv of
+     INL e => T
+   | INR (venv', fbits') =>
+      same_state venv cenv /\ vertype_list (Ev_from_decls decls) venv ⇒
+      same_state venv' cenv' ∧
+      (case mstep_ffs vfext fbits' ffs venv' of
+         INL e => T
+       | INR (venv'', fbits'') => same_state venv'' cenv'')
+Proof
+ simp [mstep_combs_def, netlist_step_def] \\ rpt strip_tac' \\
+
+ last_x_assum assume_tac \\
+ drule_strip compile_stmts_correct_cells_run \\
+ disch_then (qspec_then `combs` mp_tac) \\ simp [memsublist_sym] \\
+ disch_then drule_strip \\ simp [] \\
+ disch_then (qspec_then `cenv` mp_tac) \\
+ impl_tac >- fs [vertype_fext_vertype_fext_n, writes_ok_sis_def, cget_net_var_empty,
+                 cstate_ok_def, si_wf_empty, si_sound_empty, si_lt_empty, cstate_vertypes_sound_Ev_from_decls] \\
+ strip_tac \\
+
+ drule_strip compile_regs_correct_PsuedoRegs \\
+ disch_then (qspecl_then [‘cenv'’, ‘rtlfext’, ‘s_combs’, ‘s’, ‘pseudos’] mp_tac) \\
+ impl_tac >- (imp_res_tac cells_run_cget_var_RegVar \\
+              fs [si_complete_def, cget_net_empty, cell_inp_run_def] \\
+              fs [si_sound_def, cstate_ok_def] \\ metis_tac []) \\
+ strip_tac \\
+
+ last_x_assum assume_tac \\
+ drule_strip compile_stmts_correct_cells_run \\
+ disch_then (qspec_then `ffs` mp_tac) \\ simp [memsublist_sym] \\
+ disch_then drule_strip \\ simp [] \\
+ disch_then (qspec_then `cenv''` mp_tac) \\
+ impl_tac >- (fs [vertype_fext_vertype_fext_n, writes_ok_sis_def, cget_net_var_empty,
+                  cstate_ok_def, si_wf_empty, si_sound_empty, si_lt_empty, cstate_vertypes_sound_Ev_from_decls]) \\
+
+ rw []
+ >- fs [cstate_progress_def]
+ (*>- (rw [netlist_ok_append] \\ irule netlist_ok_le \\ asm_exists_any_tac \\ fs [cstate_progress_def])*)
+ >- metis_tac [netlist_sorted_append]
+ >- (match_mp_tac regs_ok_compile_regs \\ rpt asm_exists_tac \\ fs [cstate_progress_def])
+ >- (drule_strip regs_distinct_compile_regs \\ simp []) \\
+
+ drule_strip cells_run_si_complete_empty \\
+ simp [sum_bind_def] \\
+
+ drule_strip compile_regs_correct \\
+ qmatch_goalsub_abbrev_tac ‘sum_foldM _ cenvreg _’ \\
+ disch_then (qspecl_then [‘cenvreg’, ‘s_combs.bsi’] strip_assume_tac) \\
+ unabbrev_all_tac \\
+ pop_assum mp_tac \\ impl_tac >- simp [cget_var_def, ALOOKUP_FILTER_FST, is_RegVar_def] \\ strip_tac \\
+ rpt asm_exists_tac \\
+
+ gen_tac \\
+ last_x_assum (qspec_then ‘<| vars := venv; nbq := [] |>’ strip_assume_tac) \\
+ pop_assum mp_tac \\ TOP_CASE_TAC >- (qexists_tac ‘fbits’ \\ fs [sum_bind_def]) \\ strip_tac \\
+ drule_strip pruns_fbits \\
+ qpat_x_assum ‘∀vs. ∃fbits. _’ (qspec_then ‘<|vars := y.vars; nbq := []; fbits := y.fbits|>’ strip_assume_tac) \\
+
+ (* fbits for n steps + fbits' for the rest *)
+ qexists_tac ‘replace_prefix fbits' fbits n’ \\
+ first_x_assum (qspec_then ‘replace_prefix fbits' fbits n’ mp_tac) \\
+ impl_tac >- simp [init_seq_eq_replace_prefix] \\ simp [sum_bind_def] \\ rpt strip_tac' \\
+     
+ qpat_x_assum ‘_ ⇒ _’ mp_tac \\
+ impl_tac >- (simp [same_state_sis_def, same_state_bsi_def, same_state_nbsi_def, cget_net_empty, cell_inp_run_def,
+                    vertype_env_vertype_list, vertype_list_nil] \\ fs [same_state_def]) \\ strip_tac \\
+     
+ drule_first \\ impl_tac >- (fs [same_state_sis_def] \\ metis_tac [cells_run_same_state]) \\
+ simp [shift_seq_replace_prefix] \\ strip_tac \\
+
+ conj_asm1_tac >- metis_tac [cells_run_same_state] \\
+
+ TOP_CASE_TAC \\ TOP_CASE_TAC \\
+ gvs [shift_seq_replace_prefix, mstep_ffs_def, sum_bind_INR] \\ drule_first \\ disch_then irule \\
+ conj_tac >- simp [] \\
+ conj_tac >- fs [same_state_def, cget_var_def, ALOOKUP_FILTER_FST, is_RegVar_def] \\
+ fs [same_state_sis_def] \\ first_x_assum irule \\
+ 
+ simp [same_state_sis_def, same_state_same_state_bsi, same_state_nbsi_nil_empty,
+       vertype_env_vertype_list, vertype_list_nil] \\
+
+ (* vertype_list survives... *)
+ qpat_x_assum ‘sum_foldM _ _ combs = _’ assume_tac \\
+ drule_strip vertype_env_pruns \\
+ impl_tac >- fs [vertype_fext_vertype_fext_n, vertype_env_vertype_list, vertype_list_nil] \\
+ simp [shift_seq_replace_prefix] \\ strip_tac \\
+ 
+ qpat_x_assum ‘sum_foldM _ _ ffs = _’ assume_tac \\
+ drule_strip vertype_env_pruns \\
+ impl_tac >- fs [vertype_fext_vertype_fext_n, vertype_env_vertype_list, vertype_list_nil] \\
+ fs [vertype_env_vertype_list, vertype_list_nil]
+QED
+
+Triviality shift_seq_shift_seq_replace_prefix_lem:
+ ∀fbits fbits' n m. shift_seq n (shift_seq m (replace_prefix fbits' fbits (m + n))) = fbits'
+Proof
+ simp [shift_seq_def, replace_prefix_def, SF boolSimps.ETA_ss]
 QED
 
 Theorem compile_stmts_correct_run:
- !decls n s ps nl rtlfext vfext cenv EEv.
- compile_stmts <| bsi := [empty]; nbsi := [empty]; vertypes := decls; tmpnum := 0 |> ps = INR (s, nl) /\ (* compile_regs inlined below *)
+ !decls n combs s_combs nl_combs ffs s nl_ffs rtlfext vfext cenv pseudos EEv.
+ compile_stmts <| bsi := [empty]; nbsi := [empty]; vertypes := decls; tmpnum := 0 |> combs = INR (s_combs, nl_combs) /\
+ compile_stmts (s_combs with <| bsi := [empty]; nbsi := [empty] |>) ffs = INR (s, nl_ffs) /\
+ (* compile_regs inlined below *)
 
- ALL_DISTINCT (MAP (λ(t,var,v). var) decls) /\
- EVERY (λ(t,var,v). OPTION_ALL (λv. vertype_v v t) v) decls /\
- writes_ok ps /\
+ ALL_DISTINCT (MAP FST decls) /\ (* <-- can say regs_distinct here... *)
+ EVERY (λ(var, data). OPTION_ALL (λv. vertype_v v data.type) data.init) decls /\
+
+ writes_ok combs /\
+ writes_ok ffs ∧
+
+ (∀var. member string_cmp var pseudos ⇒ ~MEM var (FLAT (MAP vwrites ffs)) ∧
+                                        ~MEM var (FLAT (MAP vnwrites ffs))) ∧
+ (∀var. MEM var (FLAT (MAP vwrites combs)) ⇒ member string_cmp var pseudos) ∧
+
  same_fext vfext rtlfext /\
  vertype_fext EEv vfext /\
- EVERY (no_array_read_dyn (Ev_from_decls decls)) ps /\
- EVERY (no_array_write_dyn (Ev_from_decls decls)) ps /\
- EVERY no_Case ps /\
- EVERY (vertype_stmt EEv (Ev_from_decls decls)) ps /\
- 
- (!fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ==>
- netlist_ok EEv 0 s.tmpnum nl /\
- netlist_sorted nl /\
- regs_ok EEv s.tmpnum (compile_regs s.bsi s.nbsi decls) /\
- regs_distinct (compile_regs s.bsi s.nbsi decls) /\
- ?cenv'. netlist_run rtlfext cenv nl (compile_regs s.bsi s.nbsi decls) n = INR cenv' /\
-         (!fext. si_complete fext (Ev_from_decls decls) cenv' [empty]) /\
-         !venv. ?fbits. 
-          case mrun vfext fbits ps venv n of
-            INL e => T
-          | INR (venv', fbits') => same_state venv cenv /\ vertype_list (Ev_from_decls decls) venv ==> same_state venv' cenv'
+
+ (!fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ∧
+
+ EVERY (preprocessed (Ev_from_decls decls)) ffs ∧
+ EVERY (vertype_stmt EEv (Ev_from_decls decls)) ffs /\
+
+ EVERY (preprocessed (Ev_from_decls decls)) combs ∧
+ EVERY (vertype_stmt EEv (Ev_from_decls decls)) combs ==>
+ s_combs.tmpnum ≤ s.tmpnum ∧
+ netlist_ok EEv 0 s_combs.tmpnum nl_combs ∧
+ netlist_ok EEv s_combs.tmpnum s.tmpnum nl_ffs /\
+ netlist_sorted (nl_combs ++ nl_ffs) /\
+ regs_ok EEv s_combs.tmpnum s.tmpnum (compile_regs pseudos s_combs.bsi s.bsi s.nbsi decls) /\
+ regs_distinct (compile_regs pseudos s_combs.bsi s.bsi s.nbsi decls) /\
+ ?cenv' cenv''.
+  netlist_run rtlfext cenv nl_combs nl_ffs (compile_regs pseudos s_combs.bsi s.bsi s.nbsi decls) n = INR cenv' /\
+  (!fext. si_complete fext (Ev_from_decls decls) cenv' [empty]) /\
+  (* since we move the evaluation of reg's inps one step before Verilog: *)
+  sum_foldM (reg_run (rtlfext n) cenv')
+            (cenv' with env := FILTER (is_RegVar o FST) cenv'.env)
+            (FILTER (λ(var,data). data.reg_type = Reg) (compile_regs pseudos s_combs.bsi s.bsi s.nbsi decls)) = INR cenv'' ∧
+  (!fext. si_complete fext (Ev_from_decls decls) cenv'' [empty]) /\ (* <-- might want to move this... *)
+  !venv. ?fbits.
+   case mrun vfext fbits ffs combs venv n of
+     INL e => T
+   | INR (venv', fbits') =>
+      same_state venv cenv /\ vertype_list (Ev_from_decls decls) venv ⇒
+      same_state venv' cenv' ∧ 
+      (case mstep_ffs (vfext n) fbits' ffs venv' of
+         INL e => T
+       | INR (venv'', fbits'') => same_state venv'' cenv'')
 Proof
  gen_tac \\ Induct
- (* Ugly duplication here just to get netlist_ok+regs_lt... *)
- >- (simp [mrun_def, netlist_run_def] \\ rpt strip_tac' \\
-     drule_strip same_fext_same_fext_n \\ pop_assum (qspec_then `0` assume_tac) \\
-     drule_strip compile_stmts_correct_step \\
-     disch_then (qspec_then `ps` mp_tac) \\ simp [memsublist_sym] \\
-     disch_then drule_strip \\ simp [] \\
-     disch_then (qspec_then `cenv` mp_tac) \\
-     impl_tac >- fs [vertype_fext_vertype_fext_n, writes_ok_sis_def, cget_net_var_empty, 
-                     cstate_ok_def, si_wf_empty, si_sound_empty, si_lt_empty, cstate_vertypes_sound_Ev_from_decls] \\
-     rw [] \\
-     drule_strip compile_regs_correct \\ simp []) \\
+ (* base case *) >-
+ (simp [mrun_def, netlist_run_def] \\ rpt strip_tac' \\
 
- simp [mrun_def, netlist_run_def, sum_bind_INR] \\ rpt strip_tac' \\
- drule_first \\ simp [] \\
- simp [netlist_step_def, sum_bind_INR] \\
+ drule_strip (same_fext_same_fext_n |> SPEC_ALL |> EQ_IMP_RULE |> fst) \\
+ pop_assum (qspec_then `0` assume_tac) \\
+ drule_strip (vertype_fext_vertype_fext_n |> SPEC_ALL |> EQ_IMP_RULE |> fst) \\
+ pop_assum (qspec_then `0` assume_tac) \\
 
- drule_strip same_fext_same_fext_n \\ pop_assum (qspec_then `n` assume_tac) \\
- drule_strip compile_stmts_correct_step \\
- disch_then (qspec_then `ps` mp_tac) \\ simp [memsublist_sym] \\
- disch_then drule_strip \\ simp [] \\
- disch_then (qspec_then `cenv'` mp_tac) \\ impl_tac >- (rpt conj_tac
-  >- fs [vertype_fext_vertype_fext_n]
-  >- simp [writes_ok_sis_def, cget_net_var_empty]
-  \\ (simp [cstate_ok_def, si_wf_empty, si_sound_empty, si_lt_empty, cstate_vertypes_sound_Ev_from_decls])) \\ strip_tac \\
+ drule_strip (SIMP_RULE (srw_ss()) [LET_THM] compile_stmts_correct_step) \\ simp [])
 
- simp [] \\ drule_strip compile_regs_correct \\ first_x_assum (qspec_then ‘vfext n’ strip_assume_tac) \\
+ (* step case *) \\
+ simp [mrun_def, netlist_run_def] \\ rpt strip_tac' \\
+ drule_first \\ simp [sum_bind_def] \\
 
- simp [si_complete_fbits] \\ gen_tac \\
+ drule_strip (same_fext_same_fext_n |> SPEC_ALL |> EQ_IMP_RULE |> fst) \\
+ pop_assum (qspec_then `SUC n` assume_tac) \\
+ drule_strip (vertype_fext_vertype_fext_n |> SPEC_ALL |> EQ_IMP_RULE |> fst) \\
+ pop_assum (qspec_then `SUC n` assume_tac) \\
 
- last_x_assum (qspec_then `venv` strip_assume_tac) \\ pop_assum mp_tac \\
- TOP_CASE_TAC >- (qexists_tac `fbits` \\ simp [sum_bind_def]) \\ TOP_CASE_TAC \\ strip_tac \\
- drule_strip mrun_fbits \\ last_x_assum (qspec_then `<| vars := q; nbq := [] |>` strip_assume_tac) \\
+ drule_strip (SIMP_RULE (srw_ss()) [LET_THM] compile_stmts_correct_step) \\
+ 
+ simp [] \\ gen_tac \\
+ last_x_assum (qspec_then ‘venv’ strip_assume_tac) \\ pop_assum mp_tac \\
+ TOP_CASE_TAC >- (qexists_tac ‘fbits’ \\ fs [sum_bind_def]) \\
+ TOP_CASE_TAC \\ TOP_CASE_TAC >- (strip_tac \\ qexists_tac ‘fbits’ \\ simp [sum_bind_def]) \\ 
+ TOP_CASE_TAC \\ strip_tac \\
 
- qexists_tac `replace_prefix fbits' fbits m` \\ first_x_assum (qspec_then `replace_prefix fbits' fbits m` mp_tac) \\
- impl_tac >- rw [init_seq_eq_def, replace_prefix_def] \\ strip_tac \\ simp [sum_bind_def] \\ fs [shift_seq_replace_prefix] \\
- ntac 2 (pop_assum mp_tac) \\ TOP_CASE_TAC \\ simp [mstep_commit_def, sum_map_def] \\ rpt strip_tac \\
+ drule_strip mrun_fbits \\
+ drule_strip mstep_ffs_fbits \\
+ first_x_assum (qspec_then ‘q'’ strip_assume_tac) \\
+ 
+ qexists_tac ‘replace_prefix fbits' fbits (n' + m)’ \\
+ last_x_assum (qspec_then ‘replace_prefix fbits' fbits (n' + m)’ mp_tac) \\
+ impl_tac >- simp [init_seq_eq_def, replace_prefix_def] \\ simp [sum_bind_def] \\ rpt strip_tac' \\
 
- drule_first \\
- qpat_x_assum `_ ==> _` mp_tac \\
- impl_tac >- (fs [same_state_sis_def, same_state_nbsi_nil_empty, same_state_same_state_bsi, vertype_env_vertype_list] \\
-              drule_strip vertype_list_mrun \\ simp [vertype_list_def]) \\
- strip_tac \\ drule_first \\ impl_tac >- (fs [same_state_sis_def] \\ rfs []) \\ strip_tac \\
- simp [same_state_fbits]
+ first_x_assum (qspec_then ‘shift_seq m (replace_prefix fbits' fbits (n' + m))’ mp_tac) \\
+ impl_tac >- simp [init_seq_eq_def, shift_seq_def, replace_prefix_def] \\
+ simp [sum_bind_def, shift_seq_shift_seq_replace_prefix_lem] \\ strip_tac \\
+
+ TOP_CASE_TAC \\ TOP_CASE_TAC \\ rpt strip_tac' \\ fs [] \\
+ 
+ first_x_assum irule \\ simp [] \\
+
+ drule_strip vertype_env_mstep_ffs \\
+ impl_tac >- (drule_strip vertype_list_mrun \\ fs [vertype_fext_vertype_fext_n]) \\ simp []
 QED
 
 Triviality compile_regs_correct_init_lem:
- !(bsi : si_t list) nbsi decls tenv cenv extenv ps.
- vertype_prog tenv (Module extenv decls ps) ==>
- ?cenv'. init_run cenv (compile_regs bsi nbsi decls) = INR cenv' /\
+ !(bsi : si_t list) bsi' nbsi pseudos decls cenv.
+ ALL_DISTINCT (MAP FST decls) ∧
+ EVERY (λ(var,data). OPTION_ALL (λv. vertype_v v data.type) data.init) decls ⇒
+ ?cenv'. init_run cenv (compile_regs pseudos bsi bsi' nbsi decls) = INR cenv' /\
          (!var.
-           case ALOOKUP (MAP (λ(ty, var, v). (var, ty)) decls) var of
-            SOME ty => (?v. cget_var cenv' (RegVar var 0) = INR v /\ rtltype_v v (compile_type ty))
+           case ALOOKUP decls var of
+             SOME rdata => (?v. cget_var cenv' (RegVar var 0) = INR v /\ rtltype_v v (compile_type rdata.type))
            | NONE => !varnum. cget_var cenv' (RegVar var varnum) = cget_var cenv (RegVar var varnum))
 Proof
- ntac 2 gen_tac \\
- Induct \\ fs [compile_regs_def, init_run_def] \\ rpt strip_tac \\
- drule_strip vertype_prog_decls_all_distinct \\
- qpat_x_assum `vertype_prog _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_prog_cases]) \\
- rveq \\ drule_first \\ simp [compile_reg_def, init_run_def]
- >-
- (pairarg_tac \\ simp [] \\ qmatch_goalsub_abbrev_tac ‘init_run cenv' _’ \\
-  first_x_assum (qspec_then ‘cenv'’ strip_assume_tac) \\ unabbrev_all_tac \\ rw [] \\ rw []
-  >- (fs [] \\ drule_strip compile_regs_alookup_lem \\ first_x_assum (qspec_then ‘var’ mp_tac) \\
-     simp [cget_var_cset_var, cget_var_fbits] \\ drule_strip rtl_nd_value_type_correct \\ simp [])
-  \\ first_x_assum (qspec_then ‘var'’ mp_tac) \\ TOP_CASE_TAC \\
-     simp [cget_var_cset_var, cget_var_fbits])
+ ntac 4 gen_tac \\ Induct \\ TRY PairCases \\ fs [compile_regs_def, compile_reg_def, init_run_def] \\ rpt strip_tac \\
+ drule_first \\ TOP_CASE_TAC
+ >- (pairarg_tac \\ simp [] \\ qmatch_goalsub_abbrev_tac ‘init_run cenv' _’ \\
+     first_x_assum (qspec_then ‘cenv'’ strip_assume_tac) \\ unabbrev_all_tac \\ rw [] \\ rw []
+     >- (drule_strip rtl_nd_value_type_correct \\
+         fs [GSYM ALOOKUP_NONE] \\ first_x_assum (qspec_then ‘h0’ mp_tac) \\ simp [cget_var_cset_var])
+     \\ first_x_assum (qspec_then ‘var’ mp_tac) \\ TOP_CASE_TAC \\ simp [cget_var_cset_var]) \\
 
- \\
- simp [has_rtltype_v_correct, rtltype_v_compile_value_compile_type] \\
+ gvs [has_rtltype_v_correct, rtltype_v_compile_value_compile_type] \\
  qmatch_goalsub_abbrev_tac ‘init_run cenv' _’ \\ first_x_assum (qspec_then ‘cenv'’ strip_assume_tac) \\
  unabbrev_all_tac \\ rw [] \\ rw []
- >- (fs [] \\ drule_strip compile_regs_alookup_lem \\ first_x_assum (qspec_then ‘var’ mp_tac) \\
-    rw [cget_var_cset_var, cget_var_fbits, rtltype_v_compile_value_compile_type])
- \\ first_x_assum (qspec_then ‘var'’ mp_tac) \\ TOP_CASE_TAC \\ simp [cget_var_cset_var, cget_var_fbits]
+ >- (fs [GSYM ALOOKUP_NONE] \\ first_x_assum (qspec_then ‘h0’ mp_tac) \\
+     simp [cget_var_cset_var, rtltype_v_compile_value_compile_type])
+ \\ first_x_assum (qspec_then ‘var’ mp_tac) \\ TOP_CASE_TAC \\ simp [cget_var_cset_var]
 QED
 
 Theorem compile_regs_correct_init:
- !(bsi : si_t list) nbsi decls tenv cenv extenv ps.
- vertype_prog tenv (Module extenv decls ps) ==>
- ?cenv'. init_run cenv (compile_regs bsi nbsi decls) = INR cenv' /\
-         !fext. si_complete fext (Ev_from_decls decls) cenv' [empty]
+ !(bsi : si_t list) bsi' nbsi pseudos m cenv.
+ vertype_prog m ==>
+ ?cenv'. init_run cenv (compile_regs pseudos bsi bsi' nbsi m.decls) = INR cenv' /\
+         !fext. si_complete fext (Ev_from_decls m.decls) cenv' [empty]
 Proof
- rpt strip_tac \\ drule_strip compile_regs_correct_init_lem \\
- first_x_assum (qspecl_then [‘bsi’, ‘nbsi’, ‘cenv’] strip_assume_tac) \\ simp [] \\
+ rewrite_tac [vertype_prog_def] \\ rpt strip_tac \\ drule_strip compile_regs_correct_init_lem \\
+ first_x_assum (qspecl_then [‘bsi’, ‘bsi'’, ‘nbsi’, ‘pseudos’, ‘cenv’] strip_assume_tac) \\ simp [] \\
 
- fs [si_complete_def, Ev_from_decls_def, alist_to_map_alookup, cget_net_empty] \\ rpt strip_tac \\
- first_x_assum (qspec_then ‘var’ mp_tac) \\ simp [] \\ strip_tac \\ simp [cell_inp_run_def, sum_bind_def, cget_fext_var_def] \\
+ simp [si_complete_def, Ev_from_decls_def, alist_to_map_alookup, ALOOKUP_MAP, cget_net_empty] \\ rpt strip_tac \\
+
+ first_x_assum (qspec_then ‘var’ mp_tac) \\ simp [] \\ strip_tac \\
+ simp [cell_inp_run_def, sum_bind_def, cget_fext_var_def] \\
  asm_exists_any_tac \\ simp [compile_type_correct]
 QED
 
@@ -2758,24 +3248,23 @@ Proof
 QED
 
 Theorem compile_regs_correct_init_run:
- !(bsi : si_t list) nbsi decls venv venv' s s' fbits fbits'.
+ !(bsi : si_t list) bsi' nbsi decls pseudos venv venv' s s' fbits fbits'.
  run_decls fbits decls venv = (fbits', venv') /\
- init_run (s with fbits := fbits) (compile_regs bsi nbsi decls) = INR s' ==>
+ init_run (s with fbits := fbits) (compile_regs pseudos bsi bsi' nbsi decls) = INR s' ==>
  fbits' = s'.fbits /\
  (same_state venv s ==> same_state venv' s')
 Proof
- ntac 2 gen_tac \\
- Induct \\ fs [compile_regs_def] \\ rpt strip_tac' \\ TRY (PairCases_on `h`) \\
- fs [compile_reg_def, run_decls_def, init_run_def] >- rw [same_state_fbits] \\
- Cases_on `h2` \\ fs []
+ ntac 3 gen_tac \\ Induct \\ TRY PairCases \\
+ fs [compile_regs_def, compile_reg_def, run_decls_def, init_run_def, same_state_fbits] \\
+ TOP_CASE_TAC
  (* Some ugly duplication here, should factor more: *)
  >-
- (rpt (pairarg_tac \\ fs []) \\ drule_strip compile_type_correct_nd \\
+ (rpt strip_tac' \\ rpt (pairarg_tac \\ fs []) \\ drule_strip compile_type_correct_nd \\
  drule_first \\ simp [] \\ strip_tac \\ first_x_assum match_mp_tac \\
  fs [same_state_def] \\ rw [sum_alookup_cons] \\ fs [cget_var_cset_var, cget_var_def])
 
  \\
- every_case_tac \\ fs [has_rtltype_v_correct, cset_var_fbits] \\ drule_first \\ simp [] \\
+ simp [] \\ CASE_TAC \\ fs [has_rtltype_v_correct, cset_var_fbits] \\ rpt strip_tac' \\ drule_first \\ simp [] \\
  strip_tac \\ first_x_assum match_mp_tac \\
  fs [same_state_def] \\ rw [sum_alookup_cons] \\
  fs [cget_var_cset_var, cget_var_def, compile_value_correct]
@@ -2783,9 +3272,9 @@ QED
 
 (* Can maybe be proven direct instead? *)
 Triviality compile_regs_correct_init_run':
- !(bsi : si_t list) nbsi decls venv venv' s s' fbits fbits'.
+ !(bsi : si_t list) bsi' nbsi decls pseudos venv venv' s s' fbits fbits'.
  run_decls fbits decls venv = (fbits', venv') /\
- init_run s (compile_regs bsi nbsi decls) = INR s' /\
+ init_run s (compile_regs pseudos bsi bsi' nbsi decls) = INR s' /\
  fbits = s.fbits ==>
  fbits' = s'.fbits /\
  (same_state venv s ==> same_state venv' s')
@@ -2827,74 +3316,63 @@ Proof
 QED
 
 Theorem cell_input_covered_by_extenv_compile_fextenv:
- !inp decls.
- cell_input_covered_by_extenv decls inp ==> cell_input_covered_by_extenv (compile_fextenv decls) inp
+ !inp decls. cell_input_covered_by_extenv (compile_fextenv decls) inp ⇔ cell_input_covered_by_extenv decls inp
 Proof
  Cases \\ rw [cell_input_covered_by_extenv_def, compile_fextenv_def, ALOOKUP_MAP]
 QED
 
-Theorem netlist_ok_compile_fextenv:
- !decls min max nl.
- netlist_ok decls min max nl ==> netlist_ok (compile_fextenv decls) min max nl
+Theorem cell_covered_by_extenv_compile_fextenv:
+ ∀inp decls. cell_covered_by_extenv (compile_fextenv decls) inp ⇔ cell_covered_by_extenv decls inp
 Proof
- rw [netlist_ok_def] \\ pop_assum kall_tac \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\
  Cases \\ rw [cell_covered_by_extenv_def, cell_input_covered_by_extenv_compile_fextenv]
 QED
 
+Theorem netlist_ok_compile_fextenv:
+ !decls min max nl. netlist_ok (compile_fextenv decls) min max nl ⇔ netlist_ok decls min max nl
+Proof
+ metis_tac [netlist_ok_def, EVERY_CONG, cell_covered_by_extenv_compile_fextenv]
+QED
+
 Theorem regs_ok_compile_fextenv:
- !decls EEv tmpnum bsi nbsi.
- regs_ok EEv tmpnum (compile_regs bsi nbsi decls) ==>
- regs_ok (compile_fextenv EEv) tmpnum (compile_regs bsi nbsi decls)
+ !decls EEv combs_tmpnum ffs_tmpnum bsi bsi' nbsi combs.
+ regs_ok (compile_fextenv EEv) combs_tmpnum ffs_tmpnum (compile_regs bsi bsi' nbsi decls combs) ⇔
+ regs_ok EEv combs_tmpnum ffs_tmpnum (compile_regs bsi bsi' nbsi decls combs)
 Proof
- Induct \\ TRY PairCases \\ fs [compile_regs_def, regs_ok_def] \\ rw [reg_ok_def, compile_reg_def] \\
- rpt TOP_CASE_TAC \\ fs [cell_input_covered_by_extenv_compile_fextenv]
+ rw [regs_ok_def] \\ irule EVERY_CONG \\ simp [] \\ PairCases \\ rw [reg_ok_def] \\ 
+ metis_tac [optionTheory.OPTION_ALL_CONG, cell_input_covered_by_extenv_compile_fextenv]
 QED
 
-Theorem rtl_compile_correct:
- !n decls ps cir fbits rtlfext vfext EEv tmpnum.
- compile (Module EEv decls ps) = INR (cir, tmpnum) /\
- vertype_fext EEv vfext /\ (* <-- only works over reasonable vfext functions *)
- 
- (* can only compile these kind of programs: *)
- writes_ok ps /\
-
- same_fext vfext rtlfext /\
- EVERY (preprocessed (Ev_from_decls decls)) ps /\
- vertype_prog (K NONE) (Module EEv decls ps) ==>
- circuit_ok 0 tmpnum cir /\
- circuit_sorted cir /\
- ?cenv'. circuit_run rtlfext fbits cir n = INR cenv' /\
-         ?fbits'. 
-          case run vfext fbits' (Module EEv decls ps) n of
-            INL e => T
-          | INR (venv', _) => same_state venv' cenv'
+Theorem si_complete_empty_decls_cons:
+ ∀decls var rdata cenv.
+ ¬MEM var (MAP FST decls) ∧
+ (∀fext. si_complete fext (Ev_from_decls ((var, rdata)::decls)) cenv [empty]) ⇒
+ (∀fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ∧ 
+ (∃cv t'. cget_var cenv (RegVar var 0) = INR cv ∧ same_type rdata.type t' ∧ rtltype_v cv t')
 Proof
- simp [compile_def, run_def, sum_bind_INR] \\ rpt strip_tac' \\ rpt (pairarg_tac \\ fs []) \\ rveq \\
- simp [circuit_run_def, sum_bind_INR] \\
-
- drule_strip compile_regs_correct_init \\
- fs [vertype_prog_alt] \\
- first_x_assum (qspecl_then [‘s.bsi’, ‘s.nbsi’, ‘<|env := []; fbits := fbits|>’] strip_assume_tac) \\
- simp [] \\
-
- fs [EVERY_preprocessed] \\
- drule_strip compile_stmts_correct_run \\ first_x_assum (qspec_then ‘n’ strip_assume_tac) \\ simp [] \\
-
- simp [circuit_ok_def, netlist_ok_compile_fextenv, regs_ok_compile_fextenv, circuit_sorted_def] \\
-
- Cases_on `run_decls fbits decls []` \\
- drule_strip compile_regs_correct_init_run' \\ impl_tac >- simp [] \\ strip_tac \\ rveq \\
- first_x_assum (qspec_then ‘r’ strip_assume_tac) \\
-  
- drule_strip run_decls_fbits \\
- qexists_tac `replace_prefix fbits' fbits m` \\
- first_x_assum (qspec_then ‘replace_prefix fbits' fbits m’ mp_tac) \\
- impl_tac >- simp [init_seq_eq_replace_prefix] \\ strip_tac \\ simp [] \\
- fs [shift_seq_replace_prefix] \\ rpt TOP_CASE_TAC \\ fs [] \\
- rpt (first_x_assum match_mp_tac) \\ simp [same_state_def, sum_alookup_INR] \\
-
- drule_strip vertype_list_run_decls \\ disch_then match_mp_tac \\ simp [Ev_covers_decls_Ev_from_decls, vertype_list_def]
+ simp [si_complete_def, Ev_from_decls_def, alist_to_map_alookup, ALOOKUP_MAP] \\ rpt strip_tac' \\
+ fs [GSYM ALOOKUP_NONE, cget_net_empty, cell_inp_run_def] \\ rw [] \\ first_x_assum irule \\ rw [] \\ fs []
 QED
+
+Theorem outs_run_compile_outs:
+ ∀fext decls cenv.
+ ALL_DISTINCT (MAP FST decls) ∧
+ (∀fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ⇒
+ EVERY out_ok (compile_outs decls) ∧
+ ∃cenv'. sum_mapM (out_run fext cenv) (compile_outs decls) = INR cenv' ∧
+         ∀var. sum_alookup cenv' var =
+               case ALOOKUP decls var of
+                 NONE => INL UnknownVariable
+               | SOME rdata => if rdata.output then cget_var cenv (RegVar var 0) else INL UnknownVariable
+Proof
+ gen_tac \\ Induct \\ TRY PairCases \\ fs [compile_outs_def, sum_mapM_def] \\ rpt gen_tac \\ strip_tac \\
+ conj_tac >- (rw [EVERY_MAP, EVERY_FILTER, pairTheory.LAMBDA_PROD, out_ok_def, cell_input_lt_def, var_lt_def, cell_input_covered_by_extenv_def] \\ simp [GSYM pairTheory.LAMBDA_PROD]) \\
+ drule_strip si_complete_empty_decls_cons \\ drule_first \\ IF_CASES_TAC
+ >- (simp [sum_mapM_def, out_run_def, cell_inp_run_def, sum_bind_def, sum_map_def, sum_alookup_cons] \\
+     rw [] \\ simp [EQ_SYM]) \\
+ rw [] \\ IF_CASES_TAC \\ fs [] \\ CASE_TAC \\ rw [] \\ fs [GSYM ALOOKUP_NONE]
+QED
+
+(* Module EEv decls ps *)
 
 Theorem rtltype_extenv_compile_fextenv:
  !vfext rtlfext fextenv.
@@ -2907,6 +3385,113 @@ Proof
  fs [] \\ first_x_assum (qspecl_then [‘n’, ‘var’] assume_tac)
  >- (Cases_on ‘vfext n var’ \\ rfs [sum_same_value_def] \\ drule_strip same_value_rtltype_v_vertype_v \\ fs [])
  >- (Cases_on ‘rtlfext n var’ \\ rfs [sum_same_value_def] \\ drule_strip same_value_rtltype_v_vertype_v \\ fs [])
+QED
+
+Definition same_state_outs_def:
+ same_state_outs m venv cenv ⇔
+ ∀var rdata vv. ALOOKUP m.decls var = SOME rdata ∧ rdata.output ∧ sum_alookup venv var = INR vv ⇒
+                ∃cv. sum_alookup cenv var = INR cv ∧ same_value vv cv
+End
+
+Triviality vertype_stmt_vwrites_lem:
+ ∀EEv decls p.
+ vertype_stmt EEv (Ev_from_decls decls) p ⇒
+ ∀var. MEM var (vwrites p) ⇒ MEM var (MAP FST decls)
+Proof
+ ntac 2 gen_tac \\ ho_match_mp_tac vertype_stmt_ind \\
+ rw [vwrites_def, evwrites_def] \\ simp [SF SFY_ss]
+ >- (fs [EVERY_MEM, MEM_FLAT, MEM_MAP] \\ drule_first \\ pairarg_tac \\ gvs [])
+ >- (every_case_tac \\ fs [])
+ \\ fs [Ev_from_decls_decls_type, decls_type_INR] \\ drule_strip ALOOKUP_MEM \\ drule_strip MEM_pair
+QED
+
+(*Triviality EVERY_vertype_stmt_vwrites_lem:
+ ∀decls EEv ps var.
+ MEM var (FLAT (MAP vwrites ps)) ∧
+ EVERY (vertype_stmt EEv (Ev_from_decls decls)) ps ⇒
+ MEM var (MAP FST decls)
+Proof
+ rw [EVERY_MEM, MEM_FLAT, MEM_MAP] \\ drule_first \\ drule_strip vertype_stmt_vwrites_lem \\
+ fs [MEM_MAP] \\ metis_tac []
+QED*)
+
+Triviality ALOOKUP_compile_regs_PseudoReg_lem:
+ ∀decls rdata.
+ member string_cmp var pseudos ∧
+ ALOOKUP (compile_regs pseudos combs_bsi bsi nbsi decls) (var, 0) = SOME rdata ⇒
+ rdata.reg_type = PseudoReg
+Proof
+ Induct \\ TRY PairCases \\ fs [compile_regs_def, compile_reg_def] \\ rw [] \\ rw []
+QED
+
+Theorem rtl_compile_correct:
+ !m pseudos cir rtlfext vfext tmpnum.
+ compile pseudos m = INR (cir, tmpnum) /\
+
+ (* types *)
+ vertype_prog m ∧
+ vertype_fext m.fextty vfext /\ (* <-- only works over vfext functions that respect m.fextty (is well-typed) *)
+
+ same_fext vfext rtlfext /\
+ 
+ (* can only compile these kind of programs: *)
+ writes_ok m.ffs ∧
+ writes_ok m.combs ∧
+ (∀var. MEM var (FLAT (MAP vwrites m.combs)) ⇒ member string_cmp var pseudos) ∧
+ writes_overlap_ok_pseudos pseudos m.ffs ∧
+
+ EVERY (preprocessed (Ev_from_decls m.decls)) m.ffs ∧
+ EVERY (preprocessed (Ev_from_decls m.decls)) m.combs ⇒
+ (rtltype_extenv (circuit_extenv cir) rtlfext ⇔ vertype_fext m.fextty vfext) ∧
+ (∀var rdata. member string_cmp var pseudos ∧ ALOOKUP (circuit_regs cir) (var, 0) = SOME rdata ⇒
+              rdata.reg_type = PseudoReg) ∧
+ (∃combs_tmpnum. circuit_ok 0 combs_tmpnum tmpnum cir) /\
+ circuit_sorted cir /\
+ ∀n fbits. ?cenv' fbits'.
+   circuit_run rtlfext fbits cir n = INR (cenv', fbits') /\
+   ?fbits'.
+     case run vfext fbits' m n of
+       INL e => T
+     | INR (venv', _) => same_state_outs m venv' cenv'
+Proof
+ rewrite_tac [writes_overlap_ok_pseudos_def] \\
+ simp [compile_def, run_def, sum_bind_INR] \\ rpt strip_tac' \\
+ rpt (pairarg_tac \\ fs [sum_bind_INR]) \\ simp [sum_bind_def] \\ rveq \\
+
+ Ho_Rewrite.REWRITE_TAC [PULL_FORALL] \\ rpt gen_tac \\
+
+ drule_strip compile_regs_correct_init \\
+ first_x_assum (qspecl_then [‘s_combs.bsi’, ‘s.bsi’, ‘s.nbsi’, ‘pseudos’, ‘<|env := []; fbits := fbits|>’] strip_assume_tac) \\
+
+ fs [vertype_prog_def] \\
+ drule_strip compile_stmts_correct_run \\
+ first_x_assum (qspec_then ‘n’ strip_assume_tac) \\
+ qspecl_then [‘rtlfext n’, ‘m.decls’, ‘cenv''’] assume_tac outs_run_compile_outs \\ drule_first \\
+
+ rpt conj_tac
+ >- (drule_strip rtltype_extenv_compile_fextenv \\ simp [circuit_extenv_def])
+ >- (simp [circuit_regs_def] \\ metis_tac [(*EVERY_vertype_stmt_vwrites_lem,*) ALOOKUP_compile_regs_PseudoReg_lem])
+ >- (simp [circuit_ok_def, regs_ok_compile_fextenv, netlist_ok_compile_fextenv] \\
+     asm_exists_tac \\ simp [])
+ >- simp [circuit_sorted_def] \\
+
+ simp [circuit_run_def, sum_bind_INR] \\
+ 
+ Cases_on `run_decls fbits m.decls []` \\
+ drule_strip compile_regs_correct_init_run' \\ impl_tac >- simp [] \\ strip_tac \\ rveq \\
+ first_x_assum (qspec_then ‘r’ strip_assume_tac) \\
+  
+ drule_strip run_decls_fbits \\
+ qexists_tac `replace_prefix fbits' fbits m'` \\
+ first_x_assum (qspec_then ‘replace_prefix fbits' fbits m'’ mp_tac) \\
+ impl_tac >- simp [init_seq_eq_replace_prefix] \\ strip_tac \\ simp [] \\
+ fs [shift_seq_replace_prefix] \\ rpt TOP_CASE_TAC \\ fs [] \\
+
+ qpat_x_assum ‘_ ⇒ _’ mp_tac \\
+ impl_tac >- (conj_tac >- (first_x_assum irule \\ simp [same_state_def]) \\ 
+              drule_strip vertype_list_run_decls) \\ strip_tac \\
+
+ fs [same_state_outs_def, same_state_def]
 QED
 
 val _ = export_theory ();

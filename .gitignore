@@ -5,6 +5,9 @@
 *.ui
 *.uo
 
+*.hi
+*.o
+
 *Theory.sig
 *Theory.sml
 

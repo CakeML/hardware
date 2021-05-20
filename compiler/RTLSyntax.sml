@@ -28,11 +28,20 @@ val (RegVar_tm, mk_RegVar, dest_RegVar, is_RegVar) = op2 "RegVar";
 val (NetVar_tm, mk_NetVar, dest_NetVar, is_NetVar) = op1 "NetVar";
 
 (* Cell inputs *)
+val NoIndexing_tm = “RTL$NoIndexing”;
+fun is_NoIndexing tm = tm ~~ NoIndexing_tm;
+val (Indexing_tm, mk_Indexing, dest_Indexing, is_Indexing) = op1 "Indexing";
+val (SliceIndexing_tm, mk_SliceIndexing, dest_SliceIndexing, is_SliceIndexing) = op2 "SliceIndexing";
+
 val (ConstInp_tm, mk_ConstInp, dest_ConstInp, is_ConstInp) = op1 "ConstInp";
 val (ExtInp_tm, mk_ExtInp, dest_ExtInp, is_ExtInp) = op2 "ExtInp";
 val (VarInp_tm, mk_VarInp, dest_VarInp, is_VarInp) = op2 "VarInp";
 
 val cell_input_ty = mk_type ("cell_input", []);
+
+(* Outs *)
+val (OutInp_tm, mk_OutInp, dest_OutInp, is_OutInp) = op1 "OutInp";
+val (OutInps_tm, mk_OutInps, dest_OutInps, is_OutInps) = op1 "OutInps";
 
 (* Cells *)
 val (NDetCell_tm, mk_NDetCell, dest_NDetCell, is_NDetCell) = op2 "NDetCell";
@@ -43,7 +52,7 @@ val (CellLUT_tm, mk_CellLUT, dest_CellLUT, is_CellLUT) = op3 "CellLUT";
 val (Carry4_tm, mk_Carry4, dest_Carry4, is_Carry4) = op5 "Carry4";
 
 (* Circuit *)
-val (Circuit_tm, mk_Circuit, dest_Circuit, is_Circuit) = op3 "Circuit";
+val (Circuit_tm, mk_Circuit, dest_Circuit, is_Circuit) = op5 "Circuit";
 
 (* Types *)
 val cell_ty = mk_type ("cell", []);

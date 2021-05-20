@@ -1,7 +1,7 @@
 (* Must not depend on preamble! *)
 open HolKernel Parse boolLib bossLib BasicProvers;
 
-open bitstringTheory listTheory rich_listTheory wordsTheory;
+open bitstringTheory listTheory rich_listTheory alistTheory wordsTheory;
 
 val _ = new_theory "hardwareMisc";
 
@@ -34,6 +34,28 @@ Definition revLUPDATE_def:
  revLUPDATE e n l = LUPDATE e (LENGTH l - 1 - n) l
 End
 
+Definition rev_slice_def:
+ rev_slice l ih il = TAKE (ih - il + 1) (DROP (LENGTH l - ih - 1) l)
+End
+
+Theorem length_rev_slice:
+ ∀l ih il. ih < LENGTH l ∧ il ≤ ih ⇒ LENGTH (rev_slice l ih il) = ih + 1 − il
+Proof
+ simp [rev_slice_def]
+QED
+
+Theorem MEM_rev_slice:
+ ∀e l ih il. MEM e (rev_slice l ih il) ⇒ MEM e l
+Proof
+ metis_tac [rev_slice_def, MEM_TAKE, MEM_DROP_IMP]
+QED
+
+Theorem EVERY_rev_slice:
+ ∀P l i1 i2. EVERY P l ⇒ EVERY P (rev_slice l i1 i2)
+Proof
+ rw [rev_slice_def] \\ match_mp_tac EVERY_TAKE \\ match_mp_tac EVERY_DROP \\ first_x_assum MATCH_ACCEPT_TAC
+QED
+
 Theorem length_revLUPDATE[simp]:
  !e n l. LENGTH (revLUPDATE e n l) = LENGTH l
 Proof
@@ -52,19 +74,141 @@ Proof
  simp [revEL_def]
 QED
 
-Theorem dropWhile_MAP:
- !l f P. dropWhile P (MAP f l) = MAP f (dropWhile (P o f) l)
+Theorem EVERY_revEL:
+ ∀l P. EVERY P l ⇔ ∀n. n < LENGTH l ⇒ P (revEL n l)
 Proof
- Induct \\ rw []
+ rw [revEL_def, EVERY_EL] \\ eq_tac \\ rpt strip_tac \\
+ first_x_assum (qspec_then ‘LENGTH l − (n + 1)’ assume_tac) \\ gs []
 QED
 
-(* Bad rewrite, lhs in rhs *)
+Theorem EVERY_revLUPDATE_IMP:
+ ∀xs x i P. P x ∧ EVERY P xs ⇒ EVERY P (revLUPDATE x i xs)
+Proof
+ rw [revLUPDATE_def] \\ match_mp_tac IMP_EVERY_LUPDATE \\ simp []
+QED
+
+(* Bad rewrite, lhs in rhs -- do not move to list theory *)
 Theorem dropWhile_LASTN:
  !l x. dropWhile ($= x) l = LASTN (LENGTH (dropWhile ($= x) l)) l
 Proof
  Induct
  >- rw [rich_listTheory.LASTN_def]
  \\ rw [dropWhile_def, rich_listTheory.LASTN_LENGTH_ID, rich_listTheory.LASTN_CONS, LENGTH_dropWhile_LESS_EQ]
+QED
+
+Theorem dropWhile_MAP:
+ !l f P. dropWhile P (MAP f l) = MAP f (dropWhile (P o f) l)
+Proof
+ Induct \\ rw []
+QED
+
+Theorem GENLIST_EQ_NIL:
+ ∀f n. GENLIST f n = [] ⇔ n = 0
+Proof
+ gen_tac \\ Cases \\ simp [GENLIST]
+QED
+
+(* Rename to GENLIST_FUN_EQ if merged into listTheory *)
+Theorem GENLIST_FUN_EQ_gen:
+ ∀n m f g. GENLIST f n = GENLIST g m ⇔ (n = m ∧ ∀x. x < n ⇒ f x = g x)
+Proof
+ metis_tac [LIST_EQ_REWRITE, LENGTH_GENLIST, EL_GENLIST]
+QED
+
+Theorem EVERY_MAPi:
+ ∀P f l. EVERY P (MAPi f l) ⇔ EVERYi (λi x. P (f i x)) l
+Proof
+ Induct_on ‘l’ \\ simp [EVERYi_def, combinTheory.o_DEF]
+QED
+
+Theorem EVERYi_EL:
+ ∀l P. EVERYi P l ⇔ ∀i. i < LENGTH l ⇒ P i (EL i l)
+Proof
+ Induct \\ rw [EVERYi_def, EQ_IMP_THM]
+ >- (Cases_on ‘i’ \\ simp [])
+ >- (first_x_assum (qspec_then ‘0’ mp_tac) \\ simp [])
+ >- (first_x_assum (qspec_then ‘SUC i’ mp_tac) \\ simp [])
+QED
+
+Theorem EVERYi_T:
+ ∀l. EVERYi (λi x. T) l
+Proof
+ simp [EVERYi_EL]
+QED
+
+(** pairTheory extra **)
+Theorem FST_THM:
+ FST = λ(x, y). x
+Proof
+ rw [FUN_EQ_THM] \\ pairarg_tac \\ simp []
+QED
+
+Theorem FST_o:
+ ∀f. FST ∘ (λ(p1, p2). (p1, f p1 p2)) = FST
+Proof
+ gen_tac \\ simp [FUN_EQ_THM] \\ PairCases \\ simp []
+QED
+
+(** alistTheory extra **)
+Theorem ALOOKUP_FILTER_FST:
+ ∀ls x. ALOOKUP (FILTER (P o FST) ls) x = if P x then ALOOKUP ls x else NONE
+Proof
+ simp [combinTheory.o_DEF, pairTheory.LAMBDA_PROD, alistTheory.ALOOKUP_FILTER]
+QED
+
+Theorem ALL_DISTINCT_MAP_FILTER:
+ ∀l f P. ALL_DISTINCT (MAP f l) ⇒ ALL_DISTINCT (MAP f (FILTER P l))
+Proof
+ Induct \\ rw [] \\ fs [MEM_MAP, MEM_FILTER]
+QED
+
+Theorem ALOOKUP_NONE_FILTER:
+ ∀l k P. ALOOKUP l k = NONE ⇒ ALOOKUP (FILTER P l) k = NONE
+Proof
+ Induct \\ TRY PairCases \\ rw []
+QED
+
+Theorem ALOOKUP_SOME_FILTER:
+ ∀l k v v' P. ALOOKUP (FILTER P l) k = SOME v' ∧ ALOOKUP l k = SOME v ∧ ALL_DISTINCT (MAP FST l) ⇒ v' = v
+Proof
+ Induct \\ TRY PairCases \\ rw [] \\ metis_tac [ALOOKUP_NONE, ALOOKUP_NONE_FILTER, optionTheory.option_CLAUSES]
+QED
+
+(* TODO: Should replace the above: *)
+Theorem ALOOKUP_SOME_FILTER_gen:
+ ∀l k v P. ALOOKUP (FILTER P l) k = SOME v ∧ ALL_DISTINCT (MAP FST l) ⇒ ALOOKUP l k = SOME v
+Proof
+ Induct \\ TRY PairCases \\ rw [] \\ metis_tac [ALOOKUP_NONE, ALOOKUP_NONE_FILTER, optionTheory.option_CLAUSES]
+QED
+
+Theorem ALL_DISTINCT_ALOOKUP_NONE_FILTER:
+ ALL_DISTINCT (MAP FST l) ∧ ALOOKUP l x = NONE ⇒ ALOOKUP (FILTER P l) x = NONE
+Proof
+ rw [ALOOKUP_NONE, MEM_MAP, MEM_FILTER]
+QED
+
+Theorem ALOOKUP_ALL_DISTINCT_MEM_gen:
+ ALL_DISTINCT (MAP FST al) ⇒ (ALOOKUP al k = SOME v ⇔ MEM (k,v) al)
+Proof
+ metis_tac [ALOOKUP_ALL_DISTINCT_MEM, ALOOKUP_MEM]
+QED
+
+Theorem EVERY_ALOOKUP:
+ ∀l P. ALL_DISTINCT (MAP FST l) ⇒ (EVERY P l ⇔ ∀k v. ALOOKUP l k = SOME v ⇒ P (k,v))
+Proof
+ simp [pairTheory.FORALL_PROD, EVERY_MEM] \\ metis_tac [ALOOKUP_ALL_DISTINCT_MEM_gen]
+QED
+
+Theorem ALOOKUP_EVERY:
+ ∀l k v P. ALOOKUP l k = SOME v ∧ EVERY P l ⇒ P (k, v)
+Proof
+ rw [EVERY_MEM, ALOOKUP_MEM]
+QED
+
+Theorem MEM_pair:
+ ∀l x y. MEM (x, y) l ⇒ MEM x (MAP FST l) ∧ MEM y (MAP SND l)
+Proof
+ Induct \\ fs [MEM_MAP, pairTheory.EXISTS_PROD] \\ metis_tac []
 QED
 
 (** bitTheory extra **)
@@ -185,13 +329,19 @@ Proof
  simp [v2n_snoc, arithmeticTheory.EXP] \\ decide_tac
 QED
 
-Theorem fixwidth_F:
+Theorem fixwidth_F: (* Should maybe use REPLICATE instead here? *)
  ∀n. fixwidth n [F] = GENLIST (K F) n
 Proof
  rw [fixwidth_def]
  >- (rw [zero_extend_def, PAD_LEFT] \\ ‘n = SUC (n - 1)’ by decide_tac \\
     pop_assum (once_rewrite_tac o single) \\ simp [GENLIST])
  \\ ‘n = 0 ∨ n = 1’ by decide_tac \\ simp []
+QED
+
+Theorem v2n_sing:
+ ∀b. v2n [b] = if b then 1 else 0
+Proof
+ rw [v2n_def, bitify_reverse_map]
 QED
 
 (** Automatic rewrites **)

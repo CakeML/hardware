@@ -9,7 +9,32 @@ open sumExtraTheory RTLTheory;
 
 val _ = new_theory "RTLBlaster";
 
-val var_cmp_def = Define `
+Datatype:
+ inp_trans = BoolInp cell_input
+           | ArrayInp (cell_input list)
+End
+
+Datatype:
+ inp_marked = GoodInp cell_input
+            | BadInp string (num option) (* included data (string+num) only needed for error reporting! *)
+End
+
+Datatype:
+ inp_trans_marked = MBoolInp inp_marked
+                  | MArrayInp (inp_marked list)
+End
+
+val _ = type_abbrev_pp ("blastsi_t", ``:(var, inp_trans_marked) balanced_map``);
+
+Datatype:
+ blasterstate =
+   <| si : blastsi_t
+    ; extenv : (string, rtltype) alist
+    ; tmpnum : num
+    |>
+End
+
+Definition var_cmp_def:
  (var_cmp (RegVar reg1 n1) (RegVar reg2 n2) =
   let scmp = string_cmp reg1 reg2 in
    if scmp = Equal then
@@ -18,7 +43,8 @@ val var_cmp_def = Define `
     scmp) /\
  (var_cmp (RegVar _ _) (NetVar _) = Less) /\
  (var_cmp (NetVar n1) (NetVar n2) = num_cmp n1 n2) /\
- (var_cmp (NetVar _) (RegVar _ _) = Greater)`;
+ (var_cmp (NetVar _) (RegVar _ _) = Greater)
+End
 
 Theorem var_cmp_good:
  good_cmp var_cmp
@@ -33,61 +59,81 @@ Proof
  Cases \\ Cases \\ rw [var_cmp_def]
 QED
 
-val _ = Datatype `
- inp_trans = BoolInp cell_input
-           | ArrayInp (cell_input list)`;
+Definition BadInp2str_def:
+ (BadInp2str reg NONE = reg) ∧
+ (* i is confusing currently since reg indexing is backwards (w.r.t. everything else),
+    should change that... *)
+ (BadInp2str reg (SOME i) = reg (*++ "[" ++ (num_to_dec_string i) ++ "]"*))
+End
 
-val _ = type_abbrev_pp ("blastsi_t", ``:(var, inp_trans) balanced_map``);
+Definition inp_marked_get_def:
+ (inp_marked_get (GoodInp inp) = INR inp) ∧
+ (inp_marked_get (BadInp reg idx) = INL (CombError $ "Bad cell input: " ++ BadInp2str reg idx))
+End
 
-val _ = Datatype `
- blasterstate =
-   <| si : blastsi_t (* <-- everything that has been blasted *)
-    ; extenv : (string, rtltype) alist
-    ; tmpnum : num
-    |>`;
+Theorem inp_marked_get_INR:
+ ∀minp inp. inp_marked_get minp = INR inp ⇔ minp = GoodInp inp
+Proof
+ Cases \\ simp [inp_marked_get_def]
+QED
 
-val blast_cell_input_def = Define `
- (blast_cell_input s (ConstInp (CBool b)) = BoolInp $ ConstInp $ CBool b) /\
- (blast_cell_input s (ConstInp (CArray bs)) = ArrayInp $ MAP (ConstInp o CBool) bs) /\
+Definition blast_cell_input_def:
+ (blast_cell_input s (ConstInp (CBool b)) = INR $ BoolInp $ ConstInp $ CBool b) /\
+ (blast_cell_input s (ConstInp (CArray bs)) = INR $ ArrayInp $ MAP (ConstInp o CBool) bs) /\
 
- (blast_cell_input s (ExtInp var idx) =
-  case idx of
-    SOME _ => BoolInp (ExtInp var idx)
-  | NONE =>
-     case ALOOKUP s.extenv var of
-       NONE => (* should not happen *) BoolInp (ExtInp var idx)
-     | SOME CBool_t => BoolInp (ExtInp var idx)
-     | SOME (CArray_t l) => ArrayInp $ GENLIST (\i. ExtInp var (SOME $ l - 1 - i)) l) /\
+ (blast_cell_input s (ExtInp var idx) = case idx of
+   NoIndexing =>
+    (case ALOOKUP s.extenv var of
+       NONE => INL TypeError
+     | SOME CBool_t => INR $ BoolInp $ ExtInp var idx
+     | SOME (CArray_t l) => INR $ ArrayInp $ GENLIST (\i. ExtInp var (Indexing $ l - 1 - i)) l)
+ | Indexing _ => INR $ BoolInp (ExtInp var idx)
+ | SliceIndexing i1 i2 => INR $ ArrayInp $ GENLIST (\i. ExtInp var (Indexing $ i1 - i)) (i1 - i2 + 1)) /\
 
  (blast_cell_input s (VarInp var idx) = case lookup var_cmp var s.si of
-   NONE => BoolInp (VarInp var idx)
- | SOME (BoolInp inp) => BoolInp inp (* we know that idx must be NONE here *)
- | SOME (ArrayInp inps) => case idx of
-                             SOME idx => BoolInp (if idx < LENGTH inps then revEL idx inps else ConstInp (CBool F)) (* <-- if only needed for non-valid netlists *)
-                           | NONE => ArrayInp inps)`;
+   NONE => INR $ BoolInp (VarInp var idx)
+ | SOME (MBoolInp (GoodInp inp)) => INR $ BoolInp inp (* we know that idx must be NONE here *)
+ | SOME (MBoolInp (BadInp reg idx)) => INL $ CombError $ "Bad cell input: " ++ BadInp2str reg idx
+ | SOME (MArrayInp inps) =>
+    case idx of
+      NoIndexing => sum_map ArrayInp (sum_mapM inp_marked_get inps)
+     (* if-expression only needed for ill-typed netlists *)
+    | Indexing idx =>
+       if idx < LENGTH inps then
+        sum_map BoolInp (inp_marked_get (revEL idx inps))
+       else
+        INL InvalidIndex
+    | SliceIndexing i1 i2 => sum_map ArrayInp (sum_mapM inp_marked_get (rev_slice inps i1 i2)))
+End
 
-val blaster_new_names_def = Define `
- blaster_new_names s len = (s with tmpnum := s.tmpnum + len, s.tmpnum)`;
+Definition blaster_new_names_def:
+ blaster_new_names s len = (s with tmpnum := s.tmpnum + len, s.tmpnum)
+End
 
 Definition blast_cell_bitwise_def:
- (blast_cell_bitwise s (Cell1 CNot out inp) =
-  case blast_cell_input s inp of
+ (blast_cell_bitwise s (Cell1 CNot out inp) = do
+  inp <- blast_cell_input s inp;
+  return $ case inp of
   | BoolInp inp => (s, [Cell1 CNot out inp])
   | ArrayInp inps =>
      let (s, tmpnum) = blaster_new_names s (LENGTH inps);
-         outs = GENLIST (\i. VarInp (NetVar (i + tmpnum)) NONE) (LENGTH inps);
-         s = s with si := insert var_cmp (NetVar out) (ArrayInp outs) s.si in
-      (s, MAPi (\i inp. Cell1 CNot (tmpnum + i) inp) inps)) /\
+         outs = GENLIST (\i. GoodInp $ VarInp (NetVar (i + tmpnum)) NoIndexing) (LENGTH inps);
+         s = s with si := insert var_cmp (NetVar out) (MArrayInp outs) s.si in
+      (s, MAPi (\i inp. Cell1 CNot (tmpnum + i) inp) inps)
+ od) ∧
 
- (blast_cell_bitwise s (Cell2 cell2 out inp1 inp2) =
-  case (blast_cell_input s inp1, blast_cell_input s inp2) of
+ (blast_cell_bitwise s (Cell2 cell2 out inp1 inp2) = do
+  inp1 <- blast_cell_input s inp1;
+  inp2 <- blast_cell_input s inp2;
+  return $ case (inp1, inp2) of
   | (BoolInp inp1, BoolInp inp2) => (s, [Cell2 cell2 out inp1 inp2])
   (*| (ArrayInp inps1, ArrayInp inps2) =>
      let (s, tmpnum) = blaster_new_names s (LENGTH inps1);
          outs = GENLIST (\i. VarInp (NetVar (i + tmpnum)) NONE) (LENGTH inps1);
          s = s with si := insert var_cmp (NetVar out) (ArrayInp outs) s.si in
       (s, MAPi (\i (inp1, inp2). Cell2 cell2 (tmpnum + i) inp1 inp2) (ZIP (inps1, inps2)))*)
-  | _ => (* does not happen on well-typed netlists: *) (s, []))
+  | _ => (* does not happen on well-typed netlists: *) (s, [])
+ od)
 End
 
 Definition xor_lut_table_def:
@@ -98,19 +144,19 @@ Definition blast_cell_add4_def:
  blast_cell_add4 tmpnum cin lhs rhs = let
   di = PAD_LEFT (ConstInp (CBool F)) 4 $ (*if inps1t = [] then FRONT inps1h else*) lhs;
   xor_cells = MAP2i (λi inp1 inp2. CellLUT (tmpnum + i) [inp1; inp2] xor_lut_table) lhs rhs;
-  s = PAD_LEFT (ConstInp (CBool F)) 4 $ GENLIST (λi. VarInp (NetVar (tmpnum + i)) NONE) (LENGTH lhs);
+  s = PAD_LEFT (ConstInp (CBool F)) 4 $ GENLIST (λi. VarInp (NetVar (tmpnum + i)) NoIndexing) (LENGTH lhs);
   tmpnum = tmpnum + LENGTH lhs;
   cell = Carry4 tmpnum (tmpnum + 1) cin di s;
-  outs = REVERSE $ GENLIST (λi. VarInp (NetVar tmpnum) (SOME i)) (LENGTH lhs) in
-   (tmpnum + 2, outs, VarInp (NetVar $ tmpnum + 1) (SOME (LENGTH lhs - 1)), xor_cells ++ [cell])
+  outs = REVERSE $ GENLIST (λi. VarInp (NetVar tmpnum) (Indexing i)) (LENGTH lhs) in
+   (tmpnum + 2, outs, VarInp (NetVar $ tmpnum + 1) (Indexing (LENGTH lhs - 1)), xor_cells ++ [cell])
 End
 
 (* Other synthesizers seem to have special cases for very short additions, where no carry chain is needed --
    such adders are compiled into LUTs directly without any carry4 involved.
    Also, the a bit in the input can be skipped in the last adder if we don't care about
    the carry output of that adder... Not sure why this is considered an optimization... *)
-Definition blast_cell_add_def:
- blast_cell_add tmpnum cin inps1 inps2 =
+Definition blast_cell_addarray_def:
+ blast_cell_addarray tmpnum cin inps1 inps2 =
   if inps1 = [] then (tmpnum, [], cin, []) else (* only relevant if top-level input is empty? *)
   let inps1h = REVERSE (TAKE 4 inps1);
       inps2h = REVERSE (TAKE 4 inps2);
@@ -120,12 +166,25 @@ Definition blast_cell_add_def:
   if inps1t = [] then
    (tmpnum, outs4, cout, cells4)
   else
-   let (tmpnum, cells_outs, cout, cells) = blast_cell_add tmpnum cout inps1t inps2t in
+   let (tmpnum, cells_outs, cout, cells) = blast_cell_addarray tmpnum cout inps1t inps2t in
    (tmpnum, cells_outs ++ outs4, cout, cells4 ++ cells)
 Termination
  WF_REL_TAC `measure (LENGTH o (λ(_, _, inps1, _). inps1))` \\ rw [] \\ Cases_on ‘inps1’ \\ fs []
 End
 
+Definition blast_cell_add_def:
+ blast_cell_add s out inp1 inp2 = do
+  inp1 <- blast_cell_input s inp1;
+  inp2 <- blast_cell_input s inp2;
+  return $ case (inp1, inp2) of
+   (ArrayInp inps1, ArrayInp inps2) =>
+    (let (tmpnum, outs, cout, cells) =
+          blast_cell_addarray s.tmpnum (ConstInp (CBool F)) (REVERSE inps1) (REVERSE inps2) in
+     (s with <| tmpnum := tmpnum; si := insert var_cmp (NetVar out) (MArrayInp (MAP GoodInp outs)) s.si |>, cells))
+  | _ => (s, []) (* does not happen on well-typed netlists *)
+ od
+End
+        
 Definition take_drop_def:
  (take_drop n [] = ([], [])) ∧
  (take_drop n (x::xs) =
@@ -165,10 +224,10 @@ Definition blast_cell_equal_luts_def:
       (rhsh, rhst) = take_drop 3 rhs;
       cell3 = blast_cell_equal_lut tmpnum lhsh rhsh in
    if lhst = [] then
-    (SUC tmpnum, [cell3], [VarInp (NetVar tmpnum) NONE])
+    (SUC tmpnum, [cell3], [VarInp (NetVar tmpnum) NoIndexing])
    else
     let (tmpnum', cells, outs) = blast_cell_equal_luts (SUC tmpnum) lhst rhst in
-     (tmpnum', cell3 :: cells, VarInp (NetVar tmpnum) NONE :: outs)
+     (tmpnum', cell3 :: cells, VarInp (NetVar tmpnum) NoIndexing :: outs)
 Termination
  WF_REL_TAC `measure (LENGTH o (λ(_, lhs, _). lhs))` \\ rw [take_drop_TAKE_DROP] \\
  Cases_on ‘lhs’ \\ fs []
@@ -182,7 +241,7 @@ Definition blast_cell_equal12_def:
    else
     let carrycell = Carry4 tmpnum (SUC tmpnum) preveq (REPLICATE 4 (ConstInp (CBool F)))
                                                       (PAD_LEFT (ConstInp (CBool F)) 4 outs) in
-    (tmpnum + 2, SNOC carrycell cells, VarInp (NetVar (SUC tmpnum)) (SOME (LENGTH outs - 1)))
+    (tmpnum + 2, SNOC carrycell cells, VarInp (NetVar (SUC tmpnum)) (Indexing (LENGTH outs - 1)))
 End
 
 Definition blast_cell_equalarray_def:
@@ -202,111 +261,241 @@ Termination
 End
 
 Definition blast_cell_equal_def:
- blast_cell_equal s out inp1 inp2 =
-  case (blast_cell_input s inp1, blast_cell_input s inp2) of
+ blast_cell_equal s out inp1 inp2 = do
+  inp1 <- blast_cell_input s inp1;
+  inp2 <- blast_cell_input s inp2;
+  return $ case (inp1, inp2) of
     (BoolInp inp1, BoolInp inp2) =>
       (s, [Cell2 CEqual out inp1 inp2])
   | (ArrayInp inps1, ArrayInp inps2) =>
-      (let (tmpnum, cells, out') = blast_cell_equalarray s.tmpnum (ConstInp (CBool T)) inps1 inps2 in (s with <| tmpnum := tmpnum; si := insert var_cmp (NetVar out) (BoolInp out') s.si |>, cells))
+     (let (tmpnum, cells, out') = blast_cell_equalarray s.tmpnum (ConstInp (CBool T)) inps1 inps2 in
+      (s with <| tmpnum := tmpnum; si := insert var_cmp (NetVar out) (MBoolInp (GoodInp out')) s.si |>, cells))
   | _ => (s, []) (* does not happen on well-typed netlists *)
+ od
 End
 
-val blast_cell_def = Define `
- (blast_cell s (Cell1 CNot out inp1) = blast_cell_bitwise s (Cell1 CNot out inp1)) /\
+Definition blast_cell_def:
+ (blast_cell s (Cell1 CNot out inp1) = blast_cell_bitwise s (Cell1 CNot out inp1)) ∧
 
  (blast_cell s (Cell2 cell2 out inp1 inp2) = 
   case cell2 of
     CAnd => blast_cell_bitwise s (Cell2 cell2 out inp1 inp2)
   | COr => blast_cell_bitwise s (Cell2 cell2 out inp1 inp2)
   | CEqual => blast_cell_equal s out inp1 inp2
-  | CAdd => (case (blast_cell_input s inp1, blast_cell_input s inp2) of
-              (ArrayInp inps1, ArrayInp inps2) =>
-               (let (tmpnum, outs, cout, cells) = blast_cell_add s.tmpnum (ConstInp (CBool F)) (REVERSE inps1) (REVERSE inps2) in (s with <| tmpnum := tmpnum; si := insert var_cmp (NetVar out) (ArrayInp outs) s.si |>, cells))
-             | _ => (s, []) (* does not happen on well-typed netlists *))) /\
+  | CAdd => blast_cell_add s out inp1 inp2) ∧
 
- (blast_cell s (CellMux out inp1 inp2 inp3) =
-  case (blast_cell_input s inp1, blast_cell_input s inp2, blast_cell_input s inp3) of
-  | (BoolInp inp1, BoolInp inp2, BoolInp inp3) => (s, [CellMux out inp1 inp2 inp3])
+ (blast_cell s (CellMux out inp1 inp2 inp3) = do
+  inp1 <- blast_cell_input s inp1;
+  inp2 <- blast_cell_input s inp2;
+  inp3 <- blast_cell_input s inp3;
+  return $ case (inp1, inp2, inp3) of
+    (BoolInp inp1, BoolInp inp2, BoolInp inp3) => (s, [CellMux out inp1 inp2 inp3])
   | (BoolInp inp1, ArrayInp inps1, ArrayInp inps2) =>
      let (s, tmpnum) = blaster_new_names s (LENGTH inps1);
-         outs = GENLIST (\i. VarInp (NetVar (i + tmpnum)) NONE) (LENGTH inps1);
-         s = s with si := insert var_cmp (NetVar out) (ArrayInp outs) s.si in
+         outs = GENLIST (\i. GoodInp (VarInp (NetVar (i + tmpnum)) NoIndexing)) (LENGTH inps1);
+         s = s with si := insert var_cmp (NetVar out) (MArrayInp outs) s.si in
       (s, MAP2i (\i inp2 inp3. CellMux (tmpnum + i) inp1 inp2 inp3) inps1 inps2)
-  | _ => (* does not happen on well-typed netlists: *) (s, [])) ∧
+  | _ => (* does not happen on well-typed netlists: *) (s, [])
+ od) ∧
 
  (blast_cell s (CellArrayWrite out inp1 idx inp2) =
-  case blast_cell_input s inp1 of
-   ArrayInp inps =>
-    (case blast_cell_input s inp2 of
-       BoolInp inp2 =>
-        (s with si := insert var_cmp (NetVar out) (ArrayInp (if idx < LENGTH inps then revLUPDATE inp2 idx inps else inps)) s.si, [])
-     | _ => (* should not happen, inp2 must be bool *) (s, []))
-  | _ => (* should not happen, inp1 must be array *) (s, [])) /\
- (* shouldn't be any of these: *)
- (blast_cell s c = (s, [c]))`;
+  case inp1 of
+   VarInp var NoIndexing => do
+    inp2 <- blast_cell_input s inp2;
+    case (lookup var_cmp var s.si, inp2) of
+     (SOME (MArrayInp inps), BoolInp inp2) =>
+      INR (s with si := insert var_cmp (NetVar out) (MArrayInp (if idx < LENGTH inps then revLUPDATE (GoodInp inp2) idx inps else inps)) s.si, [])
+    | _ => INL TypeError (* might work with (s, []) here instead, not important anyway *)
+ od
+  | _ => INL TypeError) ∧
 
-val blast_netlist_def = Define `
- (blast_netlist s [] = (s, [])) /\
- (blast_netlist s (c::cs) =
-  let (s, c') = blast_cell s c;
-      (s, cs') = blast_netlist s cs in
-   (s, c' ++ cs'))`;
+ (blast_cell s c = return (s, [c]))
+End
 
-val blast_regs_def = Define `
+Definition blast_netlist_def:
+ (blast_netlist s [] = return (s, [])) /\
+ (blast_netlist s (c::cs) = do
+  (s, c') <- blast_cell s c;
+  (s, cs') <- blast_netlist s cs;
+  return (s, c' ++ cs')
+ od)
+End
+
+Definition blast_regs_def:
  (blast_regs s [] = return []) /\
- (blast_regs s ((ty, dest, destnum, v, inp)::rs) =
-  case ty of
+ (blast_regs s (((reg, i), rdata)::rs) =
+ case rdata.reg_type of
+  Reg =>
+  (case rdata.type of
     CBool_t =>
-     (case OPTION_MAP (blast_cell_input s) inp of (* TODO: Can remove OPTION_MAP here... *)
+     (case rdata.inp of
        NONE => do
         rs' <- blast_regs s rs;
-        return $ (ty, dest, destnum, v, NONE) :: rs'
+        return $ ((reg, i), rdata) :: rs'
        od
-     | SOME (BoolInp inp) => do
-        rs' <- blast_regs s rs;
-        return $ (ty, dest, destnum, v, SOME inp) :: rs'
-       od
-     | _ => INL TypeError)
-  | CArray_t l =>
-     case v of
-       SOME (CArray vs) =>
+     | SOME inp => do
+        inp <- blast_cell_input s inp;
         (case inp of
+           ArrayInp _ => INL TypeError
+         | BoolInp inp => do
+            rs' <- blast_regs s rs;
+            return $ ((reg, i), rdata with inp := SOME inp) :: rs'
+           od)
+        od)
+  | CArray_t l =>
+     case rdata.init of
+       SOME (CArray vs) =>
+        (case rdata.inp of
           NONE => do
            rs' <- blast_regs s rs;
-           return ((GENLIST (\i. (CBool_t, dest, i, SOME $ CBool $ EL i vs, NONE)) (LENGTH vs)) ++ rs')
+           return $ GENLIST (λi. ((reg, i), <| type := CBool_t; reg_type := Reg; init := SOME $ CBool $ EL i vs; inp := NONE |>)) (LENGTH vs) ++ rs'
           od
-        | SOME inp =>
-           (case blast_cell_input s inp of
+        | SOME inp => do
+          inp <- blast_cell_input s inp;
+          (case inp of
              BoolInp _ => INL TypeError
-           | ArrayInp inp' => do
+           | ArrayInp inp => do
               (* can be false if we are compiling ill-typed circuits: *)
-              sum_check (LENGTH vs = LENGTH inp') TypeError;
+              sum_check (LENGTH vs = LENGTH inp) TypeError;
               rs' <- blast_regs s rs;
-              return (MAPi (\i inp. (CBool_t, dest, i, SOME $ CBool $ EL i vs, SOME inp)) inp' ++ rs')
-             od))
-     | _ => INL TypeError (* we only care about wf+deterministic circuits currently *))`;
+              return $ MAPi (λi inp. ((reg, i), <| type := CBool_t; reg_type := Reg; init := SOME $ CBool $ EL i vs; inp := SOME inp |>)) inp ++ rs'
+             od)
+          od)
+     | _ => INL TypeError (* we only care about wf+deterministic circuits currently *))
+   | PseudoReg =>
+      blast_regs s rs)
+End
 
-val build_si_entry_def = Define `
- build_si_entry (t, var, n, v, inp) = case t of
-   CBool_t => NONE
- | CArray_t l => SOME (RegVar var 0, ArrayInp $ GENLIST (\i. VarInp (RegVar var i) NONE) l)`;
+Definition mk_inp_marked_def:
+ (mk_inp_marked Reg reg i = GoodInp (VarInp (RegVar reg i) NoIndexing)) ∧
+ (mk_inp_marked PseudoReg reg i = BadInp reg (SOME i))
+End
 
-val option_flatMap_def = Define `
+Definition build_combs_si_reg_entry_def:
+ build_combs_si_reg_entry ((reg, i), rdata) =
+  case rdata.type of
+    CBool_t => (case rdata.reg_type of
+                  Reg => NONE
+                | PseudoReg => SOME (RegVar reg i, MBoolInp $ BadInp reg NONE))
+  | CArray_t l => SOME (RegVar reg i, MArrayInp $ GENLIST (mk_inp_marked rdata.reg_type reg) l)
+End
+
+Definition option_flatMap_def:
  (option_flatMap f [] = []) /\
  (option_flatMap f (x::xs) =
   case f x of
     NONE => option_flatMap f xs
-  | SOME x => x :: option_flatMap f xs)`;
+  | SOME x => x :: option_flatMap f xs)
+End
+        
+Definition initial_si_def:
+ initial_si regs = fromList var_cmp $ option_flatMap build_combs_si_reg_entry regs
+End
 
-val blast_circuit_def = Define `
- blast_circuit (Circuit extenv regs nl) tmpnum =
-  let s = <| si := fromList var_cmp (option_flatMap build_si_entry regs);
-             extenv := extenv;
-             tmpnum := tmpnum |>;
-             (s', nl') = blast_netlist s nl in
-   do
-    regs' <- blast_regs s' regs;
-    return (Circuit extenv regs' nl', s')
-   od`;
+Definition blast_out_def:
+ (blast_out s (var, OutInp inp) = do
+   binp <- blast_cell_input s inp;
+   return (case binp of
+             BoolInp inp => (var, OutInp inp)
+           | ArrayInp inps => (var, OutInps inps))
+  od) ∧
+ (blast_out s x = (* should never happen *) return x)
+End
+
+Definition blast_outs_def:
+ blast_outs s outs = sum_mapM (blast_out s) outs
+End
+
+(* This can be made more fine-grained by not requiring everything to be good inputs,
+   i.e. passing blast_cell_input. But the current way is simpler for now. *)
+Definition blast_pseudoreg_inp_def:
+ blast_pseudoreg_inp s inp = do
+  binp <- blast_cell_input s inp;
+  return $ case binp of
+             BoolInp inp => MBoolInp $ GoodInp inp
+           | ArrayInp inps => MArrayInp $ MAP GoodInp inps
+ od
+End
+
+ (*  case lookup var_cmp var s.si of
+    NONE => MBoolInp (GoodInp (VarInp var idx))
+  | SOME (MBoolInp minp) => MBoolInp minp (* idx must be NoIndexing here, so can ignore it *)
+  | SOME (MArrayInp inps) =>
+      case idx of
+        NoIndexing => GoodInp (MArrayInp inps)
+      | Indexing idx =>
+          if idx < LENGTH inps then
+            sum_map BoolInp (inp_marked_get (revEL idx inps))
+          else INR (BoolInp (ConstInp (CBool F)))
+      | SliceIndexing i1 i2 =>
+          sum_map ArrayInp (sum_mapM inp_marked_get (rev_slice inps i1 i2))) ∧
+ (blast_pseudoreg_inp s inp = GoodInp (blast_cell_input s inp))*)
+
+Definition build_ffs_si_reg_entry_def:
+ build_ffs_si_reg_entry s ((reg, i), rdata) =
+  case rdata.reg_type of
+   PseudoReg =>
+    (case rdata.inp of
+      NONE => 
+        (case rdata.init of
+          NONE => INL Impossible (* cannot happen since regs are deterministic *)
+         | SOME init => do
+           minp <- blast_pseudoreg_inp s (ConstInp init);
+           return $ SOME (RegVar reg i, minp)
+          od)
+     | SOME inp => do
+      minp <- blast_pseudoreg_inp s inp;
+      (* since we might have been given an ill-typed netlist *)
+      (case (rdata.type, minp) of
+         (CBool_t, MBoolInp inp) => return $ SOME (RegVar reg i, minp)
+       | (CArray_t l, MArrayInp inps) => do
+          sum_check (LENGTH inps = l) TypeError;
+          return $ SOME (RegVar reg i, minp)
+         od
+       | _ => INL TypeError)
+     od)
+  | Reg => 
+     return $ case rdata.type of
+                CBool_t => NONE
+              | CArray_t l =>
+                 SOME (RegVar reg i, MArrayInp $ GENLIST (λi. GoodInp $ VarInp (RegVar reg i) NoIndexing) l)
+End
+
+Definition sum_option_flatMap_def:
+ (sum_option_flatMap f [] = INR []) /\
+ (sum_option_flatMap f (x::xs) = do
+  x' <- f x;
+  case x' of
+    NONE => sum_option_flatMap f xs
+  | SOME x' => do
+     xs' <- sum_option_flatMap f xs;
+     return $ x' :: xs'
+    od
+  od)
+End
+
+(* Would be nice to drop all NetVars here, but then we have to prove that the ffs netlist
+   never refers to combs netlist, which we have not done yet.
+   (Nice because we would get better performance.) *)
+Definition ffs_si_def:
+ ffs_si s regs = sum_map (FOLDR (λ(k,v) t. insert var_cmp k v t) s.si)
+                         (sum_option_flatMap (build_ffs_si_reg_entry s) regs)
+End
+
+Definition blast_circuit_def:
+ blast_circuit (Circuit extenv outs regs nl_combs nl_ffs) tmpnum = do
+  s <<- <| si := initial_si regs; extenv := extenv; tmpnum := tmpnum |>;
+
+  (s, nl_combs') <- blast_netlist s nl_combs;
+
+  new_si <- ffs_si s regs;
+  s <<- s with si := new_si;
+  (s, nl_ffs') <- blast_netlist s nl_ffs;
+
+  regs' <- blast_regs s regs;
+  outs' <- blast_outs s outs;
+  return (Circuit extenv outs' regs' (nl_combs' ++ nl_ffs') [], s)
+ od
+End
 
 val _ = export_theory ();

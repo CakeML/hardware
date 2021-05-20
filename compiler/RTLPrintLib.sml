@@ -74,11 +74,43 @@ fun print_extenv extenv = let
  fun print_extenv' entry = let
   val (var, ty) = entry |> pairSyntax.dest_pair
  in
-  " " ^ print_type ty ^ " " ^ stringSyntax.fromHOLstring var ^ ",\n"
+  " input " ^ print_type ty ^ " " ^ stringSyntax.fromHOLstring var ^ ",\n"
  end
  val extenv = extenv |> dest_list |> fst
 in
  map print_extenv' extenv |> concat
+end;
+
+fun print_outs outs = let
+ fun print_out (var, inp) =
+  if is_OutInp inp then
+   " output logic " ^ (stringSyntax.fromHOLstring var)
+  else let
+   val len = inp |> dest_OutInps |> dest_list |> fst |> length
+  in
+   " output logic[" ^ Int.toString (len - 1) ^ ":0] " ^ (stringSyntax.fromHOLstring var)
+  end
+ val outs = outs |> dest_list |> fst |> map pairSyntax.dest_pair
+in
+ map print_out outs |> String.concatWith ",\n"
+end;
+
+fun print_outs_assign outs = let
+ fun print_out (var, inp) =
+  if is_OutInp inp then let
+   val inp = inp |> dest_OutInp |> extract_cell_input |> print_cell_input
+  in
+   "assign " ^ (stringSyntax.fromHOLstring var) ^ " = " ^ inp ^ ";\n"
+  end else let
+   val inp = inp |> dest_OutInps |> dest_list |> fst
+                 |> map (print_cell_input o extract_cell_input) |> String.concatWith ", "
+  in
+   "assign " ^ (stringSyntax.fromHOLstring var) ^ " = {" ^ inp ^ "};\n"
+  end
+
+  val outs = outs |> dest_list |> fst |> map pairSyntax.dest_pair
+in
+ map print_out outs |> concat
 end;
 
 fun print_wires nl = let
@@ -98,11 +130,13 @@ FDCE #(.INIT(INIT)) FDCE_inst (
 );
 *)
 fun print_regs regs = let
- fun print_reg reg = let
-  val [ty, name, i, v, inp] = pairSyntax.spine_pair reg
+ fun print_reg (regi, rdata) = let
+  val (reg, i) = pairSyntax.dest_pair regi
   (* Could sanity-check ty here... *)
-  val reg = stringSyntax.fromHOLstring name ^ term_to_string i
-  val v = v |> optionSyntax.dest_some |> print_CBool
+  val reg = stringSyntax.fromHOLstring reg ^ term_to_string i
+  val rdata = rdata |> TypeBase.dest_record |> snd
+  val v = lookup "init" rdata |> optionSyntax.dest_some |> print_CBool
+  val inp = lookup "inp" rdata;
  in
   "logic " ^ reg ^ ";\n" ^
   "FDCE #(.INIT(" ^ v ^ ")) FDCE_" ^ reg ^ " (\n" ^
@@ -114,7 +148,7 @@ fun print_regs regs = let
   else
    " .CE(1'b0), .D(1'b0));\n\n")
  end
- val regs = regs |> dest_list |> fst
+ val regs = regs |> dest_list |> fst |> map pairSyntax.dest_pair
 in
  map print_reg regs |> concat
 end;
@@ -172,30 +206,32 @@ CARRY4 CARRY4_inst (
 
 val print_nl = concat o map print_cell;
 
+(* TODO: Need to check that wire names do not collide with reg names *)
 fun print_Circuit tm = let
- val (extenv, regs, nl) = dest_Circuit tm
- val nl = extract_netlist nl
+ val (extenv, outs, regs, nl_combs, nl_ffs) = dest_Circuit tm
+ val nl_combs = extract_netlist nl_combs
+ val nl_ffs = extract_netlist nl_ffs
+ val has_regs = listSyntax.is_cons regs
 in
  "module Circuit(\n" ^
- " input clk,\n" ^
+ (if has_regs then " input clk,\n" else "") ^
  print_extenv extenv ^
- " // add other inputs and outputs\n" ^
- ");\n" ^
+ (* todo: print correctly if outs empty... but on the other hand, do we ever have no outputs? *)
+ print_outs outs ^
+ ");\n\n" ^
+ 
+ print_wires nl_combs ^
+ print_wires nl_ffs ^
+ "\n" ^
 
- "\n" ^
- print_wires nl ^
- "\n" ^
  print_regs regs ^
- print_nl nl ^
- "endmodule\n"
-end;
 
-(* For concatenating blasted regs *)
-fun unblast_regs reg len = let
- val regs = String.concatWith ", " (List.tabulate (len, (fn i => reg ^ Int.toString i)))
-in
- ("output logic[" ^ Int.toString (len - 1) ^ ":0] " ^ reg,
- "assign " ^ reg ^ " = {" ^ regs ^ "}")
+ print_outs_assign outs ^
+ "\n" ^
+
+ print_nl nl_combs ^
+ print_nl nl_ffs ^
+ "endmodule\n"
 end;
 
 end

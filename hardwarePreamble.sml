@@ -7,21 +7,27 @@ open HolKernel Parse boolLib bossLib BasicProvers;
 open listTheory wordsTheory;
 open numLib wordsLib mp_then;
 
-(* Project libraries *)
 open hardwareMiscTheory;
-
-(*
-Setup:
-guess_lengths ();
-prefer_num ();
-*)
 
 (* Borrowed from cakeml: *)
 val rveq = rpt BasicProvers.VAR_EQ_TAC;
 val asm_exists_tac = goal_assum drule;
 val asm_exists_any_tac = goal_assum (first_assum o mp_then Any mp_tac);
 
-(* *)
+(* Handle multiple goals at the same time: *)
+
+fun op THEN2 (tac1, tac2) = tac1 THEN1 tac2 THEN1 tac2;
+infix THEN2;
+fun op THEN3 (tac1, tac2) = tac1 THEN2 tac2 THEN1 tac2;
+infix THEN3;
+fun op THEN4 (tac1, tac2) = tac1 THEN3 tac2 THEN1 tac2;
+infix THEN4;
+fun op THEN5 (tac1, tac2) = tac1 THEN4 tac2 THEN1 tac2;
+infix THEN5;
+fun op THEN6 (tac1, tac2) = tac1 THEN5 tac2 THEN1 tac2;
+infix THEN6;
+
+(* drule-based tactics *)
 
 fun drule_strip_tac (g as (tms, tm)) = let
   val tm = tm |> dest_imp |> fst |> strip_forall |> snd
@@ -33,6 +39,7 @@ in
 end;
 
 fun drule_strip th = drule th \\ rpt (disch_then drule) \\ TRY drule_strip_tac \\ rveq;
+fun rev_drule_strip th = rev_drule th \\ rpt (disch_then drule) \\ TRY drule_strip_tac \\ rveq;
 val drule_first = first_x_assum drule \\ rpt (disch_then drule) \\ TRY drule_strip_tac;
 val drule_last = last_x_assum drule \\ rpt (disch_then drule) \\ TRY drule_strip_tac;
 

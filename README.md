@@ -1,18 +1,30 @@
 Verilog development and verification project for HOL4
 
+# Important directories
+
+The formal Verilog semantics is located in the directory `verilog`.
+
+The verified Verilog synthesis tool Lutsig is located in the `compiler` directory. The (latest) proof-producing code generator is located in `newTranslator`.
+
+Some examples on how to use Lutsig and the code generator in practice are available in the `example` directory. There is also a test-suite for Lutsig available, based on unverified parsing of Verilog text files, in the `verilog_parser` directory.
+
+Silver-related theories are spread out into multiple directories, but the most important ones are `ag32` and `cakeml_connection`.
+
 # Installation and setup
 
 The development requires [HOL4](https://hol-theorem-prover.org).
 
-## Ag32-specific setup
+For Silver (ag32), additional setup is required, as described below.
 
-To build Ag32-related theories, such as the processor itself and `cakeml_connection`, you need to point `$CAKEMLDIR` to your CakeML compiler directory.
+## Silver setup
 
-Because the Verilog semantics has been updated since Ag32 was developed, the Ag32 stuff will not build using the latest commit. If you want to build Ag32, use e.g. dc281059bd3a19e478fb211aadda1c2ac7891fa9.
+To build Silver-related theories, such as the processor itself and `cakeml_connection`, you need to point `$CAKEMLDIR` to your CakeML compiler directory.
+
+Because the Verilog semantics has been updated since Silver was developed, the Silver theories will not build using the latest commit. If you want to build Silver, use e.g. dc281059bd3a19e478fb211aadda1c2ac7891fa9. (This is just a temporary workaround.)
 
 ### ISA generation
 
-Translating the Silver ISA from L3 to HOL is not necessary as the already-translated ISA stored in the CakeML compiler project is used.
+Translating the Silver ISA from L3 to HOL is not necessary as the already-translated ISA stored in the CakeML compiler project is used in all Silver theories.
 
 However, after updating the L3 ISA the following steps are required to update the HOL ISA.
 

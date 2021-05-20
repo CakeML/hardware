@@ -86,6 +86,9 @@ Inductive vertype_exp:
  (env var = SOME (VArray_t l1) /\ vertype_exp extenv env i (VArray_t ilen) ==>
   vertype_exp extenv env (ArrayIndex (Var var) ilen i) VBool_t) /\
 
+ (env var = SOME (VArray_t l) /\ i1 < l ∧ i2 ≤ i1 ∧ i3 = i1 - i2 + 1 ==>
+  vertype_exp extenv env (ArraySlice (Var var) i1 i2) (VArray_t i3)) ∧
+
  (vertype_exp extenv env e VBool_t ==>
   vertype_exp extenv env (BUOp Not e) VBool_t) ∧
 
@@ -130,15 +133,16 @@ Inductive vertype_stmt:
   vertype_stmt extenv env (NonBlockingAssign (Indexing var ilen i) (SOME e)))
 End
 
-Inductive vertype_prog:
- (env var = NONE /\ vertype_prog ((var =+ SOME ty) env) (Module extenv ds ps) ==>
-  vertype_prog env (Module extenv ((ty, var, NONE)::ds) ps)) /\
+(*Inductive vertype_prog:
+ (env var = NONE /\ vertype_prog ((var =+ SOME ty) env) (Module extenv ds cs ps mem) ==>
+  vertype_prog env (Module extenv ((ty, var, Store NONE)::ds) cs ps mem)) /\
 
- (vertype_v v ty /\ env var = NONE /\ vertype_prog ((var =+ SOME ty) env) (Module extenv ds ps) ==>
-  vertype_prog env (Module extenv ((ty, var, SOME v)::ds) ps)) /\
+ (vertype_v v ty /\ env var = NONE /\ vertype_prog ((var =+ SOME ty) env) (Module extenv ds cs ps mem) ==>
+  vertype_prog env (Module extenv ((ty, var, Store (SOME v))::ds) cs ps mem)) /\
 
- (EVERY (vertype_stmt extenv env) ps ==> vertype_prog env (Module extenv [] ps))
-End
+ (m.decls = [] ∧ EVERY (vertype_stmt m.fextty env) m.ffs ∧ EVERY (vertype_stmt m.fextty env) m.combs ==>
+  vertype_prog env m)
+End*)
 
 (** Some vertype_prog properties **)
 
@@ -174,17 +178,27 @@ Proof
 QED
 
 Definition Ev_from_decls_def:
- Ev_from_decls decls = alist_to_map $ MAP (λ(ty, var, v). (var, ty)) decls
+ Ev_from_decls decls = alist_to_map $ MAP (λ(var, data). (var, data.type)) decls
 End
 
 Definition Ev_covers_decls_def:
- Ev_covers_decls Ev decls <=> (!t var v. MEM (t, var, v) decls ==> Ev var = SOME t)
+ Ev_covers_decls Ev decls <=> (!var data. MEM (var, data) decls ==> Ev var = SOME data.type)
+End
+
+(* Temporary definition... *)
+Definition vertype_prog_def:
+ vertype_prog m ⇔
+ ALL_DISTINCT (MAP FST m.decls) ∧
+ EVERY (λ(var, data). OPTION_ALL (λv. vertype_v v data.type) data.init) m.decls ∧
+ EVERY (vertype_stmt m.fextty (Ev_from_decls m.decls)) m.ffs ∧
+ EVERY (vertype_stmt m.fextty (Ev_from_decls m.decls)) m.combs
 End
 
 Theorem Ev_from_decls_decls_type:
  ∀decls var t. Ev_from_decls decls var = SOME t ⇔ decls_type decls var = INR t
 Proof
- simp [Ev_from_decls_def, decls_type_sum_alookup, alist_to_map_alookup, sum_alookup_INR]
+ rw [Ev_from_decls_def, decls_type_def, alist_to_map_alookup, sum_alookup_INR] \\ TOP_CASE_TAC \\
+ simp [alistTheory.ALOOKUP_MAP]
 QED
 
 Theorem Ev_from_decls_nil:
@@ -194,35 +208,28 @@ Proof
 QED
 
 Theorem Ev_from_decls_cons:
- ∀decls ty var v. Ev_from_decls ((ty,var,v)::decls) = (Ev_from_decls decls)⦇var ↦ SOME ty⦈
+ ∀decls var data. Ev_from_decls ((var, data)::decls) = (Ev_from_decls decls)⦇var ↦ SOME data.type⦈
 Proof
  rw [Ev_from_decls_def, alist_to_map_def]
 QED
 
 Theorem Ev_covers_decls_cons:
- !Ev t var v decls.
- Ev_covers_decls Ev ((t,var,v)::decls) <=> Ev var = SOME t /\ Ev_covers_decls Ev decls
+ !Ev var data decls.
+ Ev_covers_decls Ev ((var, data)::decls) <=> Ev var = SOME data.type /\ Ev_covers_decls Ev decls
 Proof
  rw [Ev_covers_decls_def] \\ metis_tac []
 QED
 
-Theorem Ev_from_decls_not_in_decls:
- !decls var. ALOOKUP (MAP (λ(ty,var,v). (var,ty)) decls) var = NONE ⇔ (Ev_from_decls decls) var = NONE
-Proof
- rw [Ev_from_decls_def, alist_to_map_alookup]
-QED
-
 Theorem Ev_covers_decls_Ev_from_decls:
- !decls. ALL_DISTINCT (MAP (λ(t,var,v). var) decls) ==> Ev_covers_decls (Ev_from_decls decls) decls
+ !decls. ALL_DISTINCT (MAP FST decls) ==> Ev_covers_decls (Ev_from_decls decls) decls
 Proof
  Induct \\ TRY PairCases \\ fs [Ev_from_decls_def, Ev_covers_decls_def] \\ rpt strip_tac \\ rveq \\
- fs [alist_to_map_cons, MEM_MAP] \\ first_x_assum (qspec_then ‘(t, var, v)’ strip_assume_tac) \\ fs [] \\
- drule_first
+ fs [alist_to_map_cons, MEM_MAP] \\ first_x_assum (qspec_then ‘(var, data)’ strip_assume_tac) \\ gs []
 QED
 
-Theorem vertype_prog_decls_not_in_env:
- !decls env fextenv ps var t.
- vertype_prog env (Module fextenv decls ps) /\ env var = SOME t ==>
+(*Theorem vertype_prog_decls_not_in_env:
+ !decls env fextenv cs ps mem var t.
+ vertype_prog env (Module fextenv decls cs ps mem) /\ env var = SOME t ==>
  ~MEM var (MAP (λ(t,var,v). var) decls)
 Proof
  Induct \\ simp [Once vertype_prog_cases] \\ rpt strip_tac' \\ rveq \\ Cases_on ‘var = var'’ \\ fs [] \\
@@ -230,25 +237,30 @@ Proof
 QED
 
 Theorem vertype_prog_decls_all_distinct:
- !decls env fextenv ps.
- vertype_prog env (Module fextenv decls ps) ==> ALL_DISTINCT (MAP (λ(t, var, v). var) decls)
+ !decls env fextenv cs ps mem.
+ vertype_prog env (Module fextenv decls cs ps mem) ==> ALL_DISTINCT (MAP (λ(t, var, v). var) decls)
 Proof
  Induct \\ simp [Once vertype_prog_cases] \\ rpt strip_tac' \\ rveq \\ drule_first \\ simp [] \\
  drule_strip vertype_prog_decls_not_in_env \\ simp [combinTheory.APPLY_UPDATE_THM]
 QED
 
+Definition var_spec_all_def:
+ (var_spec_all P (Store vopt) ⇔ OPTION_ALL P vopt) ∧
+ (var_spec_all P NoStore ⇔ T)
+End
+
 Triviality vertype_prog_decls_wt_lem:
  ∀env m.
  vertype_prog env m ⇒
- case m of Module extenv decls ps => EVERY (λ(t,var,v). OPTION_ALL (λv. vertype_v v t) v) decls
+ case m of Module extenv decls cs ps mem => EVERY (λ(t,var,v). var_spec_all (λv. vertype_v v t) v) decls
 Proof
- ho_match_mp_tac vertype_prog_ind \\ rw []
+ ho_match_mp_tac vertype_prog_ind \\ rw [var_spec_all_def]
 QED
 
 Theorem vertype_prog_decls_wt:
- ∀env extenv decls ps.
- vertype_prog env (Module extenv decls ps) ⇒
- EVERY (λ(t,var,v). OPTION_ALL (λv. vertype_v v t) v) decls
+ ∀env extenv decls cs ps mem.
+ vertype_prog env (Module extenv decls cs ps mem) ⇒
+ EVERY (λ(t,var,v). var_spec_all (λv. vertype_v v t) v) decls
 Proof
  rpt strip_tac \\ drule_strip vertype_prog_decls_wt_lem \\ fs []
 QED
@@ -282,9 +294,9 @@ Proof
 QED
         
 Theorem vertype_prog_consume_decls:
- ∀decls extenv ps env.
- vertype_prog env (Module extenv decls ps) ⇒
- vertype_prog (update_append env (Ev_from_decls decls)) (Module extenv [] ps)
+ ∀decls extenv cs ps mem env.
+ vertype_prog env (Module extenv decls cs ps mem) ⇒
+ vertype_prog (update_append env (Ev_from_decls decls)) (Module extenv [] cs ps mem)
 Proof
  Induct
  >- simp [Ev_from_decls_def, alist_to_map_nil, update_append_K_NONE]
@@ -295,31 +307,31 @@ Proof
 QED
 
 Theorem vertype_prog_consume_decls_K_NONE:
- ∀decls extenv ps.
- vertype_prog (K NONE) (Module extenv decls ps) ⇒
- vertype_prog (Ev_from_decls decls) (Module extenv [] ps)
+ ∀decls extenv cs ps mem.
+ vertype_prog (K NONE) (Module extenv decls cs ps mem) ⇒
+ vertype_prog (Ev_from_decls decls) (Module extenv [] cs ps mem)
 Proof
  rpt strip_tac \\ drule_strip vertype_prog_consume_decls \\ fs [Ev_from_decls_nil, update_append_K_NONE]
 QED
 
 Theorem vertype_prog_decls_cons:
- ∀env extenv t var v decls ps.
- vertype_prog env (Module extenv ((t,var,v)::decls) ps) ⇔
- OPTION_ALL (λv. vertype_v v t) v ∧
+ ∀env extenv t var v decls cs ps mem.
+ vertype_prog env (Module extenv ((t,var,v)::decls) cs ps mem) ⇔
+ var_spec_all (λv. vertype_v v t) v ∧
  env var = NONE ∧
- vertype_prog env⦇var ↦ SOME t⦈ (Module extenv decls ps)
+ vertype_prog env⦇var ↦ SOME t⦈ (Module extenv decls cs ps mem)
 Proof
- simp [Once vertype_prog_cases] \\ rpt strip_tac \\ eq_tac \\ strip_tac \\ rveq \\ simp [] \\
- Cases_on ‘v’ \\ fs []
+ simp [Once vertype_prog_cases] \\ rpt strip_tac \\ eq_tac \\ strip_tac \\ rveq \\ simp [var_spec_all_def] \\
+ Cases_on ‘v’ \\ fs [var_spec_all_def] \\ Cases_on ‘o'’ \\ fs [var_spec_all_def]
 QED
 
 Triviality vertype_prog_alt_lem:
- ∀decls extenv ps env.
+ ∀decls extenv cs ps mem env.
  ALL_DISTINCT (MAP (λ(t,var,v). var) decls) ∧
- EVERY (λ(t,var,v). OPTION_ALL (λv. vertype_v v t) v) decls ∧
+ EVERY (λ(t,var,v). var_spec_all (λv. vertype_v v t) v) decls ∧
  (∀var t. env var = SOME t ⇒ ~MEM var (MAP (λ(t,var,v). var) decls)) ⇒
- vertype_prog env (Module extenv decls ps) =
- vertype_prog (update_append env (Ev_from_decls decls)) (Module extenv [] ps)
+ vertype_prog env (Module extenv decls cs ps mem) =
+ vertype_prog (update_append env (Ev_from_decls decls)) (Module extenv [] cs ps mem)
 Proof
  Induct \\ TRY PairCases \\
  simp [Ev_from_decls_nil, update_append_K_NONE, 
@@ -329,11 +341,13 @@ Proof
  \\ drule_first \\ fs []
 QED
 
+(* Actually usable version of vertype_prog! *)
 Theorem vertype_prog_alt:
- ∀extenv decls ps.
- vertype_prog (K NONE) (Module extenv decls ps) ⇔
+ ∀extenv decls cs ps mem.
+ vertype_prog (K NONE) (Module extenv decls cs ps mem) ⇔
  ALL_DISTINCT (MAP (λ(t,var,v). var) decls) ∧
- EVERY (λ(t,var,v). OPTION_ALL (λv. vertype_v v t) v) decls ∧
+ EVERY (λ(t,var,v). var_spec_all (λv. vertype_v v t) v) decls ∧
+ EVERY (vertype_stmt extenv (Ev_from_decls decls)) cs ∧
  EVERY (vertype_stmt extenv (Ev_from_decls decls)) ps
 Proof
  rpt strip_tac \\ eq_tac \\ strip_tac
@@ -342,7 +356,7 @@ Proof
     drule_strip vertype_prog_decls_wt)
  \\ dep_rewrite.DEP_ONCE_REWRITE_TAC [vertype_prog_alt_lem] \\ simp [update_append_K_NONE] \\
     simp [Once vertype_prog_cases]
-QED
+QED*)
 
 (** Some properties **)
 
@@ -394,6 +408,7 @@ Proof
  >- fs [Once vertype_exp_cases]
  >- fs [Once vertype_exp_cases]
  >- fs [Once vertype_exp_cases]
+ >- fs [Once vertype_exp_cases]
  >- (pop_assum mp_tac \\ simp [Once vertype_exp_cases] \\ metis_tac [])
  >- (pop_assum mp_tac \\ simp [Once vertype_exp_cases] \\ metis_tac [])
 QED
@@ -415,11 +430,25 @@ Proof
  simp [alist_to_map_alookup, alistTheory.ALOOKUP_APPEND]
 QED
 
+Theorem vertype_list_extend_Ev_from_decls:
+ ∀tenv1 tenv2 env.
+ vertype_list (Ev_from_decls tenv1) env ⇒ vertype_list (Ev_from_decls (tenv1 ⧺ tenv2)) env
+Proof
+ simp [Ev_from_decls_def, vertype_list_extend]
+QED
+
 Theorem vertype_env_extend:
  !tenv1 tenv2 env.
  vertype_env (alist_to_map tenv1) env ⇒ vertype_env (alist_to_map (tenv1 ++ tenv2)) env
 Proof
  simp [vertype_env_vertype_list] \\ rpt strip_tac' \\ imp_res_tac vertype_list_extend \\ simp []
+QED
+
+Theorem vertype_env_extend_Ev_from_decls:
+ !tenv1 tenv2 env.
+ vertype_env (Ev_from_decls tenv1) env ⇒ vertype_env (Ev_from_decls (tenv1 ++ tenv2)) env
+Proof
+ simp [Ev_from_decls_def, vertype_env_extend]
 QED
 
 Theorem vertype_exp_cong:

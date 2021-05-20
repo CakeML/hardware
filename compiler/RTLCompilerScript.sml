@@ -19,7 +19,7 @@ val compilerstate_def = Datatype `
  compilerstate =
    <| bsi : si_t list  (* Blocking sigma *)
     ; nbsi : si_t list (* Non-blocking sigma *)
-    ; vertypes : (vertype # string # verilog$value option) list (* types of verilog variables *)
+    ; vertypes : declty (* types of verilog variables *)
     ; tmpnum : num     (* free name for new cells *)
     |>`;
 
@@ -63,7 +63,7 @@ QED
 
 val cget_net_def = Define `
  cget_net bs name = case cget_net_var bs name of
-                     NONE => VarInp (RegVar name 0) NONE
+                     NONE => VarInp (RegVar name 0) NoIndexing
                    | SOME v => v`;
 
 Theorem cget_net_cons_empty:
@@ -73,7 +73,7 @@ Proof
 QED
 
 Theorem cget_net_empty:
- !var. cget_net [empty] var = VarInp (RegVar var 0) NONE
+ !var. cget_net [empty] var = VarInp (RegVar var 0) NoIndexing
 Proof
  simp [cget_net_cons_empty] \\ simp [cget_net_def, cget_net_var_def]
 QED
@@ -94,8 +94,8 @@ val compile_value_def = Define `
 
 Definition cell_input_idx_def:
  (cell_input_idx (ConstInp (CArray bs)) idx = INR $ ConstInp $ CBool $ revEL idx bs) /\
- (cell_input_idx (ExtInp var NONE) idx = INR $ ExtInp var (SOME idx)) /\
- (cell_input_idx (VarInp var NONE) idx = INR $ VarInp var (SOME idx)) /\
+ (cell_input_idx (ExtInp var NoIndexing) idx = INR $ ExtInp var (Indexing idx)) /\
+ (cell_input_idx (VarInp var NoIndexing) idx = INR $ VarInp var (Indexing idx)) /\
  (cell_input_idx _ _ = INL TypeError)
 End
 
@@ -103,19 +103,38 @@ Theorem cell_input_idx_INR:
  !inp inp' idx.
  cell_input_idx inp idx = INR inp' ==>
  (?bs. inp = ConstInp (CArray bs)) \/
- (?var. inp = ExtInp var NONE) \/
- (?var. inp = VarInp var NONE)
+ (?var. inp = ExtInp var NoIndexing) \/
+ (?var. inp = VarInp var NoIndexing)
 Proof
  Cases \\ rpt strip_tac
  >- (Cases_on ‘v’ \\ fs [cell_input_idx_def])
- \\ Cases_on ‘o'’ \\ fs [cell_input_idx_def]
+ \\ Cases_on ‘c’ \\ fs [cell_input_idx_def]
+QED
+
+Definition cell_input_slice_def:
+ (cell_input_slice (ConstInp (CArray bs)) i1 i2 = INR $ ConstInp $ CArray $ rev_slice bs i1 i2) /\
+ (cell_input_slice (ExtInp var NoIndexing) i1 i2 = INR $ ExtInp var (SliceIndexing i1 i2)) /\
+ (cell_input_slice (VarInp var NoIndexing) i1 i2 = INR $ VarInp var (SliceIndexing i1 i2)) /\
+ (cell_input_slice _ _ _ = INL TypeError)
+End
+
+Theorem cell_input_slice_INR:
+ ∀inp inp' i1 i2.
+ cell_input_slice inp i1 i2 = INR inp' ⇒
+ (?bs. inp = ConstInp (CArray bs)) \/
+ (?var. inp = ExtInp var NoIndexing) \/
+ (?var. inp = VarInp var NoIndexing)
+Proof
+ Cases \\ rpt strip_tac
+ >- (Cases_on ‘v’ \\ fs [cell_input_slice_def])
+ \\ Cases_on ‘c’ \\ fs [cell_input_slice_def]
 QED
 
 (* state -> exp -> (new state, netlist, CellInp - output name) *)
 Definition compile_exp_def:
  (compile_exp s (Const v) = return (s, [], ConstInp $ compile_value v)) /\
  (compile_exp s (Var v) = return (s, [], cget_net s.bsi v)) /\
- (compile_exp s (InputVar v) = return (s, [], ExtInp v NONE)) /\
+ (compile_exp s (InputVar v) = return (s, [], ExtInp v NoIndexing)) /\
  (compile_exp s (ArrayIndex (Var var) _ (Const v)) = do
   i <- ver2n v;
   inp <- cell_input_idx (cget_net s.bsi var) i;
@@ -123,14 +142,18 @@ Definition compile_exp_def:
  od) /\
  (compile_exp s (ArrayIndex (InputVar var) _ (Const v)) = do
   i <- ver2n v;
-  return (s, [], ExtInp var (SOME i))
+  return (s, [], ExtInp var (Indexing i))
+ od) /\
+ (compile_exp s (ArraySlice (Var var) i1 i2) = do
+  inp <- cell_input_slice (cget_net s.bsi var) i1 i2;
+  INR (s, [], inp)
  od) /\
 
  (compile_exp s (BUOp Not e) = do
   (s, nl, inp) <- compile_exp s e;
    (let (s, tmpvar) = compile_new_name s;
        newcell = Cell1 CNot tmpvar inp in
-    return (s, SNOC newcell nl, VarInp (NetVar tmpvar) NONE))
+    return (s, SNOC newcell nl, VarInp (NetVar tmpvar) NoIndexing))
  od) /\
 
  (compile_exp s (BBOp e1 bbop e2) = do
@@ -138,7 +161,7 @@ Definition compile_exp_def:
   (s, nl2, inp2) <- compile_exp s e2;
    (let (s, tmpvar) = compile_new_name s;
        newcell = Cell2 (compile_bbop bbop) tmpvar inp1 inp2 in
-   return (s, nl1 ++ nl2 ++ [newcell], VarInp (NetVar tmpvar) NONE))
+   return (s, nl1 ++ nl2 ++ [newcell], VarInp (NetVar tmpvar) NoIndexing))
  od) /\
 
  (compile_exp s (Arith e1 arith e2) = do
@@ -146,7 +169,7 @@ Definition compile_exp_def:
   (s, nl2, inp2) <- compile_exp s e2;
    (let (s, tmpvar) = compile_new_name s;
         newcell = Cell2 (compile_arith arith) tmpvar inp1 inp2 in
-   return (s, nl1 ++ nl2 ++ [newcell], VarInp (NetVar tmpvar) NONE))
+   return (s, nl1 ++ nl2 ++ [newcell], VarInp (NetVar tmpvar) NoIndexing))
  od) /\
 
  (compile_exp s (Cmp e1 cmp e2) = do (* only works for equal *)
@@ -154,7 +177,7 @@ Definition compile_exp_def:
   (s, nl2, inp2) <- compile_exp s e2;
    (let (s, tmpvar) = compile_new_name s;
         newcell = Cell2 CEqual tmpvar inp1 inp2 in
-   return (s, nl1 ++ nl2 ++ [newcell], VarInp (NetVar tmpvar) NONE))
+   return (s, nl1 ++ nl2 ++ [newcell], VarInp (NetVar tmpvar) NoIndexing))
  od) /\
 
  (compile_exp _ _ = INL NotImplemented)
@@ -184,7 +207,7 @@ val compile_merge_if_left_def = Define `
   let otherv = cget_net otherenv k;
       (s, n) = compile_new_name s;
       newcell = CellMux n cond v otherv;
-      newenv = cset_net newenv k (VarInp (NetVar n) NONE) in
+      newenv = cset_net newenv k (VarInp (NetVar n) NoIndexing) in
    (s, newenv, SNOC newcell nl)`; (* <-- cons would yield better complexity than snoc here, but is more difficult to prove correct (need to be able to re-order muxes without affecting the result) *)
 
 val compile_merge_if_right_def = Define `
@@ -194,7 +217,7 @@ val compile_merge_if_right_def = Define `
   | NONE => let otherv = cget_net fallback k;
                 (s, n) = compile_new_name s;
                 newcell = CellMux n cond otherv v;
-                newenv = cset_net newenv k (VarInp (NetVar n) NONE) in
+                newenv = cset_net newenv k (VarInp (NetVar n) NoIndexing) in
                  (s, newenv, SNOC newcell nl)`; (* <-- complexity comment above applies here as well *)
 
 (* Can probably do this in some much more efficient way *)
@@ -233,7 +256,7 @@ val compile_stmt_def = Define `
     NONE =>
      let (s, n) = compile_new_name s in (do
       t <- decls_type s.vertypes var;
-      return (s with bsi := cset_net s.bsi var (VarInp (NetVar n) NONE), [NDetCell n (compile_type t)])
+      return (s with bsi := cset_net s.bsi var (VarInp (NetVar n) NoIndexing), [NDetCell n (compile_type t)])
      od)
   | SOME e => do
      (s, nl, inp) <- compile_exp s e;
@@ -244,7 +267,7 @@ val compile_stmt_def = Define `
   i <- ver2n v;
   (let (s, tmpvar) = compile_new_name s;
        newcell = CellArrayWrite tmpvar (cget_net s.bsi var) i inp in
-   return (s with bsi := cset_net s.bsi var (VarInp (NetVar tmpvar) NONE), SNOC newcell nl))
+   return (s with bsi := cset_net s.bsi var (VarInp (NetVar tmpvar) NoIndexing), SNOC newcell nl))
  od) /\
 
  (compile_stmt s (NonBlockingAssign (NoIndexing var) e) =
@@ -252,7 +275,7 @@ val compile_stmt_def = Define `
     NONE =>
      let (s, n) = compile_new_name s in (do
       t <- decls_type s.vertypes var;
-      return (s with nbsi := cset_net s.nbsi var (VarInp (NetVar n) NONE), [NDetCell n (compile_type t)])
+      return (s with nbsi := cset_net s.nbsi var (VarInp (NetVar n) NoIndexing), [NDetCell n (compile_type t)])
      od)
   | SOME e => do
      (s, nl, inp) <- compile_exp s e;
@@ -263,7 +286,7 @@ val compile_stmt_def = Define `
   i <- ver2n v;
   (let (s, tmpvar) = compile_new_name s;
        newcell = CellArrayWrite tmpvar (cget_net s.nbsi var) i inp in
-   return (s with nbsi := cset_net s.nbsi var (VarInp (NetVar tmpvar) NONE), SNOC newcell nl))
+   return (s with nbsi := cset_net s.nbsi var (VarInp (NetVar tmpvar) NoIndexing), SNOC newcell nl))
  od) /\
 
  (compile_stmt _ _ = INL TypeError)`;
@@ -276,30 +299,49 @@ val compile_stmts_def = Define `
   return (s, nl ++ nl')
  od)`;
 
-val compile_reg_def = Define `
- compile_reg bsi nbsi (ty, var, v) =
-  let ty = compile_type ty;
-      v = OPTION_MAP compile_value v;
-      inp = case cget_net_var nbsi var of
-              SOME inp => SOME inp
-            | NONE => case cget_net_var bsi var of
-                        SOME inp => SOME inp
-                      | NONE => NONE in
-   (ty, var, 0, v, inp)`;
-
-val compile_regs_def = Define `
- compile_regs bsi nbsi decls = MAP (compile_reg bsi nbsi) decls`;
-
+(* TODO: Rename to _fextty *)
 Definition compile_fextenv_def:
  compile_fextenv fextenv = MAP (λ(var, t). (var, compile_type t)) fextenv
 End
 
-val compile_def = Define `
- compile (Module fextenv decls ps) = do
-  (s, nl) <- compile_stmts <| bsi := [empty]; nbsi := [empty]; vertypes := decls; tmpnum := 0 |> ps;
-  let decls = compile_regs s.bsi s.nbsi decls;
-      fextenv = compile_fextenv fextenv in
-   return (Circuit fextenv decls nl, s.tmpnum)
- od`;
+Definition compile_outs_def:
+ compile_outs decls =
+  MAP (λ(var, data). (var, OutInp $ VarInp (RegVar var 0) NoIndexing)) (FILTER (λ(var, data). data.output) decls)
+End
+
+Definition compile_reg_def:
+ compile_reg combs_bsi ffs_bsi ffs_nbsi pseudos (var, data) = let
+  ty = compile_type data.type;
+  v = OPTION_MAP compile_value data.init;
+  is_pseudo = member string_cmp var pseudos;
+  inp = if is_pseudo then
+         cget_net_var combs_bsi var
+        else
+         case cget_net_var ffs_nbsi var of
+           SOME inp => SOME inp
+         | NONE => cget_net_var ffs_bsi var in
+   ((var, 0), <| type := ty; reg_type := if is_pseudo then PseudoReg else Reg; init := v; inp := inp |>)
+End
+
+Definition compile_regs_def:
+ compile_regs (pseudos : (string, unit) balanced_map) combs_bsi ffs_bsi ffs_nbsi decls =
+ MAP (compile_reg combs_bsi ffs_bsi ffs_nbsi pseudos) decls
+End
+
+Definition compile_def:
+ compile pseudos m = do
+  s <<- <| bsi := [empty]; nbsi := [empty]; vertypes := m.decls; tmpnum := 0 |>;
+  (s_combs, nl_combs) <- compile_stmts s m.combs;
+
+  s <<- s_combs with <| bsi := [empty]; nbsi := [empty] |>;
+  (s, nl_ffs) <- compile_stmts s m.ffs;
+
+  fextty <<- compile_fextenv m.fextty;
+  outs <<- compile_outs m.decls;
+  decls <<- compile_regs pseudos s_combs.bsi s.bsi s.nbsi m.decls;
+
+  return (Circuit fextty outs decls nl_combs nl_ffs, s.tmpnum)
+ od
+End
 
 val _ = export_theory ();

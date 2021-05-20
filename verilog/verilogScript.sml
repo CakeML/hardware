@@ -1,6 +1,6 @@
 open hardwarePreamble;
 
-open alistTheory wordsTheory stringTheory bitstringTheory sptreeTheory;
+open alistTheory wordsTheory stringTheory bitstringTheory sptreeTheory balanced_mapTheory;
 open wordsLib;
 
 open oracleTheory sumExtraTheory;
@@ -12,12 +12,15 @@ val _ = new_theory "verilog";
  *******************************)
 
 (** Verilog values **)
-val _ = Datatype `
-  value = VBool bool
-        | VArray (bool list)`;
+Datatype:
+ value = VBool bool
+       | VArray (bool list)
+End
 
-val _ = Datatype `
- vertype = VBool_t | VArray_t num`;
+Datatype:
+ vertype = VBool_t 
+         | VArray_t num
+End
 
 val value_size_def = definition "value_size_def";
 
@@ -26,6 +29,11 @@ val value_size_def = definition "value_size_def";
   Induct \\ rw [value_size_def] \\ res_tac \\ DECIDE_TAC);*)
 
 val _ = type_abbrev("envT", ``:(string, value) alist``);
+
+Definition show_vertype_def:
+ (show_vertype VBool_t = "logic") ∧
+ (show_vertype (VArray_t l) = "logic[" ++ toString l ++ ":0]")
+End
 
 val isVBool_def = Define `
  (isVBool (VBool _) = T) /\
@@ -288,14 +296,35 @@ val MEM_IMP_vprog_size = Q.store_thm("MEM_IMP_vprog_size",
   `!cs cc cb. MEM (cc, cb) cs ==> vprog_size cb < vprog1_size cs`,
   Induct \\ rw [vprog_size_def] \\ rw [vprog_size_def] \\ res_tac \\ DECIDE_TAC);
 
-(** Program, in the form of one module: fext types, variables + initialization + actual program **)
-val _ = type_abbrev("declty", “:(vertype # string # value option)”);
+Definition verFromList_def:
+ (verFromList [] = Skip) ∧
+ (verFromList (p::ps) = Seq p (verFromList ps))
+End
 
-val _ = Datatype `
-  module = Module ((string, vertype) alist) (declty list) (vprog list)`;
+Datatype:
+ var_metadata =
+ <| output : bool (* might want to generalize this later to handle input/output/internal *)
+  ; type : vertype
+  ; init : value option |>
+End
 
-val module_decls_def = Define ‘
- module_decls (Module _ decls _) = decls’;
+(* todo: should handle init as well... *)
+Datatype:
+ mem = Memory (* might be possible to get away with just the below? *)
+     | ByteMemory (* 4-bit enable; x-bit addr; 32-bit data read port; 32-bit data write port *)
+End
+
+(* can be dropped probably: *)
+val _ = type_abbrev("declty", “:(string, var_metadata) alist”);
+
+Datatype:
+ module =
+  <| fextty : (string, vertype) alist
+   ; decls : declty
+   ; ffs : vprog list
+   ; combs : vprog list
+   (*; mem : mem list*) |>
+End
 
 (*******************************
   Process semantics
@@ -332,6 +361,12 @@ Proof
  rw [get_var_def] \\ TOP_CASE_TAC
 QED
 
+Theorem get_var_get_var_ALOOKUP_ALOOKUP:
+ ∀var s s'. get_var s' var = get_var s var ⇔ ALOOKUP s'.vars var = ALOOKUP s.vars var
+Proof
+ rw [get_var_def] \\ every_case_tac
+QED
+
 Theorem get_var_sum_alookup:
  !s name. get_var s name = sum_alookup s.vars name
 Proof
@@ -342,6 +377,12 @@ Theorem get_nbq_var_ALOOKUP:
  !s name v. get_nbq_var s name = INR v <=> ALOOKUP s.nbq name = SOME v
 Proof
  rw [get_nbq_var_def] \\ TOP_CASE_TAC
+QED
+
+Theorem get_nbq_var_get_nbq_var_ALOOKUP_ALOOKUP:
+ ∀var s s'. get_nbq_var s' var = get_nbq_var s var ⇔ ALOOKUP s'.nbq var = ALOOKUP s.nbq var
+Proof
+ rw [get_nbq_var_def] \\ every_case_tac
 QED
 
 Theorem get_nbq_var_sum_alookup:
@@ -359,6 +400,20 @@ Definition get_use_nbq_var_def:
   else
    get_var s name
 End
+
+Theorem get_use_nbq_var_sum_alookup:
+ ∀s use_nbq name.
+ get_use_nbq_var s use_nbq name =
+ if use_nbq then sum_alookup (s.nbq ++ s.vars) name else sum_alookup s.vars name
+Proof
+ rw [get_use_nbq_var_def, get_var_sum_alookup, get_nbq_var_sum_alookup, sum_alookup_append]
+QED
+
+Theorem get_use_nbq_var_F:
+ ∀s name. get_use_nbq_var s F name = get_var s name
+Proof
+ rw [get_use_nbq_var_def]
+QED
 
 (* Misc *)
 val array_type_length_def = Define ‘
@@ -523,11 +578,6 @@ val erun_resize_def = Define `
  (erun_resize SignExtend l r = if LENGTH l <= r then INR (PAD_LEFT (HD l) r l)
                                                 else INL TypeError)`;
 
-(*val get_array_index_def = Define `
-  (get_array_index [] v = INR v) /\
-  (get_array_index (i::is) (VArray vs) = sum_bind (sum_revEL i vs)
-                                                  (get_array_index is)) /\
-  (get_array_index _ _ = INL TypeError)`;*)
 val get_array_index_def = Define `
   (get_array_index i (VArray vs) = sum_map VBool (sum_revEL i vs)) /\
   (get_array_index _ _ = INL TypeError)`;
@@ -541,14 +591,26 @@ Proof
  >- rw [sum_revEL_revEL, sum_map_def]
 QED
 
-val get_array_slice_def = Define `
-  (get_array_slice msb lsb (VArray vs) =
-   let len = LENGTH vs in
-     if len < msb \/ msb < lsb then
-       INL InvalidIndex
-     else
-       INR (VArray (TAKE (msb - lsb + 1) (DROP (len - msb - 1) vs)))) /\
-  (get_array_slice _ _ _ = INL TypeError)`;
+Definition get_array_slice_def:
+ (get_array_slice msb lsb (VArray vs) =
+  let len = LENGTH vs in
+   if msb < len ∧ lsb ≤ msb then
+    INR (VArray (TAKE (msb - lsb + 1) (DROP (len - msb - 1) vs)))
+   else     
+    INL InvalidIndex) /\
+ (get_array_slice _ _ _ = INL TypeError)
+End
+
+Theorem get_array_slice_INR:
+ ∀v v' ih il.
+ get_array_slice ih il v = INR v' ⇔
+ ∃vs. ih < LENGTH vs ∧
+      il ≤ ih ∧
+      v = VArray vs ∧
+      v' = VArray (TAKE (ih − il + 1) (DROP (LENGTH vs − ih − 1) vs))
+Proof
+ Cases \\ rw [get_array_slice_def] \\ eq_tac \\ rw []
+QED
 
 val erun_get_var_def = Define `
  (erun_get_var _ s (Var vname) = get_var s vname) /\
@@ -757,43 +819,85 @@ val prun_def = Define `
 
 (* Semantics *)
 
-val mstep_def = Define `
-  mstep fext ps s = sum_foldM (prun fext) s ps`;
-
-(* mstep, then commit *)
-val mstep_commit_def = Define `
- mstep_commit fext fbits ps vs =
-  let s = <| vars := vs; nbq := []; fbits := fbits |> in
-   sum_map (\s. (s.nbq ++ s.vars, s.fbits)) (mstep fext ps s)`;
-
-val mrun_def = Define `
- (mrun fext fbits ps vs 0 = INR (vs, fbits)) /\
- (mrun fext fbits ps vs (SUC n) = sum_bind (mrun fext fbits ps vs n) (λ(vs, fbits). mstep_commit (fext n) fbits ps vs))`;
-
-val run_decls_def = Define `
- (run_decls fbits [] vs = (fbits, vs)) /\
- (run_decls fbits ((ty, var, v) :: decls) vs =
-  case v of
-    NONE => let (v, fbits') = nd_value fbits ty in run_decls fbits' decls ((var, v)::vs)
-  | SOME v => run_decls fbits decls ((var, v)::vs))`;
-
-(* Top-level run *)
-val run_def = Define `
- run fext fbits (Module fexttys decls ps) n =
-  let (fbits', vs) = run_decls fbits decls [] in
-   mrun fext fbits' ps vs n`;
-
-Definition decls_type_def:
- (decls_type [] var = INL UnknownVariable) /\
- (decls_type ((t, var', v) :: ds) var = if var' = var then INR t else decls_type ds var)
+(* step and commit *)
+Definition mstep_ffs_def:
+ mstep_ffs fext fbits ps vs = do
+  s <<- <| vars := vs; nbq := []; fbits := fbits |>;
+  s <- sum_foldM (prun fext) s ps;
+  return (s.nbq ++ s.vars, s.fbits)
+ od
 End
 
-Theorem decls_type_sum_alookup:
- !decls var. decls_type decls var = sum_alookup (MAP (λ(t, var, v). (var, t)) decls) var
+Definition mstep_combs_def:
+ mstep_combs fext fbits ps vs = do
+  s <<- <| vars := vs; nbq := []; fbits := fbits |>;
+  s <- sum_foldM (prun fext) s ps;
+  (* simply drop nbq since combs should never include any non-blocking assignments;
+     i.e. non-blocking writes are no-ops in comb blocks. *)
+  return (s.vars, s.fbits)
+ od
+End
+
+Definition mrun_def:
+ (mrun fext fbits ffs combs vs 0 = mstep_combs (fext 0) fbits combs vs) ∧
+ (mrun fext fbits ffs combs vs (SUC n) = do
+  (vs, fbits) <- mrun fext fbits ffs combs vs n;
+  (vs, fbits) <- mstep_ffs (fext n) fbits ffs vs;
+  mstep_combs (fext (SUC n)) fbits combs vs
+ od)
+End
+
+Definition run_decls_def:
+ (run_decls fbits [] vs = (fbits, vs)) /\
+ (run_decls fbits ((var, data) :: decls) vs =
+  case data.init of
+    NONE => let (v, fbits') = nd_value fbits data.type in run_decls fbits' decls ((var, v)::vs)
+  | SOME v => run_decls fbits decls ((var, v)::vs))
+End
+
+(* Top-level run *)
+Definition run_def:
+ run fext fbits m n = do
+  (fbits', vs) <<- run_decls fbits m.decls [];
+  mrun fext fbits' m.ffs m.combs vs n
+ od
+End
+
+Definition decls_type_def:
+ decls_type decls var = case ALOOKUP decls var of
+                          NONE => INL UnknownVariable
+                        | SOME data => INR data.type
+End
+
+Theorem decls_type_INR:
+ !decls var t. decls_type decls var = INR t ⇔ ∃data. ALOOKUP decls var = SOME data ∧ data.type = t
 Proof
- Induct \\ TRY PairCases \\ rw [decls_type_def, sum_alookup_nil, sum_alookup_cons]
+ rw [decls_type_def, CaseEq"option"]
 QED
-   
+
+Theorem decls_type_INL:
+ !decls var e. decls_type decls var = INL e ⇔ e = UnknownVariable ∧ ALOOKUP decls var = NONE
+Proof
+ rw [decls_type_def, CaseEq"option", CONJ_COMM]
+QED
+
+(* Mostly for compatibility with old proofs? *)
+Theorem decls_type_sum_alookup:
+ !decls var. decls_type decls var = sum_alookup (MAP (λ(var, data). (var, data.type)) decls) var
+Proof
+ rw [decls_type_def, sum_alookup_def, alistTheory.ALOOKUP_MAP] \\ TOP_CASE_TAC \\ simp []
+QED
+
+Theorem decls_type_append:
+ ∀l1 l2 var.
+ decls_type (l1 ++ l2) var =
+ case decls_type l1 var of
+  INL e => decls_type l2 var
+ | INR v => INR v
+Proof
+ simp [decls_type_sum_alookup, sum_alookup_append]
+QED
+
 (** Various syntactic predicates **)
 
 val is_vervar_def = Define `
@@ -801,15 +905,22 @@ val is_vervar_def = Define `
  (is_vervar (InputVar var) = T) /\
  (is_vervar _ = F)`;
 
+Theorem is_vervar_cases:
+ ∀e. is_vervar e ⇔ (∃var. e = Var var) ∨ (∃var. e = InputVar var)
+Proof
+ Cases \\ simp [is_vervar_def]
+QED
+
 val exp_var_def = Define `
  (exp_var (Var var) = SOME var) /\
  (exp_var (InputVar var) = SOME var) /\
  (exp_var _ = NONE)`;
 
+(* Variables (not included external inputs) read by an expression *)
 val evreads_def = Define `
   (evreads (Const _) = []) /\
   (evreads (Var vname) = [vname]) /\
-  (evreads (InputVar _) = []) /\ (* TODO: <-- this is now variables that can be affected by writes? *)
+  (evreads (InputVar _) = []) /\
   (evreads (ArrayIndex vexp _ iexp) = evreads vexp ++ evreads iexp) /\
   (evreads (ArraySlice vexp _ _) = evreads vexp) /\
   (evreads (ArrayConcat l r) = evreads l ++ evreads r) /\
@@ -874,12 +985,22 @@ val vnwrites_def = tDefine "vnwrites" `
   (WF_REL_TAC `measure vprog_size` \\ rw [] \\
    imp_res_tac MEM_IMP_vprog_size \\ DECIDE_TAC);
 
-val writes_ok_def = Define `
- writes_ok ps <=> !var. ~(MEM var (FLAT (MAP vwrites ps)) /\ MEM var (FLAT (MAP vnwrites ps)))`;
+Definition writes_ok_def:
+ writes_ok ps <=> !var. ~(MEM var (FLAT (MAP vwrites ps)) /\ MEM var (FLAT (MAP vnwrites ps)))
+End
 
-(** Semantics function **)
+Definition writes_overlap_ok_def:
+ writes_overlap_ok combs ffs ⇔
+ ∀var. MEM var (FLAT (MAP vwrites combs)) ⇒ ¬MEM var (FLAT (MAP vwrites ffs)) ∧ ¬MEM var (FLAT (MAP vnwrites ffs))
+End
 
-(*val ver_sem_def = Define `
- ver_sem fext (Module decls ps) n = { vs | ?fbits. run fext fbits (Module decls ps) n = INR vs }`;*)
+Definition writes_overlap_ok_pseudos_def:
+ writes_overlap_ok_pseudos pseudos ffs ⇔
+ ∀var. member string_cmp var pseudos ⇒ ¬MEM var (FLAT (MAP vwrites ffs)) ∧ ¬MEM var (FLAT (MAP vnwrites ffs))
+End
+
+Definition module_ok_def:
+ module_ok m ⇔ writes_ok m.ffs ∧ writes_ok m.combs ∧ writes_overlap_ok m.combs m.ffs
+End
 
 val _ = export_theory ();

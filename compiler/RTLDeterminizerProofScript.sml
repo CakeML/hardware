@@ -130,43 +130,11 @@ Proof
  Cases \\ rw [build_zero_def, rtltype_v_cases]
 QED
 
-Definition only_regs_def:
- only_regs cenv <=> !n. cget_var cenv (NetVar n) = INL UnknownVariable
-End
-
-Theorem only_regs_fbits:
- !cenv fbits. only_regs (cenv with fbits := fbits) = only_regs cenv
-Proof
- rw [only_regs_def, cget_var_fbits]
-QED
-
-Theorem only_regs_nil:
- ∀fbits. only_regs <|env := []; fbits := fbits|>
-Proof
- rw [only_regs_def, cget_var_def]
-QED
-
-Theorem only_regs_cset_var_RegVar:
+(*Theorem only_regs_cset_var_RegVar:
  ∀cenv reg i v. only_regs cenv ⇒ only_regs (cset_var cenv (RegVar reg i) v)
 Proof
  rw [only_regs_def, cget_var_cset_var]
-QED
-
-Theorem init_run_only_regs:
- ∀regs cenv cenv'. init_run cenv regs = INR cenv' ∧ only_regs cenv ⇒ only_regs cenv'
-Proof
- Induct \\ TRY PairCases \\ simp [init_run_def] \\ TOP_CASE_TAC \\ rw [] \\ TRY pairarg_tac \\ fs [] \\
- first_x_assum match_mp_tac \\ asm_exists_tac \\ simp [only_regs_fbits, only_regs_cset_var_RegVar]
-QED
-
-Theorem regs_run_only_regs:
- ∀regs fext cenv_net cenv_reg cenv_reg'.
- sum_foldM (reg_run fext cenv_net) cenv_reg regs = INR cenv_reg' ∧ only_regs cenv_reg ⇒ only_regs cenv_reg'
-Proof
- Induct \\ TRY PairCases \\ simp [sum_foldM_def, reg_run_def, sum_bind_INR] \\ rpt gen_tac \\
- TOP_CASE_TAC >- metis_tac [] \\ rw [sum_bind_INR] \\ first_x_assum match_mp_tac \\ asm_exists_tac \\
- simp [only_regs_cset_var_RegVar]
-QED
+QED*)
 
 Theorem rtl_nd_value_same_shape:
  ∀fbits1 fbits1' fbits2 fbits2' t v v'.
@@ -363,6 +331,12 @@ Proof
  every_case_tac \\ simp [cell_input_covered_by_extenv_def, cell_input_covered_by_extenv_build_const, cell_input_covered_by_extenv_build_zero_with_idx]
 QED
 
+Triviality MIN_a_min_b:
+ ∀a b. MIN (a - b) a = a - b
+Proof
+ simp [arithmeticTheory.MIN_DEF]
+QED
+
 Theorem cell_inp_run_rtl_determinizer_inp:
  ∀inp fext cenvold cenv_det cenv si v.
  cell_inp_run fext cenvold inp = INR v ∧
@@ -380,12 +354,12 @@ Proof
     imp_res_tac cget_fext_var_same_shape \\ simp [same_shape_sym])
  \\ TOP_CASE_TAC \\ rpt drule_last \\ rveq
  >- (Cases_on ‘r’ \\ fs [build_zero_def] \\ rveq \\ fs [same_shape_inv] \\ rveq \\
-     fs [cget_fext_var_def, CaseEq "option", build_zero_with_idx_def, cell_inp_run_def] \\
+     fs [cget_fext_var_def, CaseEq "cell_input_idx", build_zero_with_idx_def, cell_inp_run_def] \\
      fs [sum_map_INR, sum_revEL_INR, revEL_GENLIST] \\
-     rw [same_shape_def])
+     rw [same_shape_def, DROP_GENLIST, TAKE_GENLIST, MIN_a_min_b])
  \\ Cases_on ‘v''’ \\ Cases_on ‘idx’ \\ fs [same_shape_inv] \\ rveq \\ fs [cget_fext_var_def] \\
     fs [sum_map_INR, sum_revEL_INR] \\
-    rw [build_const_def, cell_inp_run_def, same_shape_def]
+    rw [build_const_def, cell_inp_run_def, same_shape_def, rev_slice_def]
 QED
 
 Theorem cell1_run_same_shape:
@@ -463,7 +437,7 @@ Proof
  ntac 5 Cases \\ simp [cellArrayWrite_run_def, same_shape_def] \\ rw [] \\ simp [length_revLUPDATE]
 QED
 
-Theorem rtl_determinizer_netlist_correct_step:
+Theorem rtl_determinizer_netlist_correct_cells_run:
  ∀(extenv : (string # rtltype) list) min max nl nl_det si si'.
  rtl_determinizer_netlist si nl = (si', nl_det) ∧
  netlist_ok extenv min max nl ∧
@@ -633,38 +607,171 @@ Proof
     metis_tac [same_shape_sym]
 QED
 
-Theorem rtl_determinizer_netlist_correct_run:
- ∀(extenv : (string # rtltype) list) min max n si si' nl nl_det regs fext cenvold cenvold' cenv_det cenv.
- rtl_determinizer_netlist si nl = (si', nl_det) ∧
- netlist_ok extenv min max nl ∧
- netlist_sorted nl ∧
- invariant num_cmp si ∧
- EVERY (covers_ndetcell T si) nl ∧
- netlist_run fext cenvold nl regs n = INR cenvold' ∧
- det_rel_reg cenvold cenv_det cenv ∧ only_regs cenvold ∧ only_regs cenv_det ==>
- netlist_ok extenv min max nl_det ∧
- netlist_sorted nl_det ∧
- ∃cenv_det'. netlist_run fext cenv_det nl_det (MAP (rtl_determinizer_reg si') regs) n = INR cenv_det' ∧
-             ∃fbits cenv'. netlist_run fext (cenv with fbits := fbits) nl regs n = INR cenv' ∧
-                           det_rel_reg cenvold' cenv_det' cenv' ∧ only_regs cenvold' ∧ only_regs cenv_det'
+Triviality FILTER_reg_MAP_rtl_determinizer_reg_COMM:
+ ∀regs si reg.
+ FILTER (λ(var,data). data.reg_type = reg) (MAP (rtl_determinizer_reg si) regs) =
+ MAP (rtl_determinizer_reg si) (FILTER (λ(var,data). data.reg_type = reg) regs)
 Proof
- ntac 3 gen_tac \\ Induct \\ simp [netlist_run_def, sum_bind_INR, det_rel_reg_fbits] \\ rpt strip_tac'
- >- (drule_strip rtl_determinizer_netlist_correct_step \\ simp []) \\
+ simp [rich_listTheory.FILTER_MAP, combinTheory.o_DEF, pairTheory.LAMBDA_PROD, rtl_determinizer_reg_def]
+QED
+
+Triviality netlist_ok_netlist_ok_unchanged_lem:
+ ∀combs_nl ffs_nl si si' extenv min combs_max ffs_max.
+ netlist_ok extenv min combs_max combs_nl ∧
+ netlist_ok extenv combs_max ffs_max ffs_nl ∧
+ (∀n. ¬MEM n (FLAT (MAP cell_output ffs_nl)) ⇒ lookup num_cmp n si' = lookup num_cmp n si) ⇒
+ ∀n. n < combs_max ⇒ lookup num_cmp n si' = lookup num_cmp n si
+Proof
+ rw [netlist_ok_def, EVERY_MEM] \\ first_x_assum match_mp_tac \\
+ strip_tac \\ fs [MEM_FLAT, MEM_MAP] \\ rveq \\
+ rpt drule_first \\ fs [cell_ok_alt] \\ drule_first \\ fs [cell_output_ok_def]
+QED
+
+Triviality rtl_determinizer_reg_si_cong:
+ regs_ok extenv combs_max ffs_max regs ∧
+ (∀n. n < combs_max ⇒ lookup num_cmp n si' = lookup num_cmp n si) ⇒
+ MAP (rtl_determinizer_reg si') (FILTER (λ(var,data). data.reg_type = PseudoReg) regs) =
+ MAP (rtl_determinizer_reg si) (FILTER (λ(var,data). data.reg_type = PseudoReg) regs)
+Proof
+ rw [regs_ok_def, EVERY_MEM] \\ match_mp_tac MAP_CONG \\ simp [] \\
+ PairCases \\ rw [MEM_FILTER, rtl_determinizer_reg_def, reg_metadata_component_equality] \\
+ drule_first \\ fs [reg_ok_def] \\
+ Cases_on ‘x2.inp’ \\ simp [] \\ Cases_on ‘x’ \\ simp [rtl_determinizer_inp_def] \\
+ rename1 ‘VarInp var _’ \\ Cases_on ‘var’ \\ gs [rtl_determinizer_inp_def, cell_input_lt_def, var_lt_def]
+QED
+
+Triviality det_rel_reg_det_rel_Psuedo:
+ det_rel_reg cenvold' cenv_det' cenv' ∧
+ det_rel si cenvold cenv_det cenv ∧
+ (∀n. cget_var cenvold' (NetVar n) = cget_var cenvold (NetVar n)) ∧
+ (∀n. cget_var cenv_det' (NetVar n) = cget_var cenv_det (NetVar n)) ∧
+ (∀n. cget_var cenv' (NetVar n) = cget_var cenv (NetVar n)) ⇒
+ det_rel si cenvold' cenv_det' cenv'
+Proof
+ rw [det_rel_reg_def, det_rel_def]
+QED
+
+Theorem rtl_determinizer_netlist_correct_step:
+ ∀combs_nl ffs_nl (extenv : (string # rtltype) list) min combs_max ffs_max si si' si'' combs_nl_det ffs_nl_det regs fext cenvold cenvold' cenv_det cenv.
+ rtl_determinizer_netlist si combs_nl = (si', combs_nl_det) ∧
+ rtl_determinizer_netlist si' ffs_nl = (si'', ffs_nl_det) ∧
+
+ regs_ok extenv combs_max ffs_max regs ∧
+ netlist_ok extenv min combs_max combs_nl ∧
+ netlist_ok extenv combs_max ffs_max ffs_nl ∧
+
+ netlist_sorted (combs_nl ⧺ ffs_nl) ∧
+
+ invariant num_cmp si ∧
+
+ EVERY (covers_ndetcell T si) combs_nl ∧
+ EVERY (covers_ndetcell T si') ffs_nl ∧
+
+ netlist_step fext cenvold combs_nl ffs_nl regs = INR cenvold' ∧
+ det_rel_reg cenvold cenv_det cenv ∧ only_regs cenvold ∧ only_regs cenv_det ==>
+
+ netlist_ok extenv min combs_max combs_nl_det ∧
+ netlist_ok extenv combs_max ffs_max ffs_nl_det ∧
+
+ netlist_sorted (combs_nl_det ++ ffs_nl_det) ∧
+
+ ∃cenv_det'. netlist_step fext cenv_det combs_nl_det ffs_nl_det (MAP (rtl_determinizer_reg si'') regs) =
+             INR cenv_det' ∧
+             ∃fbits cenv'. netlist_step fext (cenv with fbits := fbits) combs_nl ffs_nl regs = INR cenv' ∧
+                           det_rel si'' cenvold' cenv_det' cenv' (*∧ only_regs cenvold' ∧ only_regs cenv_det'*)
+Proof
+ simp [netlist_step_def, sum_bind_INR] \\ rpt strip_tac' \\
+ rev_drule_strip rtl_determinizer_netlist_correct_cells_run \\
+ impl_tac >- fs [netlist_sorted_def, sortingTheory.SORTED_APPEND] \\ strip_tac \\
+ drule_strip rtl_determinizer_netlist_correct_cells_run \\
+ impl_tac >- fs [netlist_sorted_def, sortingTheory.SORTED_APPEND] \\ strip_tac \\
+
+ simp [] \\ conj_tac >- metis_tac [netlist_sorted_append] \\
+
+ drule_strip det_rel_reg_det_rel \\ first_x_assum (qspec_then ‘si’ assume_tac) \\
+ drule_last \\ simp [] \\
+ 
+ drule_strip rtl_determinizer_reg_correct \\
+ disch_then (qspecl_then [‘cenv_det'’, ‘cenv'’] mp_tac) \\
+ impl_tac >- fs [det_rel_def, det_rel_reg_def] \\ strip_tac \\
+ simp [FILTER_reg_MAP_rtl_determinizer_reg_COMM] \\
+
+ qspecl_then [‘combs_nl’, ‘ffs_nl’, ‘si'’, ‘si''’, ‘extenv’] assume_tac netlist_ok_netlist_ok_unchanged_lem \\
+ drule_first \\ simp [] \\ strip_tac \\
+
+ drule_strip rtl_determinizer_reg_si_cong \\ simp [] \\
+
+ drule_first \\ disch_then (qspecl_then [‘cenv_det''’, ‘cenv''’] mp_tac) \\
+ impl_tac >- (irule det_rel_reg_det_rel_Psuedo \\ metis_tac [regs_run_cget_var_NetVar]) \\ strip_tac \\ simp [] \\
+ 
+ qpat_x_assum ‘sum_foldM (cell_run fext) _ combs_nl = _’ assume_tac \\
+ drule_strip cells_run_fbits \\
+
+ qpat_x_assum ‘sum_foldM (cell_run fext) _ ffs_nl = _’ assume_tac \\
+ drule_strip cells_run_fbits \\ fs [] \\
+
+ last_x_assum (qspec_then ‘replace_prefix fbits' fbits m’ mp_tac) \\
+ impl_tac >- simp [init_seq_eq_replace_prefix, init_seq_eq_sym] \\ strip_tac \\
+ simp [PULL_EXISTS] \\ asm_exists_tac \\
+
+ simp [shift_seq_replace_prefix] \\
+ drule_strip regs_run_fbits \\ first_x_assum (qspec_then ‘fbits'’ strip_assume_tac) \\ simp []
+QED
+
+Theorem rtl_determinizer_netlist_correct_run:
+ ∀combs_nl ffs_nl (extenv : (string # rtltype) list) min combs_max ffs_max n si si' si'' combs_nl_det ffs_nl_det regs fext cenvold cenvold' cenv_det cenv.
+ rtl_determinizer_netlist si combs_nl = (si', combs_nl_det) ∧
+ rtl_determinizer_netlist si' ffs_nl = (si'', ffs_nl_det) ∧
+
+ regs_ok extenv combs_max ffs_max regs ∧
+ netlist_ok extenv min combs_max combs_nl ∧
+ netlist_ok extenv combs_max ffs_max ffs_nl ∧
+
+ netlist_sorted (combs_nl ⧺ ffs_nl) ∧
+
+ invariant num_cmp si ∧
+
+ EVERY (covers_ndetcell T si) combs_nl ∧
+ EVERY (covers_ndetcell T si') ffs_nl ∧
+
+ netlist_run fext cenvold combs_nl ffs_nl regs n = INR cenvold' ∧
+ det_rel_reg cenvold cenv_det cenv ∧ only_regs cenvold ∧ only_regs cenv_det ==>
+
+ netlist_ok extenv min combs_max combs_nl_det ∧
+ netlist_ok extenv combs_max ffs_max ffs_nl_det ∧
+
+ netlist_sorted (combs_nl_det ++ ffs_nl_det) ∧
+
+ ∃cenv_det'. netlist_run fext cenv_det combs_nl_det ffs_nl_det (MAP (rtl_determinizer_reg si'') regs) n =
+             INR cenv_det' ∧
+             ∃fbits cenv'. netlist_run fext (cenv with fbits := fbits) combs_nl ffs_nl regs n = INR cenv' ∧
+                           det_rel si'' cenvold' cenv_det' cenv' (*∧ only_regs cenvold' ∧ only_regs cenv_det'*)
+Proof
+ ntac 6 gen_tac \\ Induct \\ simp [netlist_run_def, sum_bind_INR, det_rel_reg_fbits] \\ rpt strip_tac'
+ >- (qspecl_then [‘combs_nl’, ‘ffs_nl’] assume_tac rtl_determinizer_netlist_correct_step \\ drule_first \\
+     simp [] \\ asm_exists_tac \\ simp []) \\
  drule_first \\ simp [] \\
 
- fs [netlist_step_def, sum_bind_INR] \\ rveq \\
+ qmatch_goalsub_abbrev_tac ‘sum_foldM (reg_run _ cenv_det') cenv_reg_det _’ \\
+ drule_strip rtl_determinizer_reg_correct \\ 
+ disch_then (qspecl_then [‘cenv_reg_det’, ‘cenv' with env := FILTER (is_RegVar ∘ FST) cenv'.env’] mp_tac) \\
+ unabbrev_all_tac \\
+ impl_tac >- fs [det_rel_def, det_rel_reg_def, cget_var_def, ALOOKUP_FILTER_FST, is_RegVar_def] \\ strip_tac \\
+ simp [FILTER_reg_MAP_rtl_determinizer_reg_COMM] \\
 
- drule_strip det_rel_reg_det_rel \\ pop_assum (qspec_then ‘si’ assume_tac) \\
- drule_strip rtl_determinizer_netlist_correct_step \\ drule_first \\ simp [] \\
+ qspecl_then [‘combs_nl’, ‘ffs_nl’] assume_tac rtl_determinizer_netlist_correct_step \\ drule_first \\
+ impl_tac >- (conj_tac \\ match_mp_tac regs_run_only_regs \\
+              asm_exists_tac \\ simp [only_regs_FILTER_is_RegVar]) \\ strip_tac \\
 
- drule_strip rtl_determinizer_reg_correct \\ simp [] \\
+ simp [] \\
 
  drule_strip netlist_run_fbits \\
- qexists_tac ‘replace_prefix fbits' fbits m’ \\
  first_x_assum (qspec_then ‘replace_prefix fbits' fbits m’ mp_tac) \\
  impl_tac >- simp [init_seq_eq_replace_prefix, init_seq_eq_sym] \\ strip_tac \\
+ simp [PULL_EXISTS] \\ fs [] \\ asm_exists_tac \\
+
  simp [shift_seq_replace_prefix] \\
- drule_strip sum_foldM_reg_run_fbits \\ first_x_assum (qspecl_then [‘cenv''.fbits’, ‘fbits'’] strip_assume_tac) \\
+ drule_strip regs_run_fbits \\ first_x_assum (qspec_then ‘fbits'’ strip_assume_tac) \\
  fs [rtlstate_fbits_fbits, shift_seq_replace_prefix] \\ simp [det_rel_reg_fbits, only_regs_fbits] \\
  metis_tac [regs_run_only_regs, det_rel_reg_cong3]
 QED
@@ -686,18 +793,37 @@ Theorem rtl_determinizer_reg_correct_init:
                            (det_rel_reg cenvold cenv_det cenv ==> det_rel_reg cenvold' cenv_det' cenv')
 Proof
  gen_tac \\ Induct >- (rw [init_run_def] \\ metis_tac [rtlstate_fbits_fbits]) \\
- PairCases \\ Cases_on ‘h3’ \\
+ PairCases \\ Cases_on ‘h2.init’ \\
  rw [init_run_def, rtl_determinizer_reg_def, has_rtltype_v_correct, build_zero_type_correct]
  >- (pairarg_tac \\ fs [cset_var_fbits] \\ drule_first \\
     qmatch_goalsub_abbrev_tac ‘init_run cenv_det' (MAP (rtl_determinizer_reg si) regs)’ \\
     first_x_assum (qspecl_then [‘cenv_det'’,
-                                ‘cset_var cenv (RegVar h1 h2) (build_zero h0)’] strip_assume_tac) \\
+                                ‘cset_var cenv (RegVar h0 h1) (build_zero h2.type)’] strip_assume_tac) \\
     qunabbrev_tac ‘cenv_det'’ \\
-    simp [] \\ qexists_tac ‘replace_prefix fbits (K F) (rtltype_v_size h0)’ \\
+    simp [] \\ qexists_tac ‘replace_prefix fbits (K F) (rtltype_v_size h2.type)’ \\
     rw [rtl_nd_value_K_F_fbits] \\ first_x_assum match_mp_tac \\ simp [det_rel_reg_fbits] \\
     metis_tac [det_rel_reg_cset_var, rtl_nd_value_type_correct, build_zero_type_correct, rtltype_v_same_shape])
 
  \\ simp [cset_var_fbits, det_rel_reg_fbits] \\ drule_first \\ metis_tac [det_rel_reg_cset_var, same_shape_refl]
+QED
+
+Definition det_rel_reg_out_def:
+ det_rel_reg_out (*cenvold*) cenv_det cenv <=>
+ (∀reg. sum_alookup cenv_det reg = sum_alookup cenv reg)
+End
+
+Theorem rtl_determinizer_out_correct:
+ ∀outs fext si cenvold cenvold' cenv_det cenv.
+ sum_mapM (out_run fext cenvold) outs = INR cenvold' ∧
+ EVERY out_ok outs ∧
+ det_rel si cenvold cenv_det cenv ⇒
+ ∃cenv_det'. sum_mapM (out_run fext cenv_det) outs = INR cenv_det' ∧
+             ?cenv'. sum_mapM (out_run fext cenv) outs = INR cenv' /\
+                     det_rel_reg_out (*si cenvold'*) cenv_det' cenv'
+Proof
+ Induct \\ TRY PairCases \\ simp [sum_mapM_INR, out_ok_cases] >- simp [det_rel_reg_out_def] \\
+ rpt strip_tac \\ rveq \\ fs [out_run_def, cell_inp_run_def, sum_bind_INR] \\
+ drule_first \\ fs [det_rel_def] \\ drule_first \\ fs [det_rel_reg_out_def, sum_alookup_cons]
 QED
 
 Theorem MAP_reg_name_MAP_rtl_determinizer_reg:
@@ -707,16 +833,16 @@ Proof
 QED
 
 Theorem rtl_determinizer_reg_correct_static:
- ∀regs extenv max si.
- regs_ok extenv max regs ∧
+ ∀regs extenv combs_max ffs_max si.
+ regs_ok extenv combs_max ffs_max regs ∧
  regs_distinct regs ⇒
- regs_ok extenv max (MAP (rtl_determinizer_reg si) regs) ∧
+ regs_ok extenv combs_max ffs_max (MAP (rtl_determinizer_reg si) regs) ∧
  regs_distinct (MAP (rtl_determinizer_reg si) regs)
 Proof
  rw [regs_ok_def, regs_distinct_def, EVERY_MAP, MAP_reg_name_MAP_rtl_determinizer_reg] \\
  irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ PairCases \\ rw [reg_ok_def, rtl_determinizer_reg_def]
  >- (every_case_tac \\ fs [has_rtltype_v_correct, build_zero_type_correct])
- \\ Cases_on ‘x4’ \\ fs [cell_input_lt_rtl_determinizer_inp, cell_input_covered_by_extenv_rtl_determinizer_inp]
+ \\ Cases_on ‘x2.inp’ \\ fs [cell_input_lt_rtl_determinizer_inp, cell_input_covered_by_extenv_rtl_determinizer_inp]
 QED
 
 (* Output is deterministic *)
@@ -737,48 +863,81 @@ Proof
  every_case_tac \\ rw [] \\ rw [deterministic_cell_def]
 QED
 
-Theorem deterministic_circuit_rtl_determinizer:
- ∀cir cir'. rtl_determinizer cir = INR cir' ⇒ deterministic_circuit cir'
-Proof
- Cases \\ rw [rtl_determinizer_def, sum_map_INR] \\ pairarg_tac \\
- rw [deterministic_circuit_def, deterministic_regs_map_rtl_determinizer_reg] \\
- drule_strip deterministic_netlist_rtl_determinizer_netlist
-QED
-
 (* Top-level thm *)
 
+Theorem covers_ndetcell_si_cong:
+ ∀cell si si'.
+ (∀n. MEM n (cell_output cell) ⇒ lookup num_cmp n si' = lookup num_cmp n si) ⇒
+ covers_ndetcell T si' cell = covers_ndetcell T si cell
+Proof
+ Cases \\ simp [cell_output_def, covers_ndetcell_def]
+QED
+
+Theorem netlist_sorted_mem_lem:
+ netlist_sorted (combs_nl ⧺ ffs_nl) ∧
+ MEM cell ffs_nl ∧
+ MEM n (cell_output cell) ⇒
+ ¬MEM n (FLAT (MAP cell_output combs_nl))
+Proof
+ rpt strip_tac \\ drule_strip netlist_sorted_all_distinct \\ fs [ALL_DISTINCT_APPEND] \\
+ drule_first \\ fs [MEM_FLAT, MEM_MAP] \\ metis_tac []
+QED
+
+Triviality ALOOKUP_rtl_determinizer_reg_reg_type:
+ ∀regs rdata regi si.
+ ALOOKUP (MAP (rtl_determinizer_reg si) regs) regi = SOME rdata ⇒
+ ∃rdata'. ALOOKUP regs regi = SOME rdata' ∧ rdata'.reg_type = rdata.reg_type
+Proof
+ Induct \\ TRY PairCases \\ simp [rtl_determinizer_reg_def] \\ rw [SF SFY_ss] \\ rw []
+QED
+
 Theorem rtl_determinizer_correct:
- !cir cir' fext fbits n cenvold min max.
+ !cir cir' fext fbits fbits' n cenvold min combs_max ffs_max.
  rtl_determinizer cir = INR cir' ∧
- circuit_ok min max cir ∧
+ circuit_ok min combs_max ffs_max cir ∧
  circuit_sorted cir ∧
  (* needed to ensure that the circuit makes sense w.r.t. types: *)
- circuit_run fext fbits cir n = INR cenvold ==>
+ circuit_run fext fbits cir n = INR (cenvold, fbits') ==>
+ circuit_extenv cir' = circuit_extenv cir ∧
+ (∀regi rdata. ALOOKUP (circuit_regs cir') regi = SOME rdata ⇒
+               ∃rdata'. ALOOKUP (circuit_regs cir) regi = SOME rdata' ∧ rdata'.reg_type = rdata.reg_type) ∧
  deterministic_circuit cir' ∧
- circuit_ok min max cir' ∧
+ circuit_ok min combs_max ffs_max cir' ∧
  circuit_sorted cir' ∧
- ?cenv_det. circuit_run fext fbits cir' n = INR cenv_det /\
-            ?fbits' cenv. circuit_run fext fbits' cir n = INR cenv /\
-                          det_rel_reg cenvold cenv_det cenv
+ ?cenv_det fbits_det. circuit_run fext fbits cir' n = INR (cenv_det, fbits_det) /\ (* <-- could say fbits here instead of fbits_det, but this anyway follows from general determinism thm for circuit_run *)
+                      ?fbits' fbits'' cenv. circuit_run fext fbits' cir n = INR (cenv, fbits'') /\
+                                            det_rel_reg_out (*cenvold*) cenv_det cenv
 Proof
- Cases \\ rpt strip_tac' \\
- conj_tac >- drule_strip deterministic_circuit_rtl_determinizer \\
- fs [rtl_determinizer_def, sum_map_INR] \\
- pairarg_tac \\ fs [circuit_run_def, sum_bind_INR] \\ rveq \\
- fs [circuit_sorted_def, circuit_ok_def] \\
+ namedCases ["extenv outs regs combs_nl ffs_nl"] \\ simp [rtl_determinizer_def, sum_bind_INR] \\ rpt strip_tac' \\
+ rpt (pairarg_tac \\ gvs [sum_bind_INR]) \\
 
+ conj_tac >- simp [circuit_extenv_def] \\
+ conj_tac >- simp [circuit_regs_def, ALOOKUP_rtl_determinizer_reg_reg_type, SF SFY_ss] \\
+ conj_tac >- (fs [deterministic_circuit_def, deterministic_regs_map_rtl_determinizer_reg] \\ 
+              conj_tac \\ irule deterministic_netlist_rtl_determinizer_netlist \\ asm_exists_tac) \\
+
+ fs [circuit_run_def, sum_bind_INR, circuit_sorted_def, circuit_ok_def] \\
  drule_strip rtl_determinizer_reg_correct_static \\ simp [] \\ pop_assum kall_tac \\
 
  drule_strip rtl_determinizer_reg_correct_init \\
- first_x_assum (qspecl_then [‘si'’, ‘<|env := []; fbits := fbits|>’, ‘<|env := []|>’] strip_assume_tac) \\
+ first_x_assum (qspecl_then [‘si''’, ‘<|env := []; fbits := fbits|>’, ‘<|env := []|>’] strip_assume_tac) \\
  pop_assum mp_tac \\ impl_tac >- simp [det_rel_reg_def, cget_var_def] \\ strip_tac \\ simp [] \\
 
  drule_strip netlist_sorted_all_distinct \\
- drule_strip find_fills_correct \\ impl_tac >- simp [netlist_unprocessed_empty, empty_thm] \\ strip_tac \\
+ drule_strip find_fills_correct \\ impl_tac >- fs [netlist_unprocessed_empty, empty_thm] \\ simp [] \\ strip_tac \\
 
- drule_strip rtl_determinizer_netlist_correct_run \\
+ ‘EVERY (covers_ndetcell T si') ffs_nl’ by
+ (rev_drule_strip rtl_determinizer_netlist_correct_cells_run \\
+  impl_tac >- fs [netlist_sorted_def, sortingTheory.SORTED_APPEND] \\ strip_tac \\
+  irule EVERY_MEM_MONO \\ metis_tac [covers_ndetcell_si_cong, netlist_sorted_mem_lem]) \\
+
+ qspecl_then [‘combs_nl’, ‘ffs_nl’] assume_tac rtl_determinizer_netlist_correct_run \\
+
+ drule_first \\
  impl_tac >- (imp_res_tac init_run_only_regs \\ fs [only_regs_nil]) \\ strip_tac \\
  simp [circuit_run_def, sum_bind_def] \\
+
+ drule_strip rtl_determinizer_out_correct \\ simp [] \\
 
  drule_strip init_run_fbits \\
  qexists_tac ‘replace_prefix fbits'' fbits' n'’ \\

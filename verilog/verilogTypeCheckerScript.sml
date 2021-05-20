@@ -9,10 +9,10 @@ val _ = new_theory "verilogTypeChecker";
 (** Type utils **)
 
 val assert_type_def = Define `
- assert_type t1 t2 = if t1 = t2 then INR () else INL TypeError`;
+ assert_type t1 t2 = if t1 = t2 then INR () else INL $ TypeErrorMsg "assert_type: types not equal"`;
 
 val assert_array_type_def = Define ‘
- (assert_array_type VBool_t = INL TypeError) /\
+ (assert_array_type VBool_t = INL $ TypeErrorMsg "assert_array_type: expected array type") /\
  (assert_array_type (VArray_t n) = INR ())’;
 
 Theorem assert_array_type_INR:
@@ -22,7 +22,7 @@ Proof
 QED
 
 val array_type_length_def = Define `
- (array_type_length VBool_t = INL TypeError) /\
+ (array_type_length VBool_t = INL $ TypeErrorMsg "array_type_length: expected array type") /\
  (array_type_length (VArray_t l) = INR l)`;
 
 Theorem array_type_length_INR:
@@ -32,7 +32,7 @@ Proof
 QED
 
 Definition sum_the_def:
- (sum_the NONE = INL TypeError) /\
+ (sum_the NONE = INL $ TypeErrorMsg "sum_the: expected value, got NONE") /\
  (sum_the (SOME x) = INR x)
 End
 
@@ -87,6 +87,14 @@ val infer_exp_def = Define `
   return (ArrayIndex (Var var) i_t_len i, VBool_t)
  od) /\
 
+ (infer_exp extenv env (ArraySlice (Var var) i1 i2) = do
+  var_t <- sum_alookup env var;
+  var_t_len <- array_type_length var_t;
+  sum_check (i1 < var_t_len) TypeError;
+  sum_check (i2 ≤ i1) TypeError;
+  return (ArraySlice (Var var) i1 i2, VArray_t (i1 - i2 + 1))
+ od) /\
+
  (infer_exp extenv env (BUOp Not e) = do
   (e, e_t) <- infer_exp extenv env e;
   assert_type e_t VBool_t;
@@ -106,7 +114,7 @@ val infer_exp_def = Define `
   e1_t_len <- array_type_length e1_t;
   (e2, e2_t) <- infer_exp extenv env e2;
   e2_t_len <- array_type_length e2_t;
-  sum_check (e1_t_len = e2_t_len) TypeError;
+  sum_check (e1_t_len = e2_t_len) (TypeErrorMsg "infer_exp: Addition operands different lengths");
   return (Arith e1 Plus e2, VArray_t e1_t_len)
  od) /\
 
@@ -115,11 +123,11 @@ val infer_exp_def = Define `
   e1_t_len <- array_type_length e1_t;
   (e2, e2_t) <- infer_exp extenv env e2;
   e2_t_len <- array_type_length e2_t;
-  sum_check (e1_t_len = e2_t_len) TypeError;
+  sum_check (e1_t_len = e2_t_len) (TypeErrorMsg "infer_exp: Array eq. operands different lengths");
   return (Cmp e1 ArrayEqual e2, VBool_t)
  od) /\
 
- (infer_exp extenv env _ = INL TypeError)`;
+ (infer_exp extenv env _ = INL $ TypeErrorMsg "infer_exp: Non-supported operator")`;
 
 Theorem infer_exp_sound:
  !extenv env e e' t.
@@ -134,6 +142,8 @@ Proof
  >- fs [Once vertype_exp_cases, sum_alookup_INR]
  >- (pairarg_tac \\ fs [sum_bind_INR] \\ rveq \\ simp [Once vertype_exp_cases] \\
     fs [assert_array_type_INR, array_type_length_INR, alist_to_map_alookup, sum_alookup_INR, erun_def])
+ >- (fs [sum_alookup_INR, array_type_length_INR, sum_check_INR] \\
+     rw [Once vertype_exp_cases, alist_to_map_alookup])
  >- (rpt (pairarg_tac \\ fs [sum_bind_INR]) \\ rveq \\ simp [Once vertype_exp_cases] \\
      fs [assert_type_def, erun_def] \\ rpt asm_exists_tac)
  >- (rpt (pairarg_tac \\ fs [sum_bind_INR]) \\ rveq \\ simp [Once vertype_exp_cases] \\
@@ -153,6 +163,7 @@ Proof
  >- fs [alist_to_map_alookup, sum_alookup_INR]
  >- fs [sum_alookup_INR]
  >- fs [alist_to_map_alookup, sum_alookup_INR, assert_array_type_def, array_type_length_def]
+ >- fs [alist_to_map_alookup, sum_alookup_INR, array_type_length_def, sum_check_def]
  >- simp [assert_type_def]
  >- simp [assert_type_def]
  >- simp [array_type_length_def, sum_check_def]
@@ -162,7 +173,7 @@ QED
 val check_exp_def = Define `
  check_exp extenv env t e = do
   (e, e_t) <- infer_exp extenv env e;
-  if e_t = t then return e else INL TypeError
+  if e_t = t then return e else INL $ TypeErrorMsg "check_exp: inferred unexpected type"
  od`;
 
 Theorem check_exp_sound:
@@ -224,7 +235,7 @@ Definition check_stmt_def:
    rhs <- check_exp extenv env VBool_t rhs;
    return (BlockingAssign (Indexing var i_t_len i) (SOME rhs))
   od) /\
- (check_stmt extenv env (BlockingAssign _ rhs) = INL TypeError) /\
+ (check_stmt extenv env (BlockingAssign _ rhs) = INL $ TypeErrorMsg "Bad blocking assignment") /\
 
  (check_stmt extenv env (NonBlockingAssign (NoIndexing var) rhs) = do
    var_t <- sum_alookup env var;
@@ -240,7 +251,7 @@ Definition check_stmt_def:
    rhs <- check_exp extenv env VBool_t rhs;
    return (NonBlockingAssign (Indexing var i_t_len i) (SOME rhs))
   od) /\
- (check_stmt extenv env (NonBlockingAssign _ rhs) = INL TypeError)
+ (check_stmt extenv env (NonBlockingAssign _ rhs) = INL $ TypeErrorMsg "Bad non-blocking assignment")
 Termination
  WF_REL_TAC `measure (vprog_size o (λ(_, _, p). p))` \\ rw [] \\
  drule MEM_IMP_vprog_size \\ DECIDE_TAC
@@ -369,92 +380,40 @@ Proof
  Cases \\ rw [assert_vertype_ok_def, vertype_ok_cases]
 QED*)
 
-val check_decls_def = Define `
+Definition check_decls_def:
  (check_decls env [] = INR env) /\
- (check_decls env ((ty, var, v) :: decls) =
+ (check_decls env ((var, data) :: decls) =
   case ALOOKUP env var of
-    SOME _ => INL TypeError
+    SOME _ => INL $ TypeErrorMsg "check_decls: Duplicate variables"
   | NONE =>
-     case v of
-       NONE => check_decls (SNOC (var, ty) env) decls
+     case data.init of
+       NONE => check_decls (SNOC (var, data.type) env) decls
      | SOME v => do
                   vty <- infer_val v;
-                  if ty = vty then
-                    check_decls (SNOC (var, ty) env) decls
+                  if data.type = vty then
+                    check_decls (SNOC (var, data.type) env) decls
                    else
-                    INL TypeError
-                 od)`;
+                    INL $ TypeErrorMsg "check_decls: bad init value"
+                 od)
+End
 
 Theorem check_decls_sound:
  !decls env env'.
  check_decls env decls = INR env' /\
  ALL_DISTINCT (MAP FST env) ==>
- env' = env ++ MAP (λ(ty, var, v). (var, ty)) decls /\
+ env' = env ++ (MAP (λ(var, data). (var, data.type)) decls) /\
  ALL_DISTINCT (MAP FST env') /\
- (∀extenv ps.
-  vertype_prog (alist_to_map env') (Module extenv [] ps) ⇒
-  vertype_prog (alist_to_map env) (Module extenv decls ps))
+ EVERY (λ(var,data). OPTION_ALL (λv. vertype_v v data.type) data.init) decls
 Proof
- Induct >- simp [check_decls_def] \\ PairCases \\ Cases_on `h2` \\
- simp [check_decls_def] \\ rpt gen_tac \\ every_case_tac \\ rpt strip_tac' \\ rveq \\
- fs [Once vertype_prog_cases, alist_to_map_alookup, sum_bind_INR, infer_val_INR, ALOOKUP_NONE] \\
+ Induct \\ TRY PairCases \\ simp [check_decls_def] \\
+ rpt gen_tac \\ every_case_tac \\ simp [sum_bind_INR] \\ rpt strip_tac' \\
  every_case_tac \\ fs [] \\
- drule_first \\ simp [SNOC_APPEND, ALL_DISTINCT_APPEND] \\ rpt strip_tac \\ rveq \\
- drule_first \\ drule_strip alist_to_map_snoc \\ fs [SNOC_APPEND] \\
- simp [Once vertype_prog_cases, alist_to_map_alookup, ALOOKUP_NONE]
-QED
-
-val typecheck_def = Define `
- typecheck (Module extenv decls ps) = do
-  env <- check_decls [] decls;
-  ps <- sum_mapM (check_stmt extenv env) ps;
-  return $ Module extenv decls ps
- od`;
-
-Theorem sum_mapM_check_stmt_writes:
- ∀extenv env ps ps'.
- sum_mapM (check_stmt extenv env) ps = INR ps' ⇒
- MAP vwrites ps' = MAP vwrites ps ∧
- MAP vnwrites ps' = MAP vnwrites ps
-Proof
- ntac 2 gen_tac \\ Induct \\ simp [sum_mapM_INR] \\ rpt strip_tac' \\
- drule_strip check_stmt_writes \\ simp []
-QED
-
-Theorem typecheck_writes:
- ∀ps ps' decls decls' extenv extenv'.
- typecheck (Module extenv decls ps) = INR (Module extenv' decls' ps') ∧ writes_ok ps ⇒ writes_ok ps'
-Proof
- simp [typecheck_def, sum_bind_INR, writes_ok_def] \\ rpt strip_tac' \\
- drule_strip sum_mapM_check_stmt_writes \\ simp []
-QED
-
-Theorem sum_mapM_check_stmt_sound:
- !ps ps' extenv env.
- sum_mapM (check_stmt extenv env) ps = INR ps' ==>
- EVERY (vertype_stmt extenv (alist_to_map env)) ps' ∧
- (∀i. i < LENGTH ps ⇒ ∀fext s. prun fext s (EL i ps') = prun fext s (EL i ps))
-Proof
- rw [EVERY_EL, sum_mapM_EL] \\ drule_first \\ drule_strip check_stmt_sound \\ simp []
-QED
-
-Theorem typecheck_sound:
- !ps ps' decls decls' exttys exttys'.
-  typecheck (Module exttys decls ps) = INR (Module exttys' decls' ps') ==>
-  exttys' = exttys /\ decls' = decls /\
-  vertype_prog (K NONE) (Module exttys' decls' ps') /\
-  (!fext fbits n. run fext fbits (Module exttys' decls' ps') n = run fext fbits (Module exttys decls ps) n)
-Proof
- simp [typecheck_def, sum_bind_INR] \\ rpt strip_tac' \\
- drule_strip sum_mapM_check_stmt_sound \\ simp [] \\
- drule_strip check_decls_sound \\ simp [alist_to_map_nil] \\ strip_tac \\ rw []
- >- (first_x_assum match_mp_tac \\ simp [vertype_prog_alt] \\ simp [Once vertype_prog_cases])
- \\ rw [run_def] \\ pairarg_tac \\ simp [] \\ match_mp_tac mrun_cong \\
-    drule_strip length_sum_mapM \\ rw []
+ drule_first \\ (impl_tac >- fs [SNOC_APPEND, ALL_DISTINCT_APPEND, ALOOKUP_NONE]) \\ strip_tac \\
+ fs [infer_val_INR]
 QED
 
 (* This proof is very ugly for some reason? *)
-Theorem check_decls_complete:
+(*Theorem check_decls_complete:
  !decls env.
  EVERY (λ(t,var,v). OPTION_ALL (λv. vertype_v v t) v) decls ∧
  ALL_DISTINCT (MAP (λ(t, var, v). var) decls) ∧
@@ -472,9 +431,52 @@ Proof
     >- rfs [not_MEM_decls_ALOOKUP_NONE]
     \\ fs [CaseEq"option"] \\ drule_first \\ rfs [])
  \\ drule_first \\ fs []
+QED*)
+
+Definition typecheck_def:
+ typecheck m = do
+  (* A little overkill to build a new decls -- called env here -- after decls representation changed *)
+  env <- check_decls [] m.decls;
+  ffs <- sum_mapM (check_stmt m.fextty env) m.ffs;
+  combs <- sum_mapM (check_stmt m.fextty env) m.combs;
+  return $ m with <| ffs := ffs; combs := combs |>
+ od
+End
+
+Theorem sum_mapM_check_stmt_sound:
+ !ps ps' extenv env.
+ sum_mapM (check_stmt extenv env) ps = INR ps' ==>
+ EVERY (vertype_stmt extenv (alist_to_map env)) ps' ∧
+ (∀i. i < LENGTH ps ⇒ ∀fext s. prun fext s (EL i ps') = prun fext s (EL i ps))
+Proof
+ rw [EVERY_EL, sum_mapM_EL] \\ drule_first \\ drule_strip check_stmt_sound \\ simp []
 QED
 
-Theorem sum_mapM_check_stmt_complete:
+Triviality FST_as_lambda:
+ FST = λ(p1, p2). p1
+Proof
+ rw [FUN_EQ_THM] \\ pairarg_tac \\ rw []
+QED
+
+Theorem typecheck_sound:
+ !m m'.
+  typecheck m = INR m' ==>
+  m'.fextty = m.fextty /\ m'.decls = m.decls /\
+  vertype_prog m' /\
+  (!fext fbits n. run fext fbits m' n = run fext fbits m n)
+Proof
+ simp [typecheck_def, sum_bind_INR] \\ rpt strip_tac' \\ rveq \\
+ imp_res_tac sum_mapM_check_stmt_sound \\
+ drule_strip check_decls_sound \\ impl_tac >- simp [] \\ strip_tac \\ rveq \\ fs [] \\ conj_tac
+ >- (simp [vertype_prog_def] \\ rpt conj_tac
+     >- fs [MAP_MAP_o, combinTheory.o_DEF, pairTheory.LAMBDA_PROD, FST_as_lambda]
+     \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rpt strip_tac \\
+        irule vertype_stmt_cong \\ asm_exists_any_tac \\ simp [Ev_from_decls_def])
+ \\ rw [run_def] \\ pairarg_tac \\ simp [] \\ match_mp_tac mrun_cong \\
+    imp_res_tac length_sum_mapM \\ simp [LIST_REL_EL_EQN]
+QED
+
+(*Theorem sum_mapM_check_stmt_complete:
  !ps extenv env.
  EVERY (vertype_stmt extenv (alist_to_map env)) ps ⇒ sum_mapM (check_stmt extenv env) ps = INR ps
 Proof
@@ -494,15 +496,32 @@ Proof
  qpat_x_assum ‘vertype_prog _ (Module _ [] _)’ (assume_tac o SIMP_RULE (srw_ss()) [Once vertype_prog_cases]) \\
  drule_strip sum_mapM_check_stmt_complete \\
  simp [sum_bind_def]
+QED*)
+
+(* Other properties *)
+
+Theorem sum_mapM_check_stmt_writes:
+ ∀extenv env ps ps'.
+ sum_mapM (check_stmt extenv env) ps = INR ps' ⇒
+ MAP vwrites ps' = MAP vwrites ps ∧
+ MAP vnwrites ps' = MAP vnwrites ps
+Proof
+ ntac 2 gen_tac \\ Induct \\ simp [sum_mapM_INR] \\ rpt strip_tac' \\
+ drule_strip check_stmt_writes \\ simp []
 QED
 
-(** Check writes (unused for now) **)
-
-(* Inefficient but at least EVALable *)
-Theorem writes_ok_compute:
- !ps. writes_ok ps <=> EVERY (\var. ~MEM var (FLAT (MAP vnwrites ps))) (FLAT (MAP vwrites ps))
+Theorem typecheck_module_ok:
+ ∀m m'. typecheck m = INR m' ∧ module_ok m ⇒ module_ok m'
 Proof
- rw [writes_ok_def, EVERY_MEM] \\ metis_tac []
+ simp [typecheck_def, module_ok_def, writes_overlap_ok_def, writes_ok_def, sum_bind_INR] \\ rpt strip_tac' \\
+ imp_res_tac sum_mapM_check_stmt_writes \\ rw []
+QED
+
+Theorem typecheck_vwrites_comb:
+ ∀m m'. typecheck m = INR m' ⇒
+ ∀var. MEM var (FLAT (MAP vwrites m'.combs)) ⇔ MEM var (FLAT (MAP vwrites m.combs))
+Proof
+ rw [typecheck_def, sum_bind_INR] \\ imp_res_tac sum_mapM_check_stmt_writes \\ rw []
 QED
 
 val _ = export_theory ();

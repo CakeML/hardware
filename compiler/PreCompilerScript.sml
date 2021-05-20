@@ -16,10 +16,10 @@ Definition is_tmpvar_def:
 End
 
 val not_tmpvar_decl_def = Define ‘
- not_tmpvar_decl (ty, var, v) = ~(is_tmpvar var)’;
+ not_tmpvar_decl (var, data) = ~(is_tmpvar var)’;
 
 val tmpvar_check_def = Define ‘
- tmpvar_check (Module _ decls _) = EVERY not_tmpvar_decl decls’;
+ tmpvar_check m = EVERY not_tmpvar_decl m.decls’;
 
 Definition fresh_tmpvar_list_def:
  fresh_tmpvar_list tmpnum l = !n. tmpnum <= n ==> sum_alookup l (tmpvar n) = INL UnknownVariable
@@ -55,12 +55,12 @@ QED
 
 (* Fill with Fs instead of NONE here to keep fbits in sync, will anyway be filled with Fs later *)
 Definition tmpvardecls_def:
- tmpvardecls tmps = MAP (λ(i, t). (t, tmpvar i, SOME $ build_zero t)) tmps
+ tmpvardecls tmps = MAP (λ(i, t). (tmpvar i, <| output := F; type := t; init := SOME $ build_zero t |>)) tmps
 End
 
-Definition tmpvardecls_env_def:
+(*Definition tmpvardecls_env_def:
  tmpvardecls_env tmps = MAP (λ(ty, var, v). (var, ty)) (tmpvardecls tmps)
-End
+End*)
 
 Definition tenv_type_def:
  tenv_type tenv var = case tenv var of SOME t => INR t | NONE => INL UnknownVariable
@@ -197,9 +197,10 @@ Definition compile_array_read_list_def:
 End
 
 Definition compile_array_read_module_def:
- compile_array_read_module tmpnum (Module extenv decls ps) =
-  let (tmpnum, tmps, ps) = compile_array_read_list decls tmpnum [] ps in
-  (tmpnum, Module extenv (decls ++ tmpvardecls tmps) ps)
+ compile_array_read_module tmpnum m =
+  let (tmpnum, ffs_tmps, ffs) = compile_array_read_list m.decls tmpnum [] m.ffs;
+      (tmpnum, combs_tmps, combs) = compile_array_read_list m.decls tmpnum [] m.combs in
+  (tmpnum, m with <| decls := m.decls ++ tmpvardecls ffs_tmps ++ tmpvardecls combs_tmps; ffs := ffs; combs := combs |>)
 End
 
 Definition no_array_read_dyn_exp_def:
@@ -210,6 +211,7 @@ Definition no_array_read_dyn_exp_def:
   case (do i <- get_const i; i <- ver2n i; t <- tenv_type tenv var; return (i, t) od) of
     INR (i, VArray_t len) => i < len
   | _ => F) /\
+ (no_array_read_dyn_exp tenv (ArraySlice _ _ _) ⇔ T) ∧
  (no_array_read_dyn_exp tenv (BUOp _ e1) <=>
   no_array_read_dyn_exp tenv e1) /\
  (no_array_read_dyn_exp tenv (BBOp e1 _ e2) <=>
@@ -309,9 +311,10 @@ Definition compile_array_write_list_def:
 End
 
 Definition compile_array_write_module_def:
- compile_array_write_module tmpnum (Module extenv decls ps) =
-  let (tmpnum, tmps, ps) = compile_array_write_list decls tmpnum [] ps in
-  (tmpnum, Module extenv (decls ++ tmpvardecls tmps) ps)
+ compile_array_write_module tmpnum m =
+  let (tmpnum, ffs_tmps, ffs) = compile_array_write_list m.decls tmpnum [] m.ffs;
+      (tmpnum, combs_tmps, combs) = compile_array_write_list (m.decls ++ tmpvardecls ffs_tmps) tmpnum [] m.combs in
+  (tmpnum, m with <| decls := m.decls ++ tmpvardecls ffs_tmps ++ tmpvardecls combs_tmps; ffs := ffs; combs := combs |>)
 End
 
 Definition no_array_write_dyn_def:
@@ -396,9 +399,10 @@ Definition compile_Case_list_def:
 End
 
 Definition compile_Case_module_def:
- compile_Case_module tmpnum (Module extenv decls ps) =
-  let (tmpnum, tmps, ps) = compile_Case_list tmpnum [] ps in
-   Module extenv (decls ++ tmpvardecls tmps) ps
+ compile_Case_module tmpnum m =
+  let (tmpnum, ffs_tmps, ffs) = compile_Case_list tmpnum [] m.ffs;
+      (tmpnum, combs_tmps, combs) = compile_Case_list tmpnum [] m.combs in
+   m with <| decls := m.decls ++ tmpvardecls ffs_tmps ++ tmpvardecls combs_tmps; ffs := ffs; combs := combs |>
 End
 
 Definition no_Case_def:
@@ -433,7 +437,7 @@ Proof
 QED
 
 Definition preprocessed_module_def:
- preprocessed_module tenv (Module fextenv decls ps) <=> EVERY (preprocessed tenv) ps
+ preprocessed_module tenv m <=> EVERY (preprocessed tenv) m.ffs ∧ EVERY (preprocessed tenv) m.combs
 End
 
 val _ = export_theory ();

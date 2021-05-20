@@ -58,6 +58,14 @@ val same_shape_def = Define `
  (same_shape (CArray xs) (CArray ys) <=> LENGTH xs = LENGTH ys) /\
  (same_shape _ _ <=> F)`;
 
+Theorem same_shape_cases:
+ ∀v v'.
+ same_shape v v' ⇔ (∃b b'. v = CBool b ∧ v' = CBool b') ∨
+                   (∃bs bs'. v = CArray bs ∧ v' = CArray bs' ∧ LENGTH bs = LENGTH bs')
+Proof
+ Cases \\ Cases \\ simp [same_shape_def]
+QED
+
 (* types and values *)
 
 val has_rtltype_v_def = Define `
@@ -85,10 +93,17 @@ val var_num_def = Define `
  (var_num (RegVar _ _) = NONE) /\
  (var_num (NetVar n) = SOME n)`;
 
-val _ = Datatype `
+Datatype:
+ cell_input_idx = NoIndexing
+                | Indexing num
+                | SliceIndexing num num
+End
+
+Datatype:
  cell_input = ConstInp value
-            | ExtInp string (num option)
-            | VarInp var (num option)`;
+            | ExtInp string cell_input_idx
+            | VarInp var cell_input_idx
+End
 
 val cell_input_is_var_def = Define `
  (cell_input_is_var (ConstInp _) var <=> F) /\
@@ -130,6 +145,7 @@ val _ = Datatype `
          ports: sum out -> carry out -> carry in -> "data in" (lhs) -> "select in" (rhs) *)
       | Carry4 num num cell_input (cell_input list) (cell_input list)`;
 
+(* todo: rename to cell_outputs *)
 val cell_output_def = Define `
  (cell_output (NDetCell out _) = [out]) /\
  (cell_output (Cell1 _ out _) = [out]) /\
@@ -154,21 +170,59 @@ End
   component 2) combinational netlist
 *)
 
-val _ = type_abbrev("regty", ``:(rtltype # string # num # value option # cell_input option)``);
+Datatype:
+ reg_type = Reg | PseudoReg
+End
 
-val _ = Datatype `
+Theorem reg_type_not_PseudoReg:
+ ∀reg_type. reg_type ≠ PseudoReg ⇔ reg_type = Reg
+Proof
+ Cases \\ simp []
+QED
+
+Datatype:
+ reg_metadata =
+  <| type : rtltype
+   ; reg_type : reg_type
+   ; init : value option
+   ; inp : cell_input option |>
+End
+
+Datatype:
+ out_spec = OutInp cell_input
+          | OutInps (cell_input list)
+End
+
+Datatype:
  circuit = Circuit ((string, rtltype) alist)
-                   (regty list)
-                   (cell list)`;
+                   ((string, out_spec) alist)
+                   (((string # num), reg_metadata) alist)
+                   (cell list) (* nl_combs *)
+                   (cell list) (* nl_ffs *)
+End
+
+val _ = type_abbrev("regty", ``:((string # num) # reg_metadata)``);
 
 val circuit_extenv_def = Define `
- circuit_extenv (Circuit extenv _ _) = extenv`;
+ circuit_extenv (Circuit extenv _ _ _ _) = extenv`;
+
+val circuit_outs_def = Define `
+ circuit_outs (Circuit _ outs _ _ _) = outs`;
 
 val circuit_regs_def = Define `
- circuit_regs (Circuit _ regs _) = regs`;
+ circuit_regs (Circuit _ _ regs _ _) = regs`;
 
-val circuit_netlist_def = Define `
- circuit_netlist (Circuit _ _ nl) = nl`;
+val circuit_nl_combs_def = Define `
+ circuit_nl_combs (Circuit _ _ _ nl _) = nl`;
+
+val circuit_nl_ffs_def = Define `
+ circuit_nl_ffs (Circuit _ _ _ _ nl) = nl`;
+
+Theorem Circuit_components:
+ ∀c. Circuit (circuit_extenv c) (circuit_outs c) (circuit_regs c) (circuit_nl_combs c) (circuit_nl_ffs c) = c
+Proof
+ Cases \\ EVAL_TAC
+QED
 
 (* semantics *)
 
@@ -190,17 +244,27 @@ Proof
  rw [cget_var_def] \\ every_case_tac \\ fs []
 QED
 
-val cget_fext_var_def = Define `
+Definition cget_fext_var_def:
  cget_fext_var idx v =
   case idx of
-     NONE => INR v
-   | SOME idx =>
+     NoIndexing => INR v
+   | Indexing idx =>
       (case v of
         CBool b => INL TypeError
-      | CArray bs => sum_map CBool $ sum_revEL idx bs)`;
+      | CArray bs => sum_map CBool $ sum_revEL idx bs)
+   | SliceIndexing i1 i2 =>
+      (case v of
+        CBool b => INL TypeError
+      | CArray bs =>
+         let len = LENGTH bs in
+          if i1 < len ∧ i2 ≤ i1 then
+           INR (CArray (TAKE (i1 - i2 + 1) (DROP (len - i1 - 1) bs)))
+          else
+           INL InvalidIndex)
+End
 
 Theorem cget_fext_var_NONE[simp]:
- cget_fext_var NONE = INR
+ cget_fext_var NoIndexing = INR
 Proof
  rw [FUN_EQ_THM, cget_fext_var_def]
 QED
@@ -209,6 +273,12 @@ val cell_inp_run_def = Define `
  (cell_inp_run fext s (ConstInp v) = INR v) /\
  (cell_inp_run fext s (ExtInp var idx) = sum_bind (fext var) (cget_fext_var idx)) /\
  (cell_inp_run fext s (VarInp var idx) = sum_bind (cget_var s var) (cget_fext_var idx))`;
+
+Theorem cell_inp_run_ConstInp:
+ ∀fext s b. cell_inp_run fext s (ConstInp (CBool b)) = INR (CBool b)
+Proof
+ simp [cell_inp_run_def]
+QED
 
 val cset_var_def = Define `
  cset_var s k v = s with env := (k, v) :: s.env`;
@@ -345,65 +415,109 @@ Definition cell_run_def:
 End
 
 val reg_run_def = Define `
- reg_run fext s_net s_reg (ty, dest, destnum, (initv : value option), src) =
-  case src of
+ reg_run fext s_net s_reg ((reg, i), rdata) =
+  case rdata.inp of
     NONE => INR s_reg
-  | SOME src => do
-     v <- cell_inp_run fext s_net src;
-     if has_rtltype_v v ty then
-      return $ cset_var s_reg (RegVar dest destnum) v
+  | SOME inp => do
+     v <- cell_inp_run fext s_net inp;
+     if has_rtltype_v v rdata.type then
+      return $ cset_var s_reg (RegVar reg i) v
      else
       INL TypeError
     od`;
 
-val netlist_step_def = Define `
- netlist_step fext s cells regs = do
-  s' <- sum_foldM (cell_run fext) s cells;
-  s'' <- sum_foldM (reg_run fext s') s regs;
-  return $ s'' with fbits := s'.fbits
- od`;
+Definition is_RegVar_def:
+ (is_RegVar (RegVar _ _) = T) ∧
+ (is_RegVar (NetVar _) = F)
+End
 
-val netlist_run_def = Define `
- (netlist_run fext s cells regs 0 = INR s) /\
- (netlist_run fext s cells regs (SUC n) = do
-  s' <- netlist_run fext s cells regs n;
-  netlist_step (fext n) s' cells regs
- od)`;
+Theorem is_RegVar_cases:
+ ∀var. is_RegVar var = ∃reg i. var = RegVar reg i
+Proof
+ Cases \\ simp [is_RegVar_def]
+QED
+
+(* Common part of all netlist cycle steps *)
+Definition netlist_step_def:
+ netlist_step fext s comb_cells ff_cells regs = do
+  s <- sum_foldM (cell_run fext) s comb_cells;
+  s <- sum_foldM (reg_run fext s) s (FILTER (λ(var, data). data.reg_type = PseudoReg) regs);
+  sum_foldM (cell_run fext) s ff_cells
+ od
+End
+
+Definition netlist_run_def:
+ (netlist_run fext s comb_cells ff_cells regs 0 = netlist_step (fext 0) s comb_cells ff_cells regs) ∧
+ (netlist_run fext s comb_cells ff_cells regs (SUC n) = do
+  s <- netlist_run fext s comb_cells ff_cells regs n;
+
+  (* Note that we cannot re-run the pseudo regs here,
+     since we do not know if they actually represent combinational behavior! *)
+  s <- sum_foldM (reg_run (fext n) s)
+                 (s with env := FILTER (is_RegVar o FST) s.env)
+                 (FILTER (λ(var, data). data.reg_type = Reg) regs);
+
+  netlist_step (fext (SUC n)) s comb_cells ff_cells regs
+ od)
+End
 
 val rtl_nd_value_def = Define `
  (rtl_nd_value oracle CBool_t <=> let (b, oracle') = oracle_bit oracle in (CBool b, oracle')) /\
  (rtl_nd_value oracle (CArray_t len) <=> let (bs, oracle') = oracle_bits oracle len in (CArray bs, oracle'))`;
 
+(* todo: rewrite to sum_foldM? *)
 val init_run_def = Define `
  (init_run s [] = INR s) /\
- (init_run s ((ty, var, varnum, v, _) :: decls) =
-  case v of
-    NONE => let (v, fbits') = rtl_nd_value s.fbits ty in
-             init_run ((cset_var s (RegVar var varnum) v) with fbits := fbits') decls
-  | SOME v => if has_rtltype_v v ty then
-               init_run (cset_var s (RegVar var varnum) v) decls
+ (init_run s (((reg, i), rdata) :: decls) =
+  case rdata.init of
+    NONE => let (v, fbits') = rtl_nd_value s.fbits rdata.type in
+             init_run ((cset_var s (RegVar reg i) v) with fbits := fbits') decls
+  | SOME v => if has_rtltype_v v rdata.type then
+               init_run (cset_var s (RegVar reg i) v) decls
               else
                INL TypeError)`;
 
-val circuit_run_def = Define `
- circuit_run fext fbits (Circuit extenv regs cells) n = do
+Definition out_run_def:
+ (out_run fext s (var, OutInp inp) = do
+  b <- cell_inp_run fext s inp;
+  return (var, b)
+ od) ∧
+ (out_run fext s (var, OutInps inps) = do
+  b <- sum_mapM (cell_inp_run fext s) inps;
+  b <- sum_mapM get_bool b;
+  return $ (var, CArray b)
+ od)
+End
+
+Definition circuit_run_def:
+ circuit_run fext fbits (Circuit extenv outs regs comb_cells ff_cells) n = do
   s <- init_run <| fbits := fbits; env := [] |> regs;
-  netlist_run fext s cells regs n
- od`;
+  s <- netlist_run fext s comb_cells ff_cells regs n;
+  res <- sum_mapM (out_run (fext n) s) outs;
+  return (res, s.fbits)
+ od
+End
 
-(** Operations over circuits **)
+(* Semantics for circuits without pseudo-regs *)
 
-(*val circuit_reads_cells_def = Define `
- (circuit_reads_cells [] var <=> F) /\
- (circuit_reads_cells (cell::cells) var <=>
-  cell_has_input_var cell var \/ circuit_reads_cells cells var)`;
+Definition netlist_run_no_pseudos_def:
+ (netlist_run_no_pseudos fext s cells regs 0 =
+  sum_foldM (cell_run (fext 0)) s cells) ∧
+ (netlist_run_no_pseudos fext s cells regs (SUC n) = do
+  s <- netlist_run_no_pseudos fext s cells regs n;
+  (* Note that we cannot start from the empty list here since some regs have NONE as input *)
+  s <- sum_foldM (reg_run (fext n) s) (s with env := FILTER (is_RegVar o FST) s.env) regs;
+  sum_foldM (cell_run (fext (SUC n))) s cells
+ od)
+End
 
-val circuit_reads_regs_def = Define `
- (circuit_reads_regs [] var <=> F) /\
- (circuit_reads_regs ((_, reg, _, inp)::regs) var <=>
-  cell_input_is_var inp var \/ circuit_reads_regs regs var)`;
-
-val circuit_reads_def = Define `
- circuit_reads (Circuit extenv regs cells) var <=> circuit_reads_cells cells var \/ circuit_reads_regs regs var`;*)
+Definition circuit_run_no_pseudos_def:
+ circuit_run_no_pseudos fext fbits (Circuit extenv outs regs comb_cells ff_cells) n = do
+  s <- init_run <| fbits := fbits; env := [] |> regs;
+  s <- netlist_run_no_pseudos fext s comb_cells regs n;
+  res <- sum_mapM (out_run (fext n) s) outs;
+  return (res, s.fbits)
+ od
+End
 
 val _ = export_theory ();

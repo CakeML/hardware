@@ -13,7 +13,7 @@ val op4 = HolKernel.syntax_fns4 "verilog";
 
 (** Syntax for verilogTheory **)
 
-val value_ty = ``:value``;
+val value_ty = mk_thy_type {Thy = "verilog", Tyop = "value", Args = []};
 
 (** Values **)
 
@@ -124,7 +124,6 @@ val is_VBool_t = identical VBool_t_tm;
 val VArray_t_tm = ``VArray_t``;
 fun is_VArray_t tm = is_comb tm andalso identical (rator tm) VArray_t_tm;
 val dest_VArray_t = rand;
-val num_ty = ``:num``;
 fun mk_VArray_t i = mk_comb (VArray_t_tm, numSyntax.mk_numeral i);
 
 end

@@ -1,0 +1,85 @@
+Program. Program ::= ExpectedErrorDecl Module;
+
+ExpectedErrorDeclSome. ExpectedErrorDecl ::= "`define" "expected_error" Id;
+ExpectedErrorDeclNone. ExpectedErrorDecl ::= ;
+
+Module. Module ::= "module" Id "(" [ExtDecl] ")" ";" [IntDecl] [Always] "endmodule";
+
+InExt.  ExtDeclDir ::= "input";
+OutExt. ExtDeclDir ::= "output";
+EDeclConst. ExtDecl ::= ExtDeclDir Type Id "=" Const;
+EDeclX.     ExtDecl ::= ExtDeclDir Type Id;
+separator ExtDecl ",";
+
+IDeclConst. IntDecl ::= Type Id "=" Const;
+IDeclX.     IntDecl ::= Type Id;
+terminator IntDecl ";";
+
+-- TODO: Rename Always category to something else
+AlwaysFF.         Always ::= "always_ff" "@" "(" "posedge" Id ")" Stm;
+AlwaysComb.       Always ::= "always_comb" Stm;
+AlwaysContinuous. Always ::= "assign" Exp "=" ARHS ";";
+AlwaysModule.     Always ::= Id Id "(" [Exp] ")" ";";
+separator Always "";
+
+-- If with optional else gives shift/reduce conflict
+SIf.     Stm ::= "if" "(" Exp ")" Stm;
+SIfElse. Stm ::= "if" "(" Exp ")" Stm "else" Stm;
+SCase.   Stm ::= "case" "(" Exp ")" [CaseItem] CaseDefault "endcase";
+SBlock.  Stm ::= "begin" [Stm] "end";
+SBAss.   Stm ::= Exp "=" ARHS ";";
+SNBAss.  Stm ::= Exp "<=" ARHS ";";
+terminator Stm "";
+
+CItem. CaseItem ::= Exp ":" Stm;
+terminator CaseItem "";
+CDefault.      CaseDefault ::= "default" ":" Stm;
+CDefaultEmpty. CaseDefault ::= ;
+
+RExp. ARHS ::= Exp;
+RX.   ARHS ::= "'x";
+
+-- So we can diff between internal and external vars
+IntVar. Var ::= Id;
+internal ExtVar. Var ::= Id;
+
+-- See "Table 11-2 -- Operator precedence and associativity" in the SystemVerilog standard
+EConst. Exp4 ::= Const;
+EVar.   Exp4 ::= Var;
+EIndex. Exp4 ::= Var "[" Exp "]";
+ESlice. Exp4 ::= Var "[" Integer ":" Integer "]";
+ENot.   Exp4 ::= "!" Exp4;
+
+EAdd.   Exp3 ::= Exp3 "+" Exp4;
+ESub.   Exp3 ::= Exp3 "-" Exp4;
+
+EEq.    Exp2 ::= Exp2 "==" Exp3;
+internal EEq_bool. Exp ::= Exp Exp;
+internal EEq_array. Exp ::= Exp Exp;
+ENEq.   Exp2 ::= Exp2 "!=" Exp3;
+
+EAnd.   Exp1 ::= Exp1 "&&" Exp2;
+
+EOr.    Exp ::= Exp "||" Exp1;
+coercions Exp 4;
+separator Exp ",";
+
+CInt.     Const ::= Integer;
+CDecimal. Const ::= Integer "'d" Integer;
+CBinary.  Const ::= Integer "'b" Integer;
+
+-- The following is not a good idea in BNFC since we only get access to tokens as strings...
+--CBConst. Const ::= BinaryConst;
+--CDConst. Const ::= DecimalConst;
+--token BinaryConst digit+ '\'' 'b' ('0' | '1')+;
+--token DecimalConst digit+ '\'' 'd' digit+;
+
+TLogic. Type ::= "logic" TypeArray;
+TArrayArray. TypeArray ::= "[" Integer ":" Integer "]";
+TArrayEmpty. TypeArray ::= ;
+
+-- TODO: Check the standard what the rule is exactly
+token Id (letter | '_') (letter | digit | '_')*;
+
+comment "/*" "*/";
+comment "//";

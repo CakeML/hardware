@@ -1,4 +1,4 @@
-structure TechMapLib =
+structure GreedyTechMapLib =
 struct
 
 open hardwarePreamble;
@@ -193,8 +193,8 @@ fun build_var (RegVar (reg, i)) = mk_RegVar (stringSyntax.fromMLstring reg, term
 
 val none_tm_int = optionSyntax.none_tm |> inst [ alpha |-> numSyntax.num ];
 
-fun build_idx NONE = none_tm_int
-  | build_idx (SOME idx) = idx |> term_of_int |> optionSyntax.mk_some;
+fun build_idx NONE = NoIndexing_tm
+  | build_idx (SOME idx) = idx |> term_of_int |> mk_Indexing;
 
 fun build_cell_input (ConstInp b) = b |> lift_bool |> mk_CBool |> mk_ConstInp
   | build_cell_input (ExtInp (var, idx)) = mk_ExtInp (stringSyntax.fromMLstring var, build_idx idx)
@@ -215,23 +215,18 @@ fun selected_covers_build_luts [] = []
   | selected_covers_build_luts ((out, SOME (Cover nl)) :: cs) = build_lut_table nl out :: selected_covers_build_luts cs
   | selected_covers_build_luts ((out, SOME (CoverAlreadyMappedCell c)) :: cs) = AlreadyMappedCell_term c :: selected_covers_build_luts cs;
 
-val out = 48;
-val nl = [CellMux
-            (48, ExtInp ("enabled", NONE), ConstInp false,
-             ExtInp ("signal", SOME 7))];
-
 fun build_lut_nl selected_covers = let
  val cells = selected_covers_build_luts selected_covers
 in
  listSyntax.mk_list (cells, cell_ty)
 end;
 
-(* Top-level entry point: Expects a circuit term as input *)
-fun tech_map circuit = let
- val (_, regs, nl) = dest_Circuit circuit
+(* Top-level entry point: Expects a (blasted) circuit term as input *)
+fun greedy_tech_map circuit = let
+ val (_, outs, regs, nl, _) = dest_Circuit circuit
  val nl = extract_netlist nl
  val (nlorder, covers) = gen_covers nl
- val pos = extract_required_pos regs
+ val pos = extract_required_pos outs regs
  val pos = sort_in_rev_nlorder nlorder pos
  val selected_covers = select_covers nlorder pos covers []
 in

@@ -89,10 +89,12 @@ fun extract_var t =
   failwith "not a var";
 
 fun extract_input_idx t =
- if optionSyntax.is_some t then
-  t |> optionSyntax.dest_some |> int_of_term |> SOME
+ if is_NoIndexing t then
+  NONE
+ else if is_Indexing t then
+  t |> dest_Indexing |> int_of_term |> SOME
  else
-  NONE;
+  failwith "unknown/unexpected cell input index";
 
 fun extract_cell_input t =
  if is_ConstInp t then
@@ -159,8 +161,21 @@ in
  map extract_cell nl
 end;
 
-fun extract_required_po reg = let
- val inp = reg |> pairSyntax.spine_pair |> last
+fun extract_required_out_po out = let
+ val out_inp = out |> pairSyntax.dest_pair |> snd
+ val out_inps = if is_OutInp out_inp then
+                 [out_inp |> dest_OutInp]
+                else
+                  out_inp |> dest_OutInps |> dest_list |> fst
+in
+ out_inps |> flatMap (fn inp => case extract_cell_input inp of
+                                    VarInp (NetVar n, _) => SOME n
+                                  | _ => NONE)
+end;
+
+fun extract_required_reg_po reg = let
+ val rdata = reg |> pairSyntax.dest_pair |> snd |> TypeBase.dest_record |> snd
+ val inp = lookup "inp" rdata
 in
  if optionSyntax.is_some inp then
   case (inp |> optionSyntax.dest_some |> extract_cell_input) of
@@ -173,7 +188,12 @@ end;
 fun dedup [] = []
   | dedup (x::xs) = x :: dedup (filter (curry (op <>) x) xs);
 
-fun extract_required_pos regs = dest_list regs |> fst |> flatMap extract_required_po |> dedup;
+fun extract_required_pos outs regs = let
+ val out_pos = dest_list outs |> fst |> map extract_required_out_po |> flatten
+ val reg_pos = dest_list regs |> fst |> flatMap extract_required_reg_po
+in
+ dedup (out_pos @ reg_pos)
+end;
 
 (** Other convenient functions **)
 

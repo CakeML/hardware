@@ -7,8 +7,18 @@ open monadsyntax;
 val _ = new_theory "sumExtra";
 
 (* Error type, should probably have a lot more cases *)
-val error_def = Datatype `
- error = UnknownVariable | TypeError | InvalidIndex | NotImplemented | InvalidArgument`;
+Datatype:
+ error = UnknownVariable
+       | TypeError
+       | TypeErrorMsg string 
+       | InvalidIndex
+       | NotImplemented
+       | InvalidArgument
+       | CombError string
+       | CycleError
+       | InvalidProgram
+       | Impossible
+End
 
 val sum_bind_def = Define `
   (sum_bind (INL l) _ = INL l) /\

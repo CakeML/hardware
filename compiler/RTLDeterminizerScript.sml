@@ -49,14 +49,16 @@ End
 
 Definition build_zero_with_idx_def:
  (build_zero_with_idx CBool_t idx = ConstInp $ CBool F) /\
- (build_zero_with_idx (CArray_t l) NONE = ConstInp $ CArray $ GENLIST (K F) l) /\
- (build_zero_with_idx (CArray_t l) (SOME idx) = ConstInp $ CBool F)
+ (build_zero_with_idx (CArray_t l) NoIndexing = ConstInp $ CArray $ GENLIST (K F) l) /\
+ (build_zero_with_idx (CArray_t l) (Indexing idx) = ConstInp $ CBool F) ∧
+ (build_zero_with_idx (CArray_t l) (SliceIndexing i1 i2) = ConstInp $ CArray $ GENLIST (K F) (i1 - i2 + 1))
 End
 
 Definition build_const_def:
  (build_const (CBool b) idx = ConstInp $ CBool b) /\
- (build_const (CArray bs) NONE = ConstInp $ CArray bs) /\
- (build_const (CArray bs) (SOME idx) = ConstInp $ CBool $ revEL idx bs)
+ (build_const (CArray bs) NoIndexing = ConstInp $ CArray bs) /\
+ (build_const (CArray bs) (Indexing idx) = ConstInp $ CBool $ revEL idx bs) ∧
+ (build_const (CArray bs) (SliceIndexing i1 i2) = ConstInp $ CArray $ rev_slice bs i1 i2)
 End
 
 Definition rtl_determinizer_inp_def:
@@ -97,19 +99,32 @@ Definition rtl_determinizer_netlist_def:
    (si, case c of SOME c => c :: cs | NONE => cs))
 End
 
+(*
+Actually, only regs in outs so no need to do anything:
+
+Definition rtl_determinizer_out_def:
+ (rtl_determinizer_out si (out, OutInp inp) = (out, OutInp $ rtl_determinizer_inp si inp)) ∧
+ (rtl_determinizer_out si (out, OutInps inps) = (out, OutInps $ MAP (rtl_determinizer_inp si) inps))
+End
+*)
+
 Definition rtl_determinizer_reg_def:
- rtl_determinizer_reg si (t, reg, i, v, inp) =
-  (t, reg, i,
-   (SOME $ case v of SOME v => v | NONE => build_zero t),
-   OPTION_MAP (rtl_determinizer_inp si) inp)
+ rtl_determinizer_reg si ((reg, i), rdata) =
+  ((reg, i),
+   rdata with <| init := (SOME $ case rdata.init of SOME v => v | NONE => build_zero rdata.type);
+                 inp := OPTION_MAP (rtl_determinizer_inp si) rdata.inp |>)
 End
 
 Definition rtl_determinizer_def:
- rtl_determinizer (Circuit extenv regs nl) =
-  sum_map (λsi.
-   let (si, nl_det) = rtl_determinizer_netlist si nl;
-       regs_det = MAP (rtl_determinizer_reg si) regs in
-    Circuit extenv regs_det nl_det) (find_fills empty nl)
+ rtl_determinizer (Circuit extenv outs regs combs_nl ffs_nl) = do
+  (* can do this without concatenation, but this would require proof refactorings: *)
+  si <- find_fills empty (combs_nl ++ ffs_nl);
+  (si, combs_nl_det) <<- rtl_determinizer_netlist si combs_nl;
+  (si, ffs_nl_det) <<- rtl_determinizer_netlist si ffs_nl;
+  (* TODO: Does not change key-field so could write this in a better way: *)
+  regs_det <<- MAP (rtl_determinizer_reg si) regs;
+  return $ Circuit extenv outs regs_det combs_nl_det ffs_nl_det
+ od
 End
 
 val _ = export_theory ();

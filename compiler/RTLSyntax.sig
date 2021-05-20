@@ -20,6 +20,19 @@ sig
   val mk_NetVar : term -> term
   
   (* Cell inputs *)
+  val NoIndexing_tm : term
+  val is_NoIndexing : term -> bool
+
+  val Indexing_tm : term
+  val dest_Indexing : term -> term
+  val is_Indexing : term -> bool
+  val mk_Indexing : term -> term
+
+  val SliceIndexing_tm : term
+  val dest_SliceIndexing : term -> term * term
+  val is_SliceIndexing : term -> bool
+  val mk_SliceIndexing : term * term -> term
+                            
   val ConstInp_tm : term
   val dest_ConstInp : term -> term
   val is_ConstInp : term -> bool
@@ -36,6 +49,17 @@ sig
   val mk_VarInp : term * term -> term
 
   val cell_input_ty : hol_type
+
+  (* Outs *)
+  val OutInp_tm : term
+  val dest_OutInp : term -> term
+  val is_OutInp : term -> bool
+  val mk_OutInp : term -> term
+
+  val OutInps_tm : term
+  val dest_OutInps : term -> term
+  val is_OutInps : term -> bool
+  val mk_OutInps : term -> term
 
   (* Cells *)
   val NDetCell_tm : term
@@ -69,9 +93,9 @@ sig
   val mk_Carry4 : term * term * term * term * term -> term
 
   val Circuit_tm : term
-  val dest_Circuit : term -> term * term * term
+  val dest_Circuit : term -> term * term * term * term * term
   val is_Circuit : term -> bool
-  val mk_Circuit : term * term * term -> term
+  val mk_Circuit : term * term * term * term * term -> term
 
   val cell_ty : hol_type
 

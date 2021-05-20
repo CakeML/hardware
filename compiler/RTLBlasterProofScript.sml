@@ -1,6 +1,6 @@
 open hardwarePreamble;
 
-open balanced_mapTheory bitstringTheory numposrepTheory rich_listTheory;
+open alistTheory balanced_mapTheory bitstringTheory numposrepTheory rich_listTheory;
 
 open sumExtraTheory oracleTheory RTLTheory RTLTypeTheory RTLPropsTheory RTLBlasterTheory;
 
@@ -12,23 +12,8 @@ val _ = new_theory "RTLBlasterProof";
 
 (* this proof/file is kind of a mess after some refactorings... but it works *)
 
-Definition blasted_cell_def:
- blasted_cell min max cell ⇔ EVERY (λout. min ≤ out ∧ out < max) (cell_output cell)
-End
-
-Definition blasted_netlist_ranges_def:
- blasted_netlist_ok min max nlold nl ⇔
- EVERY (λc. MEM c nlold ∨ blasted_cell min max c) nl
-End
-
-Definition netlist_distinct_def:
- netlist_distinct nl ⇔ ALL_DISTINCT (FLAT (MAP cell_output nl))
-End
-
-Definition blasted_circuit_def:
- blasted_circuit (Circuit _ regs nl) ⇔
- blast_regs_distinct regs ∧ deterministic_netlist nl
-End
+infix THEN2;
+infix THEN3;
 
 val lookup_insert_var_cmp =
  MATCH_MP (CONV_RULE (REWR_CONV (GSYM AND_IMP_INTRO)) lookup_insert) var_cmp_good
@@ -78,298 +63,653 @@ Proof
  Cases >- simp [] \\ ntac 6 (Cases_on ‘n'’ >- simp [] \\ Cases_on ‘n’ >- simp []) \\ simp []
 QED
 
-(* to remember: we only blast deterministic netlists ... <-- does this matter? *)
-
-(* benv for "blast env" *)
-val blast_rel_def = Define `
- blast_rel fext si tmpnum s bs <=> (* <-- tmpnum here is tmpnum from compiler (not blaster!) *)
-  bs.fbits = s.fbits /\
-  !var. var_lt var tmpnum ==> (* <-- probably redundant when we assume netlist_lt ... *)
-        case cget_var s var of
-          INL e => T
-        | INR (CBool b) =>
-           (lookup var_cmp var si = NONE /\ cget_var bs var = INR (CBool b)) ∨
-           (∃inp. lookup var_cmp var si = SOME (BoolInp inp) /\ cell_inp_run fext bs inp = INR (CBool b))
-        | INR (CArray b) =>
-           ?inps. lookup var_cmp var si = SOME (ArrayInp inps) /\
-                  LENGTH inps = LENGTH b /\
-                  !i. i < LENGTH inps ==>
-                      cell_inp_run fext bs (EL i inps) = INR (CBool (EL i b))`;
-
-val blast_reg_rel_def = Define `
- blast_reg_rel si s bs <=>
-  bs.fbits = s.fbits /\
-  !reg. case cget_var s (RegVar reg 0) of
-          INL e => T
-        | INR (CBool b) => lookup var_cmp (RegVar reg 0) si = NONE /\ cget_var bs (RegVar reg 0) = INR (CBool b)
-        | INR (CArray b') =>
-           (?inps. lookup var_cmp (RegVar reg 0) si = SOME (ArrayInp inps) /\ LENGTH inps = LENGTH b') /\
-           !i. i < LENGTH b' ==> cget_var bs (RegVar reg i) = INR (CBool (EL i b'))`;
-
-(* regs ok in si ... todo: why are there type annotations here? *)
-val si_prefilled_def = Define `
- si_prefilled si (t, reg, i, v : value option, inp : cell_input option) <=>
-  case t of
-    CBool_t => lookup var_cmp (RegVar reg i) si = NONE
-  | CArray_t l => ?inps. lookup var_cmp (RegVar reg i) si = SOME (ArrayInp inps) /\ LENGTH inps = l`;
-
-val si_prefilleds_def = Define `
- si_prefilleds si regs <=> EVERY (si_prefilled si) regs`;
-
-Theorem si_prefilleds_cong:
- !regs si si'.
- (!reg i. lookup var_cmp (RegVar reg i) si' = lookup var_cmp (RegVar reg i) si) ==>
- si_prefilleds si' regs = si_prefilleds si regs
+Triviality fromList_cons:
+ !cmp k v xs. fromList cmp ((k,v)::xs) = insert cmp k v (fromList cmp xs)
 Proof
- rw [si_prefilleds_def] \\ match_mp_tac EVERY_CONG \\ rw [] \\ PairCases_on ‘x’ \\ rw [si_prefilled_def]
+ simp [fromList_def]
 QED
 
-val blasterstate_ok_def = Define `
- blasterstate_ok si min max <=>
-  min <= max /\
-  invariant var_cmp si /\
-  (!var inp. lookup var_cmp var si = SOME (BoolInp inp) ==> cell_input_lt inp max) ∧
-  (!var inps. lookup var_cmp var si = SOME (ArrayInp inps) ==> EVERY (\inp. cell_input_lt inp max) inps)`;
-
-Theorem sorted_all_distinct_lt:
- !(l:num list). SORTED ($<) l ==> ALL_DISTINCT l
-Proof
- rpt strip_tac' \\ irule sortingTheory.SORTED_ALL_DISTINCT \\ asm_exists_any_tac \\ 
- rw [relationTheory.irreflexive_def]
-QED
-
-val only_regs_def = Define ‘
- only_regs s <=>
- !var. case var of
-         RegVar reg i => if i = 0 then T else cget_var s var = INL UnknownVariable
-       | NetVar n => cget_var s var = INL UnknownVariable’;
-
-Theorem only_regs_fbits:
- !s fbits. only_regs (s with fbits := fbits) = only_regs s
-Proof
- rw [only_regs_def, cget_var_fbits]
-QED
-
-Theorem only_regs_cset_var_RegVar:
- !s reg v. only_regs (cset_var s (RegVar reg 0) v) = only_regs s
-Proof
- rw [only_regs_def, cget_var_cset_var] \\ eq_tac \\ rpt strip_tac \\ first_x_assum (qspec_then ‘var’ mp_tac) \\ TOP_CASE_TAC \\ rw []
-QED
-
-Definition var_ge_def:
- (var_ge (RegVar _ _) n <=> T) /\
- (var_ge (NetVar m) n <=> n <= m)
+Definition blast_rel_bool_def:
+ blast_rel_bool fext si bs n b ⇔
+  (lookup var_cmp (NetVar n) si = NONE /\ cget_var bs (NetVar n) = INR (CBool b)) ∨
+  (∃minp. lookup var_cmp (NetVar n) si = SOME (MBoolInp minp) /\
+          case minp of
+            GoodInp inp => cell_inp_run fext bs inp = INR (CBool b)
+          | BadInp _ _ => T)
 End
 
-Theorem var_ge_le:
- ∀var n m. var_ge var n ∧ m ≤ n ⇒ var_ge var m
+Definition blast_rel_array_def:
+ blast_rel_array fext si bs var b ⇔
+  ?minps. lookup var_cmp var si = SOME (MArrayInp minps) /\
+          LENGTH minps = LENGTH b /\
+          !i. i < LENGTH minps ==>
+              case EL i minps of
+                GoodInp inp => cell_inp_run fext bs inp = INR (CBool (EL i b))
+              | BadInp _ _ => T
+End
+
+Theorem blast_rel_array_revEL:
+ ∀fext si bs var b.
+ blast_rel_array fext si bs var b ⇔
+ ∃minps.
+   lookup var_cmp var si = SOME (MArrayInp minps) ∧
+   LENGTH minps = LENGTH b ∧
+   ∀i.
+     i < LENGTH minps ⇒
+     case revEL i minps of
+       GoodInp inp => cell_inp_run fext bs inp = INR (CBool (revEL i b))
+     | BadInp _ _ => T
 Proof
- Cases \\ rw [var_ge_def]
+ rw [blast_rel_array_def, revEL_def] \\ eq_tac \\ rw [] \\ asm_exists_tac \\ rw [] \\
+ first_x_assum (qspec_then ‘LENGTH minps - i - 1’ mp_tac) \\ simp []
+QED
+
+(* bs for "blast s" *)
+Definition blast_rel_def:
+ blast_rel fext si tmpnum s bs <=> (* <-- tmpnum here is tmpnum from compiler (not blaster!) *)
+  bs.fbits = s.fbits /\
+  (* lt check probably redundant when we assume netlist_lt/sorted? *)
+  !n. n < tmpnum ==>
+      case cget_var s (NetVar n) of
+        INL e => T
+      | INR (CBool b) => blast_rel_bool fext si bs n b
+      | INR (CArray b) => blast_rel_array fext si bs (NetVar n) b
+End
+
+(* Note that this does not depend on fext! *)
+(* need to know shape of si values to exclude cases that cannot happen + know that updating NetVars does not affect anything reg-related *)
+(* the "i = 0" information was needed when proving run_reg thms, might exist better places to store this information *)
+Definition blast_reg_rel_def:
+ blast_reg_rel si s bs <=>
+  bs.fbits = s.fbits /\
+  !reg i. case cget_var s (RegVar reg i) of
+          INL e => T
+        | INR (CBool b) =>
+          i = 0 ∧
+          ((lookup var_cmp (RegVar reg i) si = NONE ∧ cget_var bs (RegVar reg i) = INR (CBool b))
+           ∨
+           lookup var_cmp (RegVar reg i) si = SOME (MBoolInp (BadInp reg NONE)))
+        | INR (CArray b) =>
+          i = 0 ∧
+          ((lookup var_cmp (RegVar reg i) si =
+            SOME (MArrayInp (GENLIST (λi. GoodInp (VarInp (RegVar reg i) NoIndexing)) (LENGTH b))) ∧
+            ∀i. i < LENGTH b ⇒ cget_var bs (RegVar reg i) = INR (CBool (EL i b)))
+           ∨
+           (lookup var_cmp (RegVar reg i) si =
+            SOME (MArrayInp (GENLIST (λi. BadInp reg (SOME i)) (LENGTH b)))))
+End
+
+Theorem blast_reg_rel_cong:
+ ∀si si' b b' bs bs'.
+ blast_reg_rel si b bs ∧
+ (∀reg i. lookup var_cmp (RegVar reg i) si' = lookup var_cmp (RegVar reg i) si) ∧
+ (∀reg i. cget_var b' (RegVar reg i) = cget_var b (RegVar reg i)) ∧
+ (∀reg i. cget_var bs' (RegVar reg i) = cget_var bs (RegVar reg i)) ∧
+ b'.fbits = b.fbits ∧
+ bs'.fbits = bs.fbits ⇒
+ blast_reg_rel si' b' bs'
+Proof
+ rw [blast_reg_rel_def]
+QED
+
+Theorem blast_reg_rel_cong_simple:
+ ∀si si' s bs.
+ blast_reg_rel si s bs ∧
+ (∀reg i. lookup var_cmp (RegVar reg i) si' = lookup var_cmp (RegVar reg i) si) ⇒
+ blast_reg_rel si' s bs
+Proof
+ rw [blast_reg_rel_def]
+QED
+
+(* Weaker than blast_reg_rel, references fext so can only be used for one step *)
+Definition blast_reg_rel_fext_def:
+ blast_reg_rel_fext fext si s bs <=>
+  bs.fbits = s.fbits /\
+  !reg i. case cget_var s (RegVar reg i) of
+          INL e => T
+        | INR (CBool b) =>
+          i = 0 ∧
+          (case lookup var_cmp (RegVar reg i) si of
+             NONE => cget_var bs (RegVar reg i) = INR (CBool b)
+           | SOME (MBoolInp (GoodInp inp)) => cell_inp_run fext bs inp = INR (CBool b)
+           | SOME (MBoolInp (BadInp reg NONE)) => T
+           | _ => F)
+        | INR (CArray b) =>
+          i = 0 ∧
+          blast_rel_array fext si bs (RegVar reg i) b
+End
+
+Theorem blast_reg_rel_blast_reg_rel_fext:
+ ∀fext si s bs. blast_reg_rel si s bs ⇒ blast_reg_rel_fext fext si s bs
+Proof
+ rw [blast_reg_rel_def, blast_reg_rel_fext_def] \\ first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+ rpt TOP_CASE_TAC \\ rpt strip_tac' \\ gvs [blast_rel_array_def, cell_inp_run_def]
+QED
+
+Definition blast_cell_input_ok_def:
+ (blast_cell_input_ok (VarInp (NetVar n) idx) processed globalmax tmpnum ⇔
+  (n < processed ∨ globalmax ≤ n) ∧ n < tmpnum) ∧
+ (blast_cell_input_ok _ processed globalmax tmpnum ⇔ T)
+End
+
+Theorem blast_cell_input_ok_alt:
+ ∀inp processed globalmax tmpnum.
+ blast_cell_input_ok inp processed globalmax tmpnum =
+ case inp of
+   VarInp (NetVar n) idx => ((n < processed ∨ globalmax ≤ n) ∧ n < tmpnum)
+ | _ => T
+Proof
+ rpt gen_tac \\ every_case_tac \\ rw [blast_cell_input_ok_def]
+QED
+
+Theorem blast_cell_input_ok_le:
+ ∀cell processed processed' max tmpnum tmpnum'.
+ blast_cell_input_ok cell processed max tmpnum ∧ processed ≤ processed' ∧ tmpnum ≤ tmpnum' ⇒
+ blast_cell_input_ok cell processed' max tmpnum'
+Proof
+ rw [blast_cell_input_ok_alt] \\ rpt TOP_CASE_TAC \\ fs []
+QED
+
+Theorem EVERY_blast_cell_input_ok_le:
+ ∀cs processed processed' max tmpnum tmpnum'.
+ EVERY (λc. blast_cell_input_ok c processed max tmpnum) cs ∧ processed ≤ processed' ∧ tmpnum ≤ tmpnum' ⇒
+ EVERY (λc. blast_cell_input_ok c processed' max tmpnum') cs
+Proof
+ rpt strip_tac \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw [] \\
+ match_mp_tac blast_cell_input_ok_le \\ asm_exists_tac \\ simp []
+QED
+
+Definition blast_cell_output_ok_def:
+ blast_cell_output_ok cell processed globalmax tmpnum ⇔
+ ∀out. MEM out (cell_output cell) ⇒ (processed ≤ out ∧ out < globalmax) ∨ tmpnum ≤ out
+End
+
+Theorem blast_cell_output_ok_le:
+ ∀cell processed processed' max tmpnum tmpnum'.
+ blast_cell_output_ok cell processed max tmpnum ∧ processed' ≤ processed ∧ tmpnum' ≤ tmpnum ⇒
+ blast_cell_output_ok cell processed' max tmpnum'
+Proof
+ rw [blast_cell_output_ok_def] \\ drule_first \\ fs []
+QED
+
+Theorem EVERY_blast_cell_output_ok_le:
+ ∀cs processed processed' max tmpnum tmpnum'.
+ EVERY (λc. blast_cell_output_ok c processed max tmpnum) cs ∧ processed' ≤ processed ∧ tmpnum' ≤ tmpnum ⇒
+ EVERY (λc. blast_cell_output_ok c processed' max tmpnum') cs
+Proof
+ rpt strip_tac \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw [] \\
+ match_mp_tac blast_cell_output_ok_le \\ asm_exists_tac \\ simp []
 QED
 
 Definition cell_input_ge_def:
- (cell_input_ge (ConstInp _) n <=> T) /\
- (cell_input_ge (ExtInp _ _) n <=> T) /\
- (cell_input_ge (VarInp var _) n <=> var_ge var n)
+ (cell_input_ge (VarInp (NetVar n) idx) m ⇔ m ≤ n) ∧
+ (cell_input_ge _ m ⇔ T)
 End
+
+Theorem cell_input_ge_alt:
+ ∀inp m.
+ cell_input_ge inp m =
+ case inp of
+   VarInp (NetVar n) idx => m ≤ n
+ | _ => T
+Proof
+ rpt gen_tac \\ every_case_tac \\ rw [cell_input_ge_def]
+QED
 
 Theorem cell_input_ge_le:
  ∀inp n m. cell_input_ge inp n ∧ m ≤ n ⇒ cell_input_ge inp m
 Proof
- Cases \\ rw [cell_input_ge_def] \\ drule_strip var_ge_le
+ rw [cell_input_ge_alt] \\ every_case_tac \\ simp []
 QED
 
 Theorem EVERY_cell_input_ge_le:
- !l n m. EVERY (λinp. cell_input_ge inp n) l /\ m <= n ==> EVERY (λinp. cell_input_ge inp m) l
+ ∀inps n m. EVERY (λinp. cell_input_ge inp n) inps ∧ m ≤ n ⇒ EVERY (λinp. cell_input_ge inp m) inps
 Proof
  rpt strip_tac \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw [] \\
- match_mp_tac cell_input_ge_le \\ rpt asm_exists_tac
+ match_mp_tac cell_input_ge_le \\ asm_exists_tac \\ simp []
 QED
 
-(* tmpnum here is tmpnum from compiler *)
-Definition bsi_cell_input_ok_def:
- bsi_cell_input_ok out tmpnum inp <=> cell_input_lt inp out \/ cell_input_ge inp tmpnum
+Theorem blast_cell_input_ok_cell_input_lt:
+ ∀inp processed max tmpnum. blast_cell_input_ok inp processed max tmpnum ⇒ cell_input_lt inp tmpnum
+Proof
+ rw [blast_cell_input_ok_alt] \\ every_case_tac \\ simp [cell_input_lt_def, var_lt_def]
+QED
+
+Theorem EVERY_blast_cell_input_ok_cell_input_lt:
+ ∀inps processed max tmpnum.
+ EVERY (λinp. blast_cell_input_ok inp processed max tmpnum) inps ⇒ EVERY (λinp. cell_input_lt inp tmpnum) inps
+Proof
+ rpt strip_tac \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw [] \\
+ match_mp_tac blast_cell_input_ok_cell_input_lt \\ asm_exists_tac
+QED
+
+Definition blast_cell_input_marked_ok_def:
+ (blast_cell_input_marked_ok (GoodInp inp) processed globalmax tmpnum ⇔
+  blast_cell_input_ok inp processed globalmax tmpnum) ∧
+ (blast_cell_input_marked_ok _ processed globalmax tmpnum ⇔ T)
 End
 
-(** si wf things **)
-
-val si_wf_def = Define `
- si_wf si <=> (!inps reg. lookup var_cmp (RegVar reg 0) si = SOME (ArrayInp inps) ==>
-                          inps = GENLIST (\i. VarInp (RegVar reg i) NONE) (LENGTH inps)) /\
-              (!reg idx. idx <> 0 ==> lookup var_cmp (RegVar reg idx) si = NONE) ∧
-              (∀reg idx inp. lookup var_cmp (RegVar reg idx) si ≠ SOME (BoolInp inp))`;
-
-Theorem si_wf_shape:
- !var inps si.
- si_wf si /\ lookup var_cmp var si = SOME (ArrayInp inps) ==>
- (?reg. var = RegVar reg 0 /\ inps = GENLIST (\i. VarInp (RegVar reg i) NONE) (LENGTH inps)) \/
- (?n. var = NetVar n)
+Theorem blast_cell_input_marked_ok_alt:
+ ∀minp processed globalmax tmpnum.
+ blast_cell_input_marked_ok minp processed globalmax tmpnum =
+ case minp of
+   GoodInp (VarInp (NetVar n) idx) => (n < processed ∨ globalmax ≤ n) ∧ n < tmpnum
+ | _ => T
 Proof
- simp [si_wf_def] \\ Cases \\ rpt strip_tac'
- >- (Cases_on ‘n’ \\ rfs [])
- \\ metis_tac []
+ rpt gen_tac \\ every_case_tac \\ rw [blast_cell_input_marked_ok_def, blast_cell_input_ok_def]
 QED
 
-Theorem blast_rel_only_regs:
- !fext fext' si si' tmpnum s bs.
- only_regs s /\ si_wf si /\ si_wf si' /\
- (!reg i. lookup var_cmp (RegVar reg i) si' = lookup var_cmp (RegVar reg i) si) ==>
- blast_rel fext' si' tmpnum s bs = blast_rel fext si tmpnum s bs
+Theorem blast_cell_input_marked_ok_le:
+ ∀inp processed processed' globalmax tmpnum tmpnum'.
+ blast_cell_input_marked_ok inp processed globalmax tmpnum ∧ processed ≤ processed' ∧ tmpnum ≤ tmpnum' ⇒
+ blast_cell_input_marked_ok inp processed' globalmax tmpnum'
 Proof
- rw [blast_rel_def, only_regs_def] \\ eq_tac \\ rw [] \\ drule_first \\ first_x_assum (qspec_then ‘var’ mp_tac) \\
- TOP_CASE_TAC \\ fs [] \\ rw [] \\ fs [] \\ rpt TOP_CASE_TAC \\ fs []
- >- metis_tac []
- >- rfs [si_wf_def]
- >- (qexists_tac ‘inps’ \\ conj_tac >- metis_tac [] \\ conj_tac >- simp [] \\ rpt strip_tac \\
-    first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\
-    drule_strip si_wf_shape \\ fs [] \\ rveq \\ first_assum (once_rewrite_tac o sing) \\
-    simp [EL_GENLIST, cell_inp_run_def])
- >- rfs [si_wf_def]
- \\ (* proof duplication that is easy to fix: *)
-    rpt strip_tac \\
-    first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\
-    qpat_x_assum ‘si_wf si’ assume_tac \\
-    drule_strip si_wf_shape \\ fs [] \\ rveq \\ first_assum (once_rewrite_tac o sing) \\
-    simp [EL_GENLIST, cell_inp_run_def]
+ rw [blast_cell_input_marked_ok_alt] \\ rpt TOP_CASE_TAC \\ fs []
 QED
 
-Theorem blast_rel_blast_reg_rel:
- !fext si tmpnum s bs. blast_rel fext si tmpnum s bs /\ si_wf si ==> blast_reg_rel si s bs
+Theorem EVERY_blast_cell_input_marked_ok_le:
+ ∀inps processed processed' globalmax tmpnum tmpnum'.
+ EVERY (λinp. blast_cell_input_marked_ok inp processed globalmax tmpnum) inps ∧
+ processed ≤ processed' ∧ tmpnum ≤ tmpnum' ⇒
+ EVERY (λinp. blast_cell_input_marked_ok inp processed' globalmax tmpnum') inps
 Proof
- rw [blast_rel_def, si_wf_def, blast_reg_rel_def] \\
- first_x_assum (qspec_then `RegVar reg 0` mp_tac) \\
- impl_tac >- simp [var_lt_def] \\ rpt TOP_CASE_TAC \\
- rpt strip_tac \\ drule_first \\
- first_x_assum (qspec_then `i` mp_tac) \\ rfs [cell_inp_run_def, sum_bind_INR, cget_fext_var_def]
+ rpt strip_tac \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw [] \\ 
+ match_mp_tac blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []
 QED
 
-Theorem blast_reg_rel_blast_rel:
- !fext si tmpnum s bs. blast_reg_rel si s bs /\ only_regs s /\ si_wf si ==> blast_rel fext si tmpnum s bs
+(*Theorem cell_input_marked_lt_le:
+ ∀inp n m. cell_input_marked_lt inp n ∧ n ≤ m ⇒ cell_input_marked_lt inp m
 Proof
- rw [blast_reg_rel_def, only_regs_def, blast_rel_def] \\
- first_x_assum (qspec_then `var` mp_tac) \\ TOP_CASE_TAC \\ strip_tac
- >- (rveq \\ first_x_assum (qspec_then ‘s'’ assume_tac) \\ rpt TOP_CASE_TAC \\ fs [] \\
-    rpt strip_tac \\ drule_first \\ drule_strip si_wf_shape \\ fs [] \\ rveq \\
-    first_assum (once_rewrite_tac o sing) \\ simp [EL_GENLIST, cell_inp_run_def, sum_bind_def, cget_fext_var_def])
- \\ simp []
+ Cases \\ simp [cell_input_marked_lt_def] \\ metis_tac [cell_input_lt_le]
+QED*)
+
+Definition cell_input_not_pseudo_def:
+ (cell_input_not_pseudo regs (VarInp (RegVar reg i) idx) =
+  ∀rdata. ALOOKUP regs (reg, i) = SOME rdata ⇒ rdata.reg_type = Reg) ∧
+ (cell_input_not_pseudo regs _ = T)
+End
+
+Definition cell_input_marked_not_pseudo_def:
+ (cell_input_marked_not_pseudo regs (GoodInp inp) = cell_input_not_pseudo regs inp) ∧
+ (cell_input_marked_not_pseudo regs (BadInp _ _) = T)
+End
+
+(* 
+  - processed = have processed cells up to this point
+  - globalmax = tmpnum from compiler, all blasted cells allocated after this number
+  - tmpnum = current blast tmpnum, nothing exist above this
+*)
+Definition blasterstate_ok_def:
+ blasterstate_ok regs si processed globalmax tmpnum ⇔
+  processed ≤ globalmax ∧
+  globalmax ≤ tmpnum ∧
+
+  invariant var_cmp si ∧
+
+  (* Non-processed cells not covered yet *)
+  (∀m. processed ≤ m ⇒ lookup var_cmp (NetVar m) si = NONE) ∧
+  
+  (* All pseudo-regs covered *)
+  (∀reg i rdata. ALOOKUP regs (reg, i) = SOME rdata ∧ rdata.reg_type = PseudoReg ⇒
+                 ∃v. lookup var_cmp (RegVar reg i) si = SOME v) ∧
+ 
+  (* This is so we can allocate new blast cells *)
+  (∀var minp. lookup var_cmp var si = SOME (MBoolInp minp) ⇒
+              blast_cell_input_marked_ok minp processed globalmax tmpnum) ∧
+  (∀var minps. lookup var_cmp var si = SOME (MArrayInp minps) ⇒
+               EVERY (λminp. blast_cell_input_marked_ok minp processed globalmax tmpnum) minps) ∧
+
+  (* No pseudo-regs in good inps *)
+  (∀var minp. lookup var_cmp var si = SOME (MBoolInp minp) ⇒
+              cell_input_marked_not_pseudo regs minp) ∧
+  (∀var minps. lookup var_cmp var si = SOME (MArrayInp minps) ⇒
+               EVERY (cell_input_marked_not_pseudo regs) minps)
+End
+
+(* Can be generalized? *)
+Theorem blasterstate_ok_le:
+ ∀regs si processed processed' globalmax tmpnum.
+ blasterstate_ok regs si processed globalmax tmpnum ∧ processed ≤ processed' ∧ processed' ≤ globalmax ⇒
+ blasterstate_ok regs si processed' globalmax tmpnum
+Proof
+ rw [blasterstate_ok_def] \\ rpt drule_first \\
+ TRY (irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ simp [] \\ rpt strip_tac) \\
+ match_mp_tac blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []
 QED
 
-Theorem blast_reg_rel_only_regs:
- !fext fext' si si' tmpnum s bs.
- only_regs s /\ si_wf si /\ si_wf si' /\
- (!reg i. lookup var_cmp (RegVar reg i) si' = lookup var_cmp (RegVar reg i) si) ==>
- blast_reg_rel si' s bs = blast_reg_rel si s bs
+Theorem blast_rel_blast_reg_rel_fext_NONE:
+ ∀var fext si s bs tmpnum n v.
+ cget_var s var = INR v ∧
+ var_lt var n ∧
+ n ≤ tmpnum ∧
+
+ lookup var_cmp var si = NONE ∧
+
+ blast_rel fext si tmpnum s bs ∧
+ blast_reg_rel_fext fext si s bs ⇒
+ (∃b. v = CBool b) ∧ cget_var bs var = INR v
 Proof
- metis_tac [blast_reg_rel_blast_rel, blast_rel_blast_reg_rel, blast_rel_only_regs]
+ Cases \\ rpt strip_tac'
+ >- (fs [blast_reg_rel_fext_def, blast_rel_array_def] \\
+     first_x_assum (qspecl_then [‘s’, ‘n’] mp_tac) \\ simp [] \\ TOP_CASE_TAC)
+ \\ fs [blast_rel_def, var_lt_def] \\ first_x_assum (qspec_then ‘n’ mp_tac) \\ simp [] \\ TOP_CASE_TAC \\ simp [blast_rel_bool_def, blast_rel_array_def]
 QED
 
-Theorem blast_rel_cset_var_reg_bool:
- !fext si tmpnum s bs reg b.
- blast_rel fext si tmpnum s bs /\
- si_wf si /\
- only_regs s /\
- lookup var_cmp (RegVar reg 0) si = NONE ==>
- blast_rel fext si tmpnum (cset_var s (RegVar reg 0) (CBool b))
-                          (cset_var bs (RegVar reg 0) (CBool b))
+Theorem blast_rel_blast_reg_rel_fext_SOME_MBoolInp:
+ ∀var fext si s bs tmpnum n v inp.
+ cget_var s var = INR v ∧
+ var_lt var n ∧
+ n ≤ tmpnum ∧
+
+ lookup var_cmp var si = SOME (MBoolInp (GoodInp inp)) ∧
+
+ blast_rel fext si tmpnum s bs ∧
+ blast_reg_rel_fext fext si s bs ⇒
+ (∃b. v = CBool b) ∧ cell_inp_run fext bs inp = INR v
 Proof
- rw [blast_rel_def, cset_var_fbits, cget_var_cset_var] \\ 
- IF_CASES_TAC >- fs [] \\ drule_first \\ rpt TOP_CASE_TAC \\ fs [] \\
- rpt strip_tac \\
+ Cases \\ rpt strip_tac'
+ >- (fs [blast_reg_rel_fext_def, blast_rel_array_def] \\
+     first_x_assum (qspecl_then [‘s’, ‘n’] mp_tac) \\ simp [] \\ TOP_CASE_TAC)
+ \\ fs [blast_rel_def, var_lt_def] \\ first_x_assum (qspec_then ‘n’ mp_tac) \\ simp [] \\ TOP_CASE_TAC \\ simp [blast_rel_bool_def, blast_rel_array_def]
+QED
 
- fs [only_regs_def] \\ first_x_assum (qspec_then ‘var’ mp_tac) \\ TOP_CASE_TAC \\ fs [] \\ strip_tac \\ rveq
- >- rfs [si_wf_def] \\
- drule_strip si_wf_shape \\ fs [] \\ rveq \\
+Theorem blast_rel_blast_reg_rel_fext_SOME_MArrayInp:
+ ∀var fext si s bs tmpnum n v minps.
+ cget_var s var = INR v ∧
+ var_lt var n ∧
+ n ≤ tmpnum ∧
 
- first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\
- first_assum (once_rewrite_tac o sing) \\ simp [EL_GENLIST, cell_inp_run_cset_var] \\ fs []
+ lookup var_cmp var si = SOME (MArrayInp minps) ∧
+
+ blast_rel fext si tmpnum s bs ∧
+ blast_reg_rel_fext fext si s bs ⇒
+ ∃b. v = CArray b ∧ LENGTH b = LENGTH minps ∧
+     ∀i. i < LENGTH minps ⇒
+         case EL i minps of
+           GoodInp inp => cell_inp_run fext bs inp = INR (CBool (EL i b))
+         | BadInp _ _ => T
+Proof
+ Cases \\ rpt strip_tac'
+ >- (fs [blast_reg_rel_fext_def, blast_rel_array_def] \\
+     first_x_assum (qspecl_then [‘s’, ‘n’] assume_tac) \\ every_case_tac \\ gvs [cell_inp_run_def])
+ \\ fs [blast_rel_def, var_lt_def] \\ first_x_assum (qspec_then ‘n’ mp_tac) \\ simp [] \\ TOP_CASE_TAC \\ simp [blast_rel_bool_def, blast_rel_array_def]
+QED
+
+Theorem blast_rel_blast_reg_rel_fext_SOME_MArrayInp_Indexing:
+ ∀var fext si s bs tmpnum n v v' minps i inp.
+ cget_var s var = INR v' ∧
+ cget_fext_var (Indexing i) v' = INR v ∧
+ var_lt var n ∧
+ n ≤ tmpnum ∧
+
+ lookup var_cmp var si = SOME (MArrayInp minps) ∧
+ i < LENGTH minps ∧ revEL i minps = GoodInp inp ∧
+
+ blast_rel fext si tmpnum s bs ∧
+ blast_reg_rel_fext fext si s bs ⇒
+ cell_inp_run fext bs inp = INR v ∧ ∃b. v = CBool b
+Proof
+ rpt strip_tac' \\ drule_strip blast_rel_blast_reg_rel_fext_SOME_MArrayInp \\
+ gvs [cget_fext_var_def, sum_map_INR, sum_revEL_INR, revEL_def] \\
+ first_x_assum (qspec_then ‘LENGTH minps - (i + 1)’ mp_tac) \\ simp []
+QED
+
+Theorem blast_rel_blast_reg_rel_fext_SOME_MArrayInp_fail_case:
+ ∀var.
+ cget_var s var = INR (CArray b) ∧
+ var_lt var n ∧
+ n ≤ tmpnum ∧
+
+ lookup var_cmp var si = SOME (MArrayInp minps) ∧
+
+ blast_rel fext si tmpnum s bs ∧
+ blast_reg_rel_fext fext si s bs ⇒
+ LENGTH minps = LENGTH b
+Proof
+ Cases \\ rpt strip_tac'
+ >- (fs [blast_reg_rel_fext_def, blast_rel_array_def] \\
+     first_x_assum (qspecl_then [‘s'’, ‘n'’] assume_tac) \\ rfs [])
+ \\ fs [blast_rel_def, var_lt_def] \\ first_x_assum (qspec_then ‘n'’ assume_tac) \\ rfs [blast_rel_array_def]
 QED
 
 Theorem blast_cell_inp_run_correct_bool:
  !inp tmpnum inp' fext s bs v blast_s n.
- blast_cell_input blast_s inp = BoolInp inp' /\
+ blast_cell_input blast_s inp = INR (BoolInp inp') /\
  cell_inp_run fext s inp = INR v /\
  rtltype_extenv_n blast_s.extenv fext /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum /\
  blast_rel fext blast_s.si tmpnum s bs /\
+ blast_reg_rel_fext fext blast_s.si s bs ∧
  cell_input_lt inp n /\
  cell_input_covered_by_extenv blast_s.extenv inp /\
  n <= tmpnum ==>
- cell_inp_run fext bs inp' = INR v /\
- ?b. v = CBool b
+ cell_inp_run fext bs inp' = INR v /\ ?b. v = CBool b
 Proof
- rewrite_tac [blast_rel_def] \\ Cases
+ Cases
  >- (Cases_on `v` \\ simp [cell_inp_run_def, blast_cell_input_def])
 
- >- (simp [cell_inp_run_def, sum_bind_INR, blast_cell_input_def, rtltype_extenv_n_def] \\
-     rpt strip_tac' \\ every_case_tac \\ fs [cget_fext_var_def]
-     >- (fs [cell_input_covered_by_extenv_def] \\ fs [])
-     >- (fs [cell_input_covered_by_extenv_def] \\ fs [])
-     >- (drule_first \\ fs [] \\ rveq \\ simp [cell_inp_run_def, sum_bind_def, cget_fext_var_def] \\ fs [rtltype_v_cases])
-     \\ every_case_tac \\ fs [] \\ drule_first \\ fs [] \\ rveq \\ fs [sum_map_INR] \\
-        rw [cell_inp_run_def, sum_bind_def, cget_fext_var_def, sum_map_def])
+ >- (simp [cell_inp_run_def, sum_bind_INR, blast_cell_input_def, rtltype_extenv_n_def,
+           cell_input_covered_by_extenv_def] \\ rpt strip_tac' \\ drule_first \\
+     every_case_tac \\ gvs [rtltype_v_cases, cell_inp_run_def, sum_bind_def, sum_map_INR, cget_fext_var_def]) \\
 
- \\ simp [cell_inp_run_def, blast_cell_input_def, cell_input_lt_def] \\
-    rpt strip_tac' \\ first_x_assum (qspec_then `v` mp_tac) \\
-    impl_tac >- (match_mp_tac var_lt_le \\ asm_exists_tac \\ fs [blasterstate_ok_def]) \\
-    rpt TOP_CASE_TAC
-    >- fs [sum_bind_INR]
-    >- (fs [sum_bind_INR] \\ every_case_tac \\ fs [] \\ rveq
-       >- (fs [cell_inp_run_def, sum_bind_def, cget_fext_var_def] \\ rw [])
-       \\ fs [cget_fext_var_def] \\ rw [])
-    \\ strip_tac \\ every_case_tac \\ fs [] \\ rveq \\ fs [sum_bind_def, cget_fext_var_def, sum_map_INR] \\ rveq \\
-       fs [sum_revEL_INR, revEL_def]
+ simp [cell_inp_run_def, sum_bind_INR, blast_cell_input_def, cell_input_lt_def] \\ rpt gen_tac \\
+ TOP_CASE_TAC >- (rpt strip_tac' \\ rveq \\
+                  drule_strip blast_rel_blast_reg_rel_fext_NONE \\
+                  fs [cell_inp_run_def, cget_fext_var_def, sum_bind_def] \\
+                  every_case_tac \\ gvs []) \\
+ TOP_CASE_TAC >- (TOP_CASE_TAC \\ rpt strip_tac' \\
+                  drule_strip blast_rel_blast_reg_rel_fext_SOME_MBoolInp \\
+                  fs [cget_fext_var_def] \\
+                  every_case_tac \\ gvs []) \\
+ every_case_tac \\ simp [sum_map_INR] \\ rpt strip_tac'
+ >- (fs [inp_marked_get_INR] \\ drule_strip blast_rel_blast_reg_rel_fext_SOME_MArrayInp_Indexing \\ simp []) \\
+ rveq \\ fs [cget_fext_var_def] \\ every_case_tac \\ gvs [sum_map_INR, sum_revEL_INR] \\
+ drule_strip blast_rel_blast_reg_rel_fext_SOME_MArrayInp_fail_case \\ fs []
 QED
 
 Theorem blast_cell_inp_run_correct_array:
  !inp n tmpnum fext s bs v blast_s inps.
- blast_cell_input blast_s inp = ArrayInp inps /\
+ blast_cell_input blast_s inp = INR (ArrayInp inps) /\
  cell_inp_run fext s inp = INR v /\
  rtltype_extenv_n blast_s.extenv fext /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum /\
  blast_rel fext blast_s.si tmpnum s bs /\
+ blast_reg_rel_fext fext blast_s.si s bs ∧
  cell_input_lt inp n /\
+ cell_input_covered_by_extenv blast_s.extenv inp ∧
  n <= tmpnum ==>
  ?b. v = CArray b /\ LENGTH b = LENGTH inps /\
      (!i. i < LENGTH inps ==> cell_inp_run fext bs (EL i inps) = INR (CBool (EL i b)))
 Proof
- rewrite_tac [blast_rel_def] \\ Cases
+ Cases
  >- (Cases_on `v` \\ simp [cell_inp_run_def, blast_cell_input_def, EL_MAP])
 
- >- (simp [cell_inp_run_def, sum_bind_INR, blast_cell_input_def, rtltype_extenv_n_def] \\
+ >- (simp [cell_inp_run_def, sum_bind_INR, blast_cell_input_def, rtltype_extenv_n_def, cell_input_covered_by_extenv_def] \\
      rpt strip_tac \\ every_case_tac \\ fs [cget_fext_var_def] \\ rveq \\
-     drule_first \\ fs [rtltype_v_CArray_t] \\ rveq \\
-     simp [cell_inp_run_def, sum_bind_def, cget_fext_var_def, sum_revEL_revEL, revEL_def, sum_map_def])
+     drule_first \\ fs [rtltype_v_cases] \\ rveq \\
+     fs [cell_inp_run_def, sum_bind_def, cget_fext_var_def, sum_revEL_revEL, revEL_def, sum_map_def,
+         EL_TAKE, EL_DROP]) \\
 
- \\ simp [cell_inp_run_def, blast_cell_input_def, cell_input_lt_def] \\
-    rpt strip_tac' \\ first_x_assum (qspec_then `v` mp_tac) \\
-    impl_tac >- (match_mp_tac var_lt_le \\ asm_exists_tac \\ fs [blasterstate_ok_def]) \\
-    TOP_CASE_TAC \\ fs [sum_bind_INR] \\ every_case_tac \\ fs [] \\ rveq \\ strip_tac \\
-    fs [cget_fext_var_def] \\ rw []
+ simp [cell_inp_run_def, cell_input_lt_def, blast_cell_input_def] \\
+ rpt gen_tac \\ rpt TOP_CASE_TAC \\ simp [sum_map_INR, sum_bind_INR] \\
+ rpt strip_tac' \\ drule_strip blast_rel_blast_reg_rel_fext_SOME_MArrayInp \\
+ fs [sum_mapM_EL, inp_marked_get_INR, cget_fext_var_def, length_rev_slice] \\ rpt strip_tac'
+ >- (rpt drule_first \\ fs []) \\
+ last_x_assum drule \\ simp [rev_slice_def, EL_TAKE, EL_DROP] \\ 
+ qmatch_goalsub_abbrev_tac ‘EL idx l = _’ \\
+ first_x_assum (qspec_then ‘idx’ mp_tac) \\
+ unabbrev_all_tac \\ rpt strip_tac \\ fs []
+QED
+
+Theorem cell_input_lt_blast_cell_input_ok:
+ cell_input_lt inp processed ∧ processed ≤ tmpnum ⇒ blast_cell_input_ok inp processed max tmpnum
+Proof
+ Cases_on ‘inp’ \\ simp [blast_cell_input_ok_def] \\
+ Cases_on ‘v’ \\ simp [cell_input_lt_def, blast_cell_input_ok_def, var_lt_def]
+QED
+
+Theorem blast_cell_input_cell_input_marked_ok_bool:
+ !inp blast_s inp' tmpnum regs processed max.
+ blast_cell_input blast_s inp = INR (BoolInp inp') /\
+ (∀var minp. lookup var_cmp var blast_s.si = SOME (MBoolInp minp) ⇒
+             blast_cell_input_marked_ok minp processed max tmpnum) ∧
+ (∀var minps. lookup var_cmp var blast_s.si = SOME (MArrayInp minps) ⇒
+              EVERY (λminp. blast_cell_input_marked_ok minp processed max tmpnum) minps) ∧
+ cell_input_lt inp processed ∧ processed ≤ tmpnum ==> (* was less-than tmpnum before *)
+ blast_cell_input_ok inp' processed max tmpnum
+Proof
+ Cases
+ >- (Cases_on `v` \\ rw [blast_cell_input_def] \\ rw [blast_cell_input_ok_def])
+
+ >- (rw [blast_cell_input_def] \\ every_case_tac \\ rw [blast_cell_input_ok_def])
+
+ >- (rw [blast_cell_input_def] \\ every_case_tac \\ fs [cell_input_lt_blast_cell_input_ok] \\ drule_first \\
+     gvs [sum_map_INR, EVERY_revEL, inp_marked_get_INR, blast_cell_input_ok_def] \\
+     metis_tac [blast_cell_input_marked_ok_def])
+QED
+
+(* previous name: blast_cell_input_SOME_bool *)
+Theorem blast_cell_input_cell_input_lt_bool:
+ !inp blast_s inp' tmpnum regs processed max.
+ blast_cell_input blast_s inp = INR (BoolInp inp') /\
+ blasterstate_ok regs blast_s.si processed max tmpnum ∧
+ cell_input_lt inp processed ∧ processed ≤ tmpnum ⇒ (* was less-than tmpnum before *)
+ cell_input_lt inp' tmpnum
+Proof
+ rw [blasterstate_ok_def] \\
+ drule_strip blast_cell_input_cell_input_marked_ok_bool \\
+ first_x_assum (qspec_then ‘regs'’ assume_tac) \\
+ irule blast_cell_input_ok_cell_input_lt \\ asm_exists_tac
+QED
+
+Theorem blast_cell_input_cell_input_marked_ok_array:
+ !inp blast_s inps tmpnum regs processed max.
+ blast_cell_input blast_s inp = INR (ArrayInp inps) /\
+ (∀var minp. lookup var_cmp var blast_s.si = SOME (MBoolInp minp) ⇒
+             blast_cell_input_marked_ok minp processed max tmpnum) ∧
+ (∀var minps. lookup var_cmp var blast_s.si = SOME (MArrayInp minps) ⇒
+              EVERY (λminp. blast_cell_input_marked_ok minp processed max tmpnum) minps) ⇒
+ EVERY (\inp. blast_cell_input_ok inp processed max tmpnum) inps
+Proof
+ Cases
+ >- (Cases_on `v` \\ rw [blast_cell_input_def] \\
+    rw [EVERY_MEM, MEM_MAP] \\ simp [blast_cell_input_ok_def])
+
+ >- (rpt gen_tac \\ simp [blast_cell_input_def] \\ every_case_tac \\ strip_tac \\ rveq \\
+    rw [EVERY_MEM, MEM_GENLIST] \\ simp [blast_cell_input_ok_def])
+
+ >- (rw [blast_cell_input_def] \\ every_case_tac \\ fs [] \\ rpt drule_first \\
+     fs [sum_map_INR, EVERY_MEM] \\ rpt strip_tac \\ drule_strip sum_mapM_MEM \\
+     TRY (drule_strip MEM_rev_slice) \\ drule_first \\
+     gvs [inp_marked_get_INR, blast_cell_input_marked_ok_def])
+QED
+
+(* previous name: blast_cell_input_SOME *)
+Theorem blast_cell_input_cell_input_lt_array:
+ !inp blast_s inps tmpnum regs processed max.
+ blast_cell_input blast_s inp = INR (ArrayInp inps) ∧
+ blasterstate_ok regs blast_s.si processed max tmpnum ⇒
+ EVERY (λinp. cell_input_lt inp tmpnum) inps
+Proof
+ rw [blasterstate_ok_def] \\
+ drule_strip blast_cell_input_cell_input_marked_ok_array \\
+ first_x_assum (qspec_then ‘regs'’ assume_tac) \\
+ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw [] \\
+ irule blast_cell_input_ok_cell_input_lt \\ asm_exists_tac
+QED
+
+(*Theorem blast_cell_input_cell_input_lt_gen:
+ !inp minp tmpnum blast_s.
+ blast_cell_input blast_s inp = INR minp /\
+ (∀var minp. lookup var_cmp var blast_s.si = SOME (MBoolInp minp) ⇒
+             cell_input_marked_lt minp tmpnum) ∧
+ (∀var minps. lookup var_cmp var blast_s.si = SOME (MArrayInp minps) ⇒
+              EVERY (λminp. cell_input_marked_lt minp tmpnum) minps) ⇒
+ case minp of
+   BoolInp inp' => cell_input_lt inp tmpnum ⇒ cell_input_lt inp' tmpnum
+ | ArrayInp inps => EVERY (\inp. cell_input_lt inp tmpnum) inps
+Proof
+ rpt strip_tac \\ Cases_on ‘minp’
+ >- (drule_strip blast_cell_input_cell_input_lt_bool \\ simp [])
+ >- (drule_strip blast_cell_input_cell_input_lt_array \\ simp [])
+QED*)
+
+Theorem blast_cell_input_cell_input_marked_ok:
+ !inp minp tmpnum blast_s regs processed max.
+ blast_cell_input blast_s inp = INR minp /\
+ blasterstate_ok regs blast_s.si processed max tmpnum ∧
+ cell_input_lt inp processed ∧ processed ≤ tmpnum (* <-- strictly speaking only needed for bool case *) ⇒
+ case minp of
+   BoolInp inp' => blast_cell_input_ok inp' processed max tmpnum
+ | ArrayInp inps => EVERY (\inp. blast_cell_input_ok inp processed max tmpnum) inps
+Proof
+ rw [blasterstate_ok_def] \\ TOP_CASE_TAC
+ >- (drule_strip blast_cell_input_cell_input_marked_ok_bool \\ simp [])
+ >- (drule_strip blast_cell_input_cell_input_marked_ok_array \\ simp [])
+QED
+
+Theorem blast_cell_input_not_pseudo:
+ ∀inp blast_s regs tinp processed globalmax tmpnum.
+ blast_cell_input blast_s inp = INR tinp ∧
+ blasterstate_ok regs blast_s.si processed globalmax tmpnum ⇒
+ case tinp of
+   BoolInp inp => cell_input_not_pseudo regs inp
+ | ArrayInp inps => EVERY (cell_input_not_pseudo regs) inps
+Proof
+ Cases
+ >- (Cases_on `v` \\ rw [blast_cell_input_def] \\ simp [cell_input_not_pseudo_def, EVERY_MAP])
+
+ >- (rpt gen_tac \\ simp [blast_cell_input_def] \\ every_case_tac \\ strip_tac \\ rveq \\
+     rw [EVERY_MEM, MEM_GENLIST] \\ simp [cell_input_not_pseudo_def]) \\
+
+ rename1 ‘VarInp var idx’ \\
+ fs [blast_cell_input_def] \\ rpt gen_tac \\
+ TOP_CASE_TAC >- (rw [blasterstate_ok_def] \\ simp [] \\
+                  Cases_on ‘var’ \\ rw [cell_input_not_pseudo_def] \\ drule_first \\
+                  Cases_on ‘rdata.reg_type’ \\ simp []) \\
+ TOP_CASE_TAC >- (TOP_CASE_TAC \\ rw [blasterstate_ok_def] \\ drule_first \\
+                  fs [cell_input_marked_not_pseudo_def]) \\
+ TOP_CASE_TAC \\ rw [cell_input_not_pseudo_def, sum_map_INR, blasterstate_ok_def] \\ drule_first
+ >- (fs [EVERY_MEM] \\ rpt strip_tac \\ drule_strip sum_mapM_MEM \\ drule_first \\
+     gvs [inp_marked_get_INR, cell_input_marked_not_pseudo_def])
+ >- (fs [EVERY_revEL, inp_marked_get_INR] \\ drule_first \\ gvs [cell_input_marked_not_pseudo_def])
+ >- (fs [EVERY_MEM] \\ rpt strip_tac \\ drule_strip sum_mapM_MEM \\ drule_strip MEM_rev_slice \\
+     drule_first \\ gvs [inp_marked_get_INR, cell_input_marked_not_pseudo_def])
 QED
 
 Theorem blasterstate_ok_insert:
- !si min max out l.
- blasterstate_ok si min max ==>
- blasterstate_ok (insert var_cmp (NetVar out) (ArrayInp (GENLIST (λi. VarInp (NetVar (i + max)) NONE) l)) si) min (l + max)
+ !regs si min max globalmax tmpnum tmpnum' out minp.
+ blasterstate_ok regs si min globalmax tmpnum ∧
+ cell_output_ok min max out ∧
+ (case minp of
+    MBoolInp inp => blast_cell_input_marked_ok inp max globalmax tmpnum' ∧
+                    cell_input_marked_not_pseudo regs inp
+  | MArrayInp inps => EVERY (λminp. blast_cell_input_marked_ok minp max globalmax tmpnum') inps ∧
+                      EVERY (cell_input_marked_not_pseudo regs) inps) ∧
+ max ≤ globalmax ∧
+ tmpnum ≤ tmpnum' ⇒
+ blasterstate_ok regs (insert var_cmp (NetVar out) minp si) max globalmax tmpnum'
 Proof
- rw [blasterstate_ok_def, lookup_insert_var_cmp, insert_thm_var_cmp] \\
- every_case_tac
- >- rw [EVERY_GENLIST, cell_input_lt_def, var_lt_def]
- >- (drule_first \\ match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
- >- rw [EVERY_GENLIST, cell_input_lt_def, var_lt_def]
- \\ drule_first \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\
- rw [] \\ match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp []
+ simp [blasterstate_ok_def, lookup_insert_var_cmp, insert_thm_var_cmp, cell_output_ok_def] \\
+ rpt strip_tac' \\ rpt conj_tac \\ rpt gen_tac \\
+ IF_CASES_TAC \\ strip_tac \\ fs  [] \\
+
+ rpt drule_first \\
+ TRY (irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw []) \\
+ match_mp_tac blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []
 QED
 
-(* TODO: rename *)
-Theorem EVERY_output_not_in_si_not_NetVar:
- !inps out tmpnum idx i.
- EVERY (bsi_cell_input_ok out tmpnum) inps /\ i < LENGTH inps /\ out < tmpnum ==>
- EL i inps <> VarInp (NetVar out) idx
+(* Somewhat overkill do not simply do this inline *)
+Theorem blasterstate_ok_insert_cell1:
+ !regs si min max globalmax tmpnum out l.
+ blasterstate_ok regs si min globalmax tmpnum ∧ cell_output_ok min max out ∧ max ≤ globalmax ⇒
+ blasterstate_ok regs
+                 (insert var_cmp (NetVar out)
+                                 (MArrayInp (GENLIST (λi. GoodInp (VarInp (NetVar (i + tmpnum)) NoIndexing)) l)) si)
+                 max globalmax (l + tmpnum)
 Proof
- rw [EVERY_EL] \\ first_x_assum (qspec_then `i` mp_tac) \\
- Cases_on `EL i inps` \\ simp [bsi_cell_input_ok_def] \\
- Cases_on ‘v’ \\ simp [cell_input_lt_def, cell_input_ge_def, var_lt_def, var_ge_def]
+ rpt strip_tac \\ match_mp_tac blasterstate_ok_insert \\ asm_exists_tac \\
+ fs [blasterstate_ok_def, EVERY_GENLIST,
+     blast_cell_input_marked_ok_def, blast_cell_input_ok_def,
+     cell_input_marked_not_pseudo_def, cell_input_not_pseudo_def]
 QED
 
 Theorem cell1_bitwise_correct:
@@ -381,7 +721,7 @@ Theorem cell1_bitwise_correct:
       INR s' /\
       s'.fbits = s.fbits /\ (* <-- follows from general determinism thm... *)
       (!inp. cell_input_lt inp tmpnum ==> cell_inp_run fext s' inp = cell_inp_run fext s inp) /\
-      (!i. i < LENGTH inps ==> cell_inp_run fext s' (VarInp (NetVar (i + tmpnum)) NONE) =
+      (!i. i < LENGTH inps ==> cell_inp_run fext s' (VarInp (NetVar (i + tmpnum)) NoIndexing) =
                                INR (CBool ~(EL i b)))
 Proof
  gen_tac \\ Induct \\ rw [sum_foldM_def, sum_bind_INR, cell_run_def] \\
@@ -407,7 +747,7 @@ Proof
  conj_tac >- (rpt strip_tac \\ first_x_assum (qspec_then `inp` mp_tac) \\
               simp [cell_input_lt_SUC, cell_input_lt_cell_inp_run_cset_var]) \\
 
- Cases >- (simp [] \\ first_x_assum (qspec_then `VarInp (NetVar tmpnum) NONE` mp_tac) \\
+ Cases >- (simp [] \\ first_x_assum (qspec_then `VarInp (NetVar tmpnum) NoIndexing` mp_tac) \\
           simp [cell_input_lt_def, var_lt_def, cell_inp_run_cset_var]) \\
 
  simp [] \\ strip_tac \\ drule_first \\ fs [arithmeticTheory.ADD1]
@@ -427,7 +767,7 @@ Theorem blast_cellMux_correct:
  ∃s'. sum_foldM (cell_run fext) s (MAP2i (λi inp2 inp3. CellMux (i + tmpnum) c inp2 inp3) lhs rhs) = INR s' /\
       s'.fbits = s.fbits /\ (* <-- follows from general determinism thm... *)
       (!inp. cell_input_lt inp tmpnum ==> cell_inp_run fext s' inp = cell_inp_run fext s inp) /\
-      (!i. i < LENGTH lhs ==> cell_inp_run fext s' (VarInp (NetVar (i + tmpnum)) NONE) =
+      (!i. i < LENGTH lhs ==> cell_inp_run fext s' (VarInp (NetVar (i + tmpnum)) NoIndexing) =
                               INR (CBool (EL i (if c' then lhs' else rhs'))))
 Proof
  Induct >- rw [sum_foldM_def] \\ Cases_on ‘lhs'’ >- rw [] \\ Cases_on ‘rhs’ >- rw [] \\ Cases_on ‘rhs'’ >- rw [] \\
@@ -453,45 +793,13 @@ Proof
  simp [cset_var_fbits] \\ rpt strip_tac
  >- (drule_strip cell_input_lt_SUC \\ drule_first \\ simp [cell_input_lt_cell_inp_run_cset_var])
  \\ Cases_on ‘i’ \\ fs []
- >- (first_x_assum (qspec_then ‘VarInp (NetVar tmpnum) NONE’ mp_tac) \\
+ >- (first_x_assum (qspec_then ‘VarInp (NetVar tmpnum) NoIndexing’ mp_tac) \\
      impl_tac >- simp [cell_input_lt_def, var_lt_def] \\ strip_tac \\ rw [cell_inp_run_cset_var])
  \\ drule_first \\ rw [] \\ fs [arithmeticTheory.ADD1]
 QED
 
-Theorem blast_cell_input_SOME_bool: (* todo: rename *)
- !inp blast_s inp' tmpnum.
- blast_cell_input blast_s inp = BoolInp inp' /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum ∧
- cell_input_lt inp blast_s.tmpnum ==>
- cell_input_lt inp' blast_s.tmpnum
-Proof
- Cases
- >- (Cases_on `v` \\ rw [blast_cell_input_def] \\ rw [cell_input_lt_def])
-
- >- (rw [blast_cell_input_def] \\ every_case_tac \\ rw [cell_input_lt_def])
-
- >- (rw [blast_cell_input_def, blasterstate_ok_def] \\ every_case_tac \\ fs [] \\
-     drule_first \\ rw [] \\ fs [EVERY_EL, revEL_def, cell_input_lt_def])
-QED
-
-Theorem blast_cell_input_SOME: (* todo: rename *)
- !inp blast_s inps tmpnum.
- blast_cell_input blast_s inp = ArrayInp inps /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum ==>
- EVERY (\inp. cell_input_lt inp blast_s.tmpnum) inps
-Proof
- Cases
- >- (Cases_on `v` \\ rw [blast_cell_input_def] \\
-    rw [EVERY_MEM, MEM_MAP] \\ simp [cell_input_lt_def])
-
- >- (rpt gen_tac \\ simp [blast_cell_input_def] \\ every_case_tac \\ strip_tac \\ rveq \\
-    rw [EVERY_MEM, MEM_GENLIST] \\ simp [cell_input_lt_def])
-
- >- (rw [blast_cell_input_def, blasterstate_ok_def] \\ every_case_tac \\ fs [] \\ drule_first \\ rw [])
-QED
-
 (* should be merged with above... blasterstate_ok unrolled... *)        
-Theorem blast_cell_input_bool_cell_input_lt:
+(*Theorem blast_cell_input_bool_cell_input_lt:
  !inp inp' blast_s out tmpnum.
  blast_cell_input blast_s inp = BoolInp inp' /\
  cell_input_lt inp out /\ out <= tmpnum /\
@@ -509,6 +817,8 @@ Proof
  >- drule_first
  >- (drule_first \\ fs [revEL_def, EVERY_EL])
  >- simp [cell_input_lt_def]
+ >- (fs [cell_input_lt_def] \\ drule_strip var_lt_le)
+ >- drule_first
 QED
 
 Theorem blast_cell_input_bool_bsi_cell_input_ok:
@@ -538,7 +848,8 @@ Proof
  >- (Cases_on ‘v’ \\ fs [blast_cell_input_def] \\ rw [cell_input_lt_def, EVERY_MAP])
  >- (every_case_tac \\ fs [] \\ rw [cell_input_lt_def, EVERY_GENLIST])
  \\ every_case_tac \\ fs [] \\ Cases_on ‘v’ \\ rveq \\
-    fs [cell_input_lt_def, var_lt_def] \\ drule_first \\ fs [revEL_def, EVERY_EL]
+    fs [cell_input_lt_def, var_lt_def] \\ drule_first \\ fs [revEL_def, EVERY_EL] \\
+    rw [rev_slice_def, EL_TAKE, EL_DROP, LENGTH_TAKE_EQ]
 QED
 
 Theorem blast_cell_input_array_bsi_cell_input_ok:
@@ -550,8 +861,8 @@ Proof
  Cases \\ rpt gen_tac
  >- (Cases_on ‘v’ \\ rw [blast_cell_input_def] \\ simp [EVERY_MAP, bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def])
  >- (simp [blast_cell_input_def] \\ every_case_tac \\ rw [] \\ simp [EVERY_GENLIST, bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def])
- \\ simp [blast_cell_input_def] \\ every_case_tac \\ rw [] \\ drule_first
-QED
+ \\ simp [blast_cell_input_def] \\ every_case_tac \\ rw [] \\ drule_first \\ simp [EVERY_rev_slice]
+QED*)
 
 Theorem cell_inp_run_lt_cget_var_cong:
  ∀inp fext s s' n m.
@@ -575,12 +886,6 @@ Theorem inps2n_nil:
  ∀fext s. inps2n fext s [] = INR 0
 Proof
  rpt gen_tac \\ EVAL_TAC
-QED
-
-Theorem v2n_sing:
- ∀b. v2n [b] = if b then 1 else 0
-Proof
- rw [v2n_def, bitify_reverse_map]
 QED
 
 Theorem inps2n_sing:
@@ -771,67 +1076,83 @@ Proof
  simp [EVERY_MEM]
 QED
 
-Triviality cell_inp_run_ConstInp:
- ∀fext s b. cell_inp_run fext s (ConstInp (CBool b)) = INR (CBool b)
-Proof
- simp [cell_inp_run_def]
-QED
-
 (* Separate out proof of "static properties" in adder case, "dynamic properties" depends on the input lists being
    of equal length... *)
 Theorem blast_cell_add4_correct_static_part:
- ∀n r tmpnum tmpnum' cin inps1 inps2 outs cout cells.
+ ∀n r tmpnum tmpnum' cin inps1 inps2 outs cout cells regs.
  blast_cell_add4 tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
  LENGTH inps1 ≤ 4 ∧
- cell_input_lt cin tmpnum ∧ EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧ EVERY (\inp. cell_input_lt inp tmpnum) inps2 ⇒
+ cell_input_lt cin tmpnum ∧
+ EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧
+ EVERY (\inp. cell_input_lt inp tmpnum) inps2 ⇒
  tmpnum ≤ tmpnum' ∧
  EVERY (λinp. cell_input_ge inp tmpnum) outs ∧
  EVERY (λinp. cell_input_lt inp tmpnum') outs ∧
+ EVERY (λc. cell_input_not_pseudo regs c) outs ∧
  cell_input_lt cout tmpnum' ∧
- deterministic_netlist cells
+ deterministic_netlist cells ∧
+ (* added afterwards: *)
+ (∀processed globalmax.
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) inps1 ∧
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) inps2 ⇒
+  EVERY (λc. blast_cell_output_ok c processed globalmax tmpnum) cells)
 Proof
  simp [Once blast_cell_add4_def, le4] \\ rpt strip_tac' \\ fs [length_le4_lem] \\ rveq \\ fs [] \\
- simp [EVERY_DEF, cell_input_ge_def, var_ge_def, cell_input_lt_def, var_lt_def] \\
- simp [EVERY_EL, deterministic_netlist_def, deterministic_cell_def, indexedListsTheory.EL_MAP2i]
+ simp [EVERY_DEF, cell_input_ge_def, cell_input_lt_def, var_lt_def] \\
+ simp [EVERY_EL, deterministic_netlist_def, deterministic_cell_def, indexedListsTheory.EL_MAP2i,
+       cell_input_not_pseudo_def, blast_cell_output_ok_def, cell_output_def]
 QED
 
-Theorem blast_cell_add_correct_static_part:
- ∀n r tmpnum tmpnum' cin inps1 inps2 outs cout cells.
- blast_cell_add tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
+Theorem blast_cell_addarray_correct_static_part:
+ ∀regs n r tmpnum tmpnum' cin inps1 inps2 outs cout cells.
+ blast_cell_addarray tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
  LENGTH inps1 = n*4 + r ∧ r < 4 ∧
- cell_input_lt cin tmpnum ∧ EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧ EVERY (\inp. cell_input_lt inp tmpnum) inps2 ⇒
+ cell_input_lt cin tmpnum ∧
+ EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧
+ EVERY (\inp. cell_input_lt inp tmpnum) inps2 ⇒
  tmpnum ≤ tmpnum' ∧
  EVERY (λinp. cell_input_ge inp tmpnum) outs ∧
  EVERY (λinp. cell_input_lt inp tmpnum') outs ∧
- deterministic_netlist cells
+ EVERY (λc. cell_input_not_pseudo regs c) outs ∧
+ deterministic_netlist cells ∧
+ (* added afterwards: *)
+ (∀processed globalmax.
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) inps1 ∧
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) inps2 ⇒
+  EVERY (λc. blast_cell_output_ok c processed globalmax tmpnum) cells)
 Proof
- Induct
+ gen_tac \\ Induct
  >- (* base *)
- (simp [Once blast_cell_add_def, DROP_EQ_NIL] \\ rpt gen_tac \\
+ (simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt gen_tac \\
   IF_CASES_TAC >- simp [deterministic_netlist_def] \\
   rpt strip_tac' \\ fs [DROP_LENGTH_TOO_LONG, TAKE_LENGTH_TOO_LONG] \\
   pairarg_tac \\ fs [] \\ rveq \\
   drule_strip blast_cell_add4_correct_static_part \\ simp [EVERY_REVERSE, EVERY_TAKE])
  \\ (* step *)
- simp [Once blast_cell_add_def, DROP_EQ_NIL] \\ rpt strip_tac' \\
+ simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt strip_tac' \\
  qpat_x_assum ‘LENGTH _ = _’ mp_tac \\ ‘r + 4 * SUC n = 4 + (4 * n + r)’ by decide_tac \\
  pop_assum (rewrite_tac o sing) \\ once_rewrite_tac [LENGTH_EQ_SUM] \\ strip_tac \\ rveq \\
 
  Cases_on ‘l1 = []’ \\ fs [] \\ Cases_on ‘l2 = []’ \\ fs []
  >- (* length 4... *)
  (fs [length_le4_lem, blast_cell_add4_def] \\ rveq \\ fs [] \\
-  simp [cell_input_ge_def, var_ge_def, cell_input_lt_def, var_lt_def] \\
-  simp [EVERY_EL, deterministic_netlist_def, deterministic_cell_def, indexedListsTheory.EL_MAP2i])
+  simp [cell_input_ge_def, cell_input_lt_def, var_lt_def] \\
+  simp [EVERY_EL, deterministic_netlist_def, deterministic_cell_def, indexedListsTheory.EL_MAP2i,
+        cell_input_not_pseudo_def, blast_cell_output_ok_def, cell_output_def])
  \\ (* all other lengths *)
  fs [DROP_APPEND, DROP_LENGTH_TOO_LONG, TAKE_APPEND, TAKE_LENGTH_TOO_LONG] \\
  pairarg_tac \\ drule_strip blast_cell_add4_correct_static_part \\ simp [EVERY_REVERSE, EVERY_TAKE] \\
- strip_tac \\ every_case_tac >- (‘n = 0 ∧ r = 0’ by decide_tac \\ fs []) \\ fs [] \\
+ disch_then (qspec_then ‘regs’ strip_assume_tac) \\
+ every_case_tac >- (‘n = 0 ∧ r = 0’ by decide_tac \\ fs []) \\ fs [] \\
  pairarg_tac \\ drule_first \\ impl_tac >- (rpt conj_tac
  >- (match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp [])
  >- (qspec_then ‘inps2’ assume_tac EVERY_cell_input_lt_le \\ drule_first \\ simp [EVERY_DROP])) \\ strip_tac \\
- fs [] \\ rveq \\ simp [EVERY_APPEND, deterministic_netlist_append] \\ conj_tac
+ fs [] \\ rveq \\ simp [EVERY_APPEND, deterministic_netlist_append] \\ rpt strip_tac
  >- (match_mp_tac EVERY_cell_input_ge_le \\ asm_exists_tac \\ simp [])
- \\ match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp []
+ >- (match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp [])
+ >- metis_tac [EVERY_TAKE]
+ >- metis_tac [EVERY_DROP, EVERY_blast_cell_output_ok_le, EVERY_blast_cell_input_ok_le,
+               arithmeticTheory.LESS_EQ_REFL]
 QED
 
 (* Works if only bool vars are present in goal *)        
@@ -879,7 +1200,7 @@ Proof
  (conj_tac >- (rw [var_lt_def, cget_var_cset_var] \\
                Cases_on ‘var’ >- (drule_strip cells_run_cget_var_RegVar \\ simp []) \\ fs [var_lt_def])) \\
  simp [carry4_xor_def, carry4_muxcy_def, inps2n_def, sum_mapM_def, sum_map_def, sum_bind_def] \\
- simp [cell_inp_run_cset_var', cget_fext_var_def, sum_revEL_def, sum_EL_EL, get_bool_def, sum_map_def, sum_bind_def] \\
+ simp [cell_inp_run_cset_var, cget_fext_var_def, sum_revEL_def, sum_EL_EL, get_bool_def, sum_map_def, sum_bind_def] \\
 
  fs [inps2n_def, sum_map_INR, sum_mapM_INR] \\ fs [sum_mapM_def] \\ fs [sum_bind_def, get_bool_def] \\ rveq \\
     
@@ -907,13 +1228,15 @@ Proof
 QED
 
 (* Well... cute induction by simply complete induction would have probably worked here... *)
-Theorem blast_cell_add_correct:
+Theorem blast_cell_addarray_correct:
  ∀n tmpnum tmpnum' cin cin' inps1 inps1' inps2 inps2' outs cout cells fext bs r.
- blast_cell_add tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
+ blast_cell_addarray tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
  inps2n fext bs (REVERSE inps1) = INR inps1' ∧
  inps2n fext bs (REVERSE inps2) = INR inps2' ∧
  inps2n fext bs [cin] = INR cin' ∧
- cell_input_lt cin tmpnum ∧ EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧ EVERY (\inp. cell_input_lt inp tmpnum) inps2 ∧
+ cell_input_lt cin tmpnum ∧
+ EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧
+ EVERY (\inp. cell_input_lt inp tmpnum) inps2 ∧
  LENGTH inps1 = 4*n + r ∧ LENGTH inps2 = 4*n + r ∧ r < 4 ⇒
  tmpnum ≤ tmpnum' ∧
  LENGTH outs = LENGTH inps1 ∧
@@ -926,7 +1249,7 @@ Theorem blast_cell_add_correct:
 Proof
  Induct
  >- (* Base *)
- (simp [Once blast_cell_add_def, DROP_EQ_NIL] \\ rpt gen_tac \\ IF_CASES_TAC
+ (simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt gen_tac \\ IF_CASES_TAC
  >- (* len = 0 *)
  (rw [] \\ fs [inps2n_nil, REVERSE_DEF] \\ rw [sum_foldM_def])
  \\ (* len = 1, 2, 3 *)
@@ -934,7 +1257,7 @@ Proof
  fs [TAKE_LENGTH_TOO_LONG] \\ drule_strip blast_cell_add4_correct \\ simp [EVERY_REVERSE])
 
  \\ (* Step *)  
- simp [Once blast_cell_add_def, DROP_EQ_NIL] \\ rpt gen_tac \\ IF_CASES_TAC >- simp [] \\
+ simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt gen_tac \\ IF_CASES_TAC >- simp [] \\
  pairarg_tac \\ simp [] \\ IF_CASES_TAC
  >- (* len = 4 *)
  (last_x_assum kall_tac \\ rpt strip_tac' \\ fs [] \\ rveq \\
@@ -986,40 +1309,60 @@ Theorem blast_cell_equal12_correct_static:
  tmpnum ≤ tmpnum' ∧
  cell_input_lt out tmpnum' ∧
  cell_input_ge out tmpnum ∧
- deterministic_netlist cells
+ cell_input_not_pseudo regs out ∧
+ deterministic_netlist cells ∧
+ (* added afterwards: *)
+ (∀processed globalmax.
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) lhs ∧
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) rhs ⇒
+  EVERY (λc. blast_cell_output_ok c processed globalmax tmpnum) cells)
 Proof
  rewrite_tac [le12] \\ rpt strip_tac' \\ fs [LENGTH_EQ_NUM_compute] \\ rveq \\
  fs [blast_cell_equal12_def] \\
  fs [Ntimes blast_cell_equal_luts_def 4, blast_cell_equal_lut_def, take_drop_TAKE_DROP] \\ rveq \\
  every_case_tac \\ fs [] \\ rveq \\
- simp [deterministic_netlist_def, deterministic_cell_def, cell_input_lt_def, var_lt_def, cell_input_ge_def, var_ge_def]
+ simp [deterministic_netlist_def, deterministic_cell_def, cell_input_lt_def, var_lt_def, cell_input_ge_def,
+       cell_input_not_pseudo_def, blast_cell_output_ok_def, cell_output_def]
 QED
 
 Theorem blast_cell_equalarray_correct_static:
- ∀lhs rhs tmpnum tmpnum' tmpnumbase cells out preveq.
+ ∀lhs rhs tmpnum tmpnum' tmpnumbase cells out preveq regs.
  blast_cell_equalarray tmpnum preveq lhs rhs = (tmpnum', cells, out) ∧
  cell_input_lt preveq tmpnum ∧
  cell_input_ge preveq tmpnumbase ∧
+ cell_input_not_pseudo regs preveq ∧
  tmpnumbase ≤ tmpnum ⇒
  tmpnum ≤ tmpnum' ∧
  cell_input_lt out tmpnum' ∧
  cell_input_ge out tmpnumbase ∧
- deterministic_netlist cells
+ cell_input_not_pseudo regs out ∧
+ deterministic_netlist cells ∧
+ (* added afterwards: *)
+ (∀processed globalmax.
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) lhs ∧
+  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) rhs ⇒
+  EVERY (λc. blast_cell_output_ok c processed globalmax tmpnum) cells)
 Proof
  gen_tac \\ completeInduct_on ‘LENGTH lhs’ \\ gen_tac \\ strip_tac \\ rpt gen_tac \\
  once_rewrite_tac [blast_cell_equalarray_def] \\
  IF_CASES_TAC >- (rw [deterministic_netlist_def, cell_input_lt_def, cell_input_ge_def] \\ simp []) \\
  simp [take_drop_TAKE_DROP] \\ rpt strip_tac' \\
- pairarg_tac \\ drule_strip blast_cell_equal12_correct_static \\
+ pairarg_tac \\ drule_strip blast_cell_equal12_correct_static \\ disch_then (qspec_then ‘regs’ mp_tac) \\
  impl_tac >- simp [LENGTH_TAKE_EQ] \\ strip_tac \\ fs [] \\
- every_case_tac >- (fs [] \\ rw [] \\ match_mp_tac cell_input_ge_le \\ asm_exists_tac \\ simp []) \\
+ every_case_tac >- (fs [] \\ rw []
+                    >- (match_mp_tac cell_input_ge_le \\ asm_exists_tac \\ simp [])
+                    >- (metis_tac [EVERY_TAKE])) \\
 
  pairarg_tac \\
- first_x_assum (qspec_then ‘LENGTH (DROP 12 lhs)’ mp_tac) \\
+ last_x_assum (qspec_then ‘LENGTH (DROP 12 lhs)’ mp_tac) \\
  impl_tac >- (Cases_on ‘lhs’ \\ fs [LENGTH_DROP]) \\
  disch_then (qspec_then ‘DROP 12 lhs’ mp_tac) \\ impl_tac >- simp [] \\ disch_then drule_strip \\
- fs [] \\ rw [deterministic_netlist_append] \\
- match_mp_tac cell_input_ge_le \\ asm_exists_tac \\ simp []
+ fs [] \\ rw [deterministic_netlist_append]
+ >- (match_mp_tac cell_input_ge_le \\ asm_exists_tac \\ simp [])
+ >- metis_tac [EVERY_TAKE]
+ >- (‘tmpnum ≤ tmpnum''’ by fs [] \\
+     metis_tac [EVERY_DROP, EVERY_blast_cell_output_ok_le, EVERY_blast_cell_input_ok_le,
+                arithmeticTheory.LESS_EQ_REFL])
 QED
 
 Triviality cell_inp_run_cleanup_lem:
@@ -1137,7 +1480,7 @@ Proof
  rpt blast_luts_tac \\
  TRY blast_carry_tac \\
  
- TRY (conj_tac >- (simp [cell_inp_run_cset_var'] \\ EVAL_TAC \\ rewrite_tac [CONJ_ASSOC]) \\
+ TRY (conj_tac >- (simp [cell_inp_run_cset_var] \\ EVAL_TAC \\ rewrite_tac [CONJ_ASSOC]) \\
       Cases \\ rw [cell_inp_run_def, cget_var_cset_var, cell_input_lt_def, var_lt_def])
 QED
 
@@ -1174,7 +1517,8 @@ Proof
  pairarg_tac \\ first_x_assum (qspec_then ‘LENGTH (DROP 12 lhs)’ mp_tac) \\
  impl_tac >- (Cases_on ‘lhs’ \\ fs [LENGTH_DROP]) \\ disch_then (qspec_then ‘DROP 12 lhs’ mp_tac) \\
  impl_tac >- simp [] \\
- drule_strip blast_cell_equal12_correct_static \\ impl_tac >- simp [LENGTH_TAKE_EQ] \\ strip_tac \\
+ drule_strip blast_cell_equal12_correct_static \\ disch_then (qspec_then ‘regs’ mp_tac) \\
+ impl_tac >- simp [LENGTH_TAKE_EQ] \\ strip_tac \\
  drule_strip blast_cell_equalarray_correct_static \\
  disch_then drule_strip \\ disch_then (qspecl_then [‘DROP 12 b’, ‘DROP 12 b'’] mp_tac) \\
  impl_tac >- (rw [] \\
@@ -1202,426 +1546,397 @@ Proof
  rpt conj_tac \\ Cases \\ simp [cell2_run_def]
 QED
 
-Theorem bsi_cell_input_ok_cell_inp_run_cset_var_bool:
- ∀fext s inp v v' out tmpnum.
- cell_inp_run fext s inp = INR v ∧
- bsi_cell_input_ok out tmpnum inp ∧
- out < tmpnum ⇒
- cell_inp_run fext (cset_var s (NetVar out) v') inp = INR v
-Proof
- rw [bsi_cell_input_ok_def] \\
- Cases_on ‘inp’ \\ fs [cell_inp_run_def, sum_bind_INR] \\ rw [cget_var_cset_var] \\ fs [cell_input_lt_def, cell_input_ge_def, var_lt_def, var_ge_def]
-QED
-
-Theorem bsi_cell_input_ok_cell_inp_run_cset_var_array:
- ∀fext s inps i v out tmpnum.
- EVERY (bsi_cell_input_ok out tmpnum) inps ∧
- i < LENGTH inps ∧
- out < tmpnum ⇒
- cell_inp_run fext (cset_var s (NetVar out) v) (EL i inps) = cell_inp_run fext s (EL i inps)
-Proof
- rpt strip_tac \\ Cases_on ‘EL i inps’ \\
- simp [cell_inp_run_def, cget_var_cset_var] \\ rw [] \\ metis_tac [EVERY_output_not_in_si_not_NetVar]
-QED
-
-Theorem bsi_cell_input_ok_cell_inp_run_cset_var:
- ∀inp fext s out tmpnum v.
- bsi_cell_input_ok out tmpnum inp ∧ out < tmpnum ⇒
+(*Theorem inp_marked_NetVar_inv_cell_inp_run:
+ ∀inp s out max v fext.
+ inp_marked_NetVar_inv out max (GoodInp inp) ∧ out < max ⇒
  cell_inp_run fext (cset_var s (NetVar out) v) inp = cell_inp_run fext s inp
 Proof
- rw [bsi_cell_input_ok_def]
- >- simp [cell_input_lt_cell_inp_run_cset_var]
- \\ Cases_on ‘inp’ \\ rw [cell_inp_run_def, cget_var_cset_var] \\ fs [cell_input_ge_def, var_ge_def]
-QED
-
-Theorem blast_rel_cset_var_NetVar_bool:
- !fext si tmpnum s bs b out.
- blast_rel fext si tmpnum s bs ∧
- out < tmpnum ∧
- (∀var inps. lookup var_cmp var si = SOME (ArrayInp inps) ⇒
-             EVERY (bsi_cell_input_ok out tmpnum) inps) ∧
- (∀var inp. lookup var_cmp var si = SOME (BoolInp inp) ⇒
-            bsi_cell_input_ok out tmpnum inp) ⇒
- lookup var_cmp (NetVar out) si = NONE ==>
- blast_rel fext si tmpnum (cset_var s (NetVar out) (CBool b))
-                          (cset_var bs (NetVar out) (CBool b))
-Proof
- rw [blast_rel_def, cset_var_fbits, cget_var_cset_var] \\ 
- IF_CASES_TAC >- simp [] \\ drule_first \\ rpt TOP_CASE_TAC \\ fs [] \\ rpt strip_tac \\ drule_first
- >- (drule_strip bsi_cell_input_ok_cell_inp_run_cset_var \\ simp [])
- \\ fs [EVERY_EL] \\ first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
- drule_strip bsi_cell_input_ok_cell_inp_run_cset_var \\ simp []
-QED
-
-(*Theorem blast_rel_cset_var_NetVar_array:
- !fext si tmpnum s bs b out.
- blast_rel fext si tmpnum s bs ∧
- out < tmpnum ∧
- (∀var inps. lookup var_cmp var si = SOME (ArrayInp inps) ⇒
-             EVERY (bsi_cell_input_ok out tmpnum) inps) ∧
- (∀var inp. lookup var_cmp var si = SOME (BoolInp inp) ⇒
-            bsi_cell_input_ok out tmpnum inp) ⇒
- lookup var_cmp (NetVar out) si = NONE ==>
- blast_rel fext si tmpnum (cset_var s (NetVar out) (CBool b))
-                          (cset_var bs (NetVar out) (CBool b))
-Proof
- rw [blast_rel_def, cset_var_fbits, cget_var_cset_var] \\ 
- IF_CASES_TAC >- simp [] \\ drule_first \\ rpt TOP_CASE_TAC \\ fs [] \\ rpt strip_tac \\ drule_first
- >- (drule_strip bsi_cell_input_ok_cell_inp_run_cset_var \\ simp [])
- \\ fs [EVERY_EL] \\ first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
- drule_strip bsi_cell_input_ok_cell_inp_run_cset_var \\ simp []
+ Cases \\ simp [cell_inp_run_def] \\ rename1 ‘VarInp var idx’ \\ Cases_on ‘var’ \\
+ simp [cget_var_cset_var, inp_marked_NetVar_inv_def]
 QED*)
 
-Theorem blast_rel_cset_var_cset_var_bool:
- ∀fext si tmpnum tmpnum' s bs out b.
- blast_rel fext si tmpnum s bs ∧
- blasterstate_ok si tmpnum tmpnum' ∧
- lookup var_cmp (NetVar out) si = NONE ∧
- out < tmpnum ∧
- (∀var inps. lookup var_cmp var si = SOME (ArrayInp inps) ⇒ EVERY (bsi_cell_input_ok out tmpnum) inps) ∧
- (∀var inp. lookup var_cmp var si = SOME (BoolInp inp) ⇒ bsi_cell_input_ok out tmpnum inp) ⇒
- blast_rel fext si tmpnum (cset_var s (NetVar out) (CBool b)) (cset_var bs (NetVar out) (CBool b))
+Theorem blast_cell_input_ok_cell_inp_run_cset_var:
+ ∀inp s out v fext processed max tmpnum.
+ blast_cell_input_ok inp processed max tmpnum ∧ processed ≤ out ∧ out < max ⇒
+ cell_inp_run fext (cset_var s (NetVar out) v) inp = cell_inp_run fext s inp
 Proof
- fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var] \\ rpt strip_tac \\ rw [] \\
- drule_first \\ rpt TOP_CASE_TAC \\ fs []
- >- (drule_first \\ drule_strip bsi_cell_input_ok_cell_inp_run_cset_var \\ simp [])
- \\ drule_first \\ fs [EVERY_EL] \\ rpt strip_tac \\ rpt (first_x_assum (qspec_then ‘i’ mp_tac)) \\ simp [] \\
-    rpt strip_tac \\ drule_strip bsi_cell_input_ok_cell_inp_run_cset_var \\ simp []
+ Cases \\ fs [cell_inp_run_def] \\ rename1 ‘VarInp var idx’ \\ Cases_on ‘var’ \\
+ fs [cget_var_cset_var, blast_cell_input_ok_def]
 QED
 
-Definition bsi_inp_trans_ok_def:
- (bsi_inp_trans_ok out tmpnum (ArrayInp inps) ⇔ EVERY (bsi_cell_input_ok out tmpnum) inps) ∧
- (bsi_inp_trans_ok out tmpnum (BoolInp inp) ⇔ bsi_cell_input_ok out tmpnum inp)
-End
+Theorem blast_rel_cset_var_cset_var_bool:
+ ∀fext si max s bs out b regs processed tmpnum.
+ blast_rel fext si max s bs ∧
+ blasterstate_ok regs si processed max tmpnum ∧
+ processed ≤ out ∧ out < max ⇒
+ blast_rel fext si max (cset_var s (NetVar out) (CBool b)) (cset_var bs (NetVar out) (CBool b))
+Proof
+ simp [blast_rel_def, blasterstate_ok_def, cget_var_cset_var] \\ rpt strip_tac \\ rw [] \\ rpt TOP_CASE_TAC
+ >- simp [blast_rel_bool_def, cget_var_cset_var]
+ >- (rpt drule_first \\ gs [blast_rel_bool_def, cget_var_cset_var] \\ TOP_CASE_TAC \\
+     rpt drule_first \\ fs [blast_cell_input_marked_ok_def] \\
+     drule_strip blast_cell_input_ok_cell_inp_run_cset_var \\ simp [])
+ >- (rpt drule_first \\ gs [blast_rel_array_def, cget_var_cset_var] \\ rpt strip_tac \\ TOP_CASE_TAC \\
+     rpt drule_first \\ gs [EVERY_EL] \\ rpt drule_first \\ gs [blast_cell_input_marked_ok_def] \\
+     drule_strip blast_cell_input_ok_cell_inp_run_cset_var \\ simp [])
+QED
+
+Theorem blast_rel_blast_reg_rel_fext_array:
+ ∀var fext si tmpnum s bs b out.
+ blast_rel fext si tmpnum s bs ∧
+ blast_reg_rel_fext fext si s bs ∧
+ cget_var s var = INR (CArray b) ∧
+ var_lt var out ∧
+ out ≤ tmpnum ⇒
+ ∃minps. lookup var_cmp var si = SOME (MArrayInp minps) ∧ LENGTH minps = LENGTH b ∧
+         ∀i. i < LENGTH minps ⇒
+             case EL i minps of
+               GoodInp inp => cell_inp_run fext bs inp = INR (CBool (EL i b))
+             | BadInp _ _ => T
+Proof
+ Cases \\ rpt strip_tac'
+ >- (fs [blast_reg_rel_fext_def, blast_rel_array_def] \\ first_x_assum (qspecl_then [‘s’, ‘n’] mp_tac) \\ simp [])
+ \\ fs [blast_rel_def, var_lt_def] \\ first_x_assum (qspec_then ‘n’ mp_tac) \\ simp [blast_rel_array_def]
+QED
 
 Theorem blast_cell_correct:
- !cell blast_s blast_s' nl tmpnum.
- blast_cell blast_s cell = (blast_s', nl) /\
+ !cell blast_s blast_s' nl globalmax.
+ blast_cell blast_s cell = INR (blast_s', nl) /\
 
  deterministic_cell cell /\
- cell_ok 0 tmpnum cell /\
+ cell_ok (HD (cell_output cell)) (LAST (cell_output cell) + 1) cell /\
  cell_covered_by_extenv blast_s.extenv cell /\
 
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum ==>
+ (* from si_NetVar_inv: *)
+ (*(∀out. MEM out (cell_output cell) ⇒ si_cell_out_inv out globalmax blast_s.si) ∧*)
+ 
+ blasterstate_ok regs blast_s.si (HD (cell_output cell)) globalmax blast_s.tmpnum ∧
+ LAST (cell_output cell) < globalmax ==>
  blast_s'.extenv = blast_s.extenv /\
- blasterstate_ok blast_s'.si tmpnum blast_s'.tmpnum /\
+ blast_s.tmpnum ≤ blast_s'.tmpnum /\
+ blasterstate_ok regs blast_s'.si (LAST (cell_output cell) + 1) globalmax blast_s'.tmpnum /\
  deterministic_netlist nl ∧
+ EVERY (λc. blast_cell_output_ok c (HD (cell_output cell)) globalmax blast_s.tmpnum) nl ∧
 
- ((!var inp out. lookup var_cmp var blast_s.si = SOME inp ∧ MEM out (cell_output cell) ==>
-                 bsi_inp_trans_ok out tmpnum inp) ==>
-  (!var inp out. lookup var_cmp var blast_s'.si = SOME inp ∧ MEM out (cell_output cell) ==>
-                 bsi_inp_trans_ok out tmpnum inp)) ∧
+ (* LAST makes sense here since the outputs are ordered *)
+ (*(si_cell_out_inv (LAST (cell_output cell) + 1) globalmax blast_s'.si) ∧*)
+
  (!reg i. lookup var_cmp (RegVar reg i) blast_s'.si = lookup var_cmp (RegVar reg i) blast_s.si) /\
- (!n. ~MEM n (cell_output cell) ==> lookup var_cmp (NetVar n) blast_s'.si = lookup var_cmp (NetVar n) blast_s.si) /\
+ (*(!n. ~MEM n (cell_output cell) ==> lookup var_cmp (NetVar n) blast_s'.si = lookup var_cmp (NetVar n) blast_s.si) /\*)
 
  (!fext s s' bs.
   cell_run fext s cell = INR s' /\ rtltype_extenv_n blast_s.extenv fext /\ 
-  blast_rel fext blast_s.si tmpnum s bs /\
-  (∀out. MEM out (cell_output cell) ⇒ lookup var_cmp (NetVar out) blast_s.si = NONE) /\
-  (!var inps out. lookup var_cmp var blast_s.si = SOME (ArrayInp inps) ∧ MEM out (cell_output cell) ==>
-                  EVERY (bsi_cell_input_ok out tmpnum) inps) ∧
-  (!var inp out. lookup var_cmp var blast_s.si = SOME (BoolInp inp) ∧ MEM out (cell_output cell) ==>
-                 bsi_cell_input_ok out tmpnum inp) ==>
-  ?bs'. sum_foldM (cell_run fext) bs nl = INR bs' /\ blast_rel fext blast_s'.si tmpnum s' bs')
+  blast_rel fext blast_s.si globalmax s bs /\ blast_reg_rel_fext fext blast_s.si s bs ==>
+  ?bs'. sum_foldM (cell_run fext) bs nl = INR bs' /\
+        blast_rel fext blast_s'.si globalmax s' bs'
+        (* probably need this as well now: blast_reg_rel_fext fext blast_s'.si s' bs'*))
 Proof
  Cases \\ rewrite_tac [deterministic_cell_def, cell_ok_def, cell_covered_by_extenv_def]
 
  >- (* Cell1 *)
  (rename1 `Cell1 t out in1` \\ Cases_on `t` \\
- simp [blast_cell_def, blast_cell_bitwise_def] \\ rpt gen_tac \\ TOP_CASE_TAC \\ rpt strip_tac' \\ rveq
+ simp [blast_cell_def, blast_cell_bitwise_def, sum_bind_INR, cell_output_def, cell_output_ok_def] \\ rpt strip_tac' \\
+ FULL_CASE_TAC
 
- >- (simp [deterministic_netlist_def, deterministic_cell_def] \\ rpt strip_tac' \\
-    fs [sum_foldM_def, cell_run_def, sum_bind_INR, cell_output_ok_def, cell_output_def] \\
-    drule_strip blast_cell_inp_run_correct_bool \\ simp [] \\
-    strip_tac \\ fs [cell1_run_def] \\ rveq \\
-    drule_strip blast_rel_cset_var_cset_var_bool \\ simp []) \\
+ >- (gvs [deterministic_netlist_def, deterministic_cell_def,
+          cell_run_def, sum_foldM_def, sum_bind_INR] \\
+     rpt strip_tac
+     >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp [])
+     >- simp [blast_cell_output_ok_def, cell_output_def] \\
+     drule_strip blast_cell_inp_run_correct_bool \\ impl_tac >- simp [] \\ strip_tac \\
+     gvs [cell1_run_def] \\ match_mp_tac blast_rel_cset_var_cset_var_bool \\ rpt asm_exists_tac \\ simp []) \\
 
- fs [blaster_new_names_def] \\ rveq \\ simp [] \\
- rpt conj_tac \\ rpt strip_tac
- >- simp [blasterstate_ok_insert]
+ gvs [blaster_new_names_def] \\ rpt conj_tac \\ rpt strip_tac
+ >- (match_mp_tac blasterstate_ok_insert_cell1 \\ rpt asm_exists_tac \\ fs [cell_output_ok_def])
  >- simp [deterministic_netlist_def, EVERY_EL, deterministic_cell_def]
- >- (rfs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_ok_def, cell_output_def] \\ every_case_tac
-     >- rw [EVERY_GENLIST, bsi_inp_trans_ok_def, bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def, var_lt_def, var_ge_def]
-     >- metis_tac [])
- >- (fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_def])
- >- (fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_def]) \\
+ >- simp [EVERY_MAPi, EVERYi_EL, blast_cell_output_ok_def, cell_output_def]
+ >- fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_def] \\
 
  fs [cell_run_def, sum_bind_INR, cell_output_ok_def, cell_output_def] \\
-
- drule_strip blast_cell_inp_run_correct_array \\ simp [] \\ strip_tac \\
+ drule_strip blast_cell_inp_run_correct_array \\ impl_tac >- simp [] \\ strip_tac \\
  fs [cell1_run_def] \\ rveq \\
- drule_strip blast_cell_input_SOME \\
+ drule_strip blast_cell_input_cell_input_lt_array \\
  drule_strip cell1_bitwise_correct \\
- fs [blast_rel_def, cset_var_fbits, cget_var_cset_var] \\ rpt strip_tac \\
- IF_CASES_TAC >- fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_inp_run_def, EL_MAP] \\
+ fs [blast_rel_def, cget_var_cset_var] \\ rpt strip_tac \\
+ IF_CASES_TAC >- fs [blast_rel_array_def, blasterstate_ok_def, lookup_insert_var_cmp, cell_inp_run_def, EL_MAP] \\
 
- fs [blasterstate_ok_def, lookup_insert_var_cmp] \\
- drule_first \\ pop_assum mp_tac \\ rpt TOP_CASE_TAC
- >- (first_assum (qspec_then `VarInp var NONE` mp_tac) \\
-    impl_tac >- (simp [cell_input_lt_def] \\ match_mp_tac var_lt_le \\
-                asm_exists_tac \\ simp []) \\
-    rpt strip_tac \\ fs [cell_inp_run_def, sum_bind_def, sum_bind_INR, cget_fext_var_def] \\
-    rpt drule_first \\ simp []) \\
+ fs [blasterstate_ok_def] \\ drule_first \\ rpt TOP_CASE_TAC
 
- strip_tac \\ rw [] \\
- first_x_assum (qspec_then `i` mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
- first_x_assum (qspec_then `EL i inps` mp_tac) \\
- impl_tac >- (drule_first \\ fs [EVERY_EL] \\
-              first_x_assum (qspec_then `i` mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
-              first_x_assum irule \\ simp [] \\ asm_exists_tac) \\
- simp [cell_inp_run_def])
+ >- (fs [blast_rel_bool_def]
+     >- (simp [lookup_insert_var_cmp] \\ first_x_assum (qspec_then ‘VarInp (NetVar n) NoIndexing’ mp_tac) \\
+         simp [cell_inp_run_def, cell_input_lt_def, var_lt_def])
+     >- (simp [lookup_insert_var_cmp] \\ TOP_CASE_TAC \\ fs [] \\ rpt drule_first \\
+         fs [blast_cell_input_marked_ok_def] \\
+         drule_strip blast_cell_input_ok_cell_input_lt \\ simp[]))
+ \\ fs [blast_rel_array_def, lookup_insert_var_cmp] \\ rpt strip_tac \\ TOP_CASE_TAC \\
+    first_x_assum (qspec_then ‘i’ mp_tac) \\ simp [] \\ rpt drule_first \\ fs [EVERY_EL] \\
+    first_x_assum (qspec_then ‘i’ mp_tac) \\ simp [blast_cell_input_marked_ok_def] \\
+    strip_tac \\ drule_strip blast_cell_input_ok_cell_input_lt \\ simp [])
 
  >- (* Cell2 *)
  (rename1 `Cell2 t out in1 in2` \\ Cases_on `t`
 
- \\ (* CAnd and COr *)
- TRY (simp [blast_cell_def, blast_cell_bitwise_def] \\ rpt gen_tac \\ rpt TOP_CASE_TAC \\ rpt strip_tac' \\ rveq
+ THEN2 (* CAnd and COr *) (
+ simp [blast_cell_def, sum_bind_INR, blast_cell_bitwise_def] \\ rpt strip_tac' \\
+ every_case_tac
  >- (* bool, bool *)
- (simp [deterministic_netlist_def, deterministic_cell_def] \\
-  simp [sum_foldM_def, cell_run_def, sum_bind_INR, cell_output_ok_def, cell_output_def] \\ rpt strip_tac' \\
-  qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-  qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-  fs [cell_output_ok_def] \\ rpt strip_tac' \\ fs [cell2_run_def] \\ rveq \\
+ (gvs [deterministic_netlist_def, deterministic_cell_def,
+       cell_output_ok_def, blast_cell_output_ok_def, cell_output_def] \\
+  conj_tac >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp []) \\
+  simp [sum_foldM_def, cell_run_def, sum_bind_INR] \\ rpt strip_tac' \\
+  qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\ impl_tac >- simp [] \\ strip_tac \\
+  qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\ impl_tac >- simp [] \\ strip_tac \\
+  fs [cell2_run_def] \\ 
   drule_strip blast_rel_cset_var_cset_var_bool \\ simp [])
 
  \\ (* non bool *)
- simp [deterministic_netlist_def, deterministic_cell_def] \\
- simp [sum_foldM_def, cell_run_def, sum_bind_INR, cell_output_def] \\ rpt strip_tac' \\
- drule_strip blast_cell_inp_run_correct_array \\ fs [cell_output_ok_def] \\ strip_tac \\
+ gvs [deterministic_netlist_def, deterministic_cell_def, cell_output_ok_def] \\
+ (conj_tac >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp [])) \\
+ simp [sum_foldM_def, cell_run_def, sum_bind_INR] \\ rpt strip_tac' \\
+ drule_strip blast_cell_inp_run_correct_array \\ (impl_tac >- simp []) \\ strip_tac \\
  fs [cell2_run_bad_types])
 
  >- (* Equal *)
- (simp [blast_cell_def, blast_cell_equal_def] \\ rpt gen_tac \\ every_case_tac \\ rpt strip_tac' \\ rveq
+ (simp [blast_cell_def, blast_cell_equal_def, sum_bind_INR, cell_output_def, cell_output_ok_def] \\ rpt strip_tac' \\
+  every_case_tac \\ gvs []
  >- (* bool, bool *)
- (simp [deterministic_netlist_def, deterministic_cell_def, sum_foldM_def, cell_run_def, sum_bind_INR] \\
+ (simp [deterministic_netlist_def, deterministic_cell_def,
+        blast_cell_output_ok_def, cell_output_def,
+        sum_foldM_def, cell_run_def, sum_bind_INR] \\
+  conj_tac >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp []) \\
   rpt strip_tac' \\
   qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
   qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-  fs [cell_output_ok_def] \\ rpt strip_tac \\ rveq \\
-  fs [cell_output_def, cell2_run_def] \\ rveq \\
+  simp [] \\ rpt strip_tac \\
+  fs [cell2_run_def] \\
   drule_strip blast_rel_cset_var_cset_var_bool \\ simp [])
 
- >- (* bool, array *)
- (rw [sum_foldM_def, cell_run_def, sum_bind_INR, deterministic_netlist_def] \\
- drule_strip blast_cell_inp_run_correct_bool \\ drule_strip blast_cell_inp_run_correct_array \\
- fs [cell_output_ok_def] \\ rpt strip_tac \\ rveq \\ fs [cell2_run_def])
-
- >- (* array, bool (same as bool, array case) *)
- (rw [sum_foldM_def, cell_run_def, sum_bind_INR, deterministic_netlist_def] \\
- drule_strip blast_cell_inp_run_correct_bool \\ drule_strip blast_cell_inp_run_correct_array \\
- fs [cell_output_ok_def] \\ rpt strip_tac \\ rveq \\ fs [cell2_run_def])
+ THEN2 (* bool, array and array, bool*)
+ (rw [sum_foldM_def, cell_run_def, sum_bind_INR, deterministic_netlist_def]
+  >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp []) \\
+  drule_strip blast_cell_inp_run_correct_bool \\ drule_strip blast_cell_inp_run_correct_array \\
+  simp [] \\ rpt strip_tac \\ fs [cell2_run_def])
 
  >- (* array, array *)
- (pairarg_tac \\ drule_strip blast_cell_equalarray_correct_static \\
-  disch_then (qspec_then ‘blast_s.tmpnum’ mp_tac) \\ impl_tac >- simp [cell_input_lt_def, cell_input_ge_def] \\
-  strip_tac \\ fs [] \\ rveq \\ simp [] \\ rpt conj_tac
- >- (fs [blasterstate_ok_def, insert_thm_var_cmp, lookup_insert_var_cmp] \\ rw [] \\ simp []
-     >- (drule_first \\ match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
-     \\ drule_first \\ match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp [])
- >- (fs [cell_output_def, blasterstate_ok_def, lookup_insert_var_cmp] \\ strip_tac \\ rw []
-     >- (simp [bsi_inp_trans_ok_def, bsi_cell_input_ok_def] \\ disj2_tac \\
-         match_mp_tac cell_input_ge_le \\ asm_exists_tac \\ simp [])
-     >- drule_first)
- >- fs [blasterstate_ok_def, lookup_insert_var_cmp]
- >- fs [cell_output_def, blasterstate_ok_def, lookup_insert_var_cmp] \\
+ (pairarg_tac \\ gvs [] \\
+
+  qspec_then ‘in1’ assume_tac blast_cell_input_cell_input_marked_ok \\ drule_first \\
+  impl_tac >- fs [blasterstate_ok_def] \\ strip_tac \\
+  qspec_then ‘in2’ assume_tac blast_cell_input_cell_input_marked_ok \\ drule_first \\
+  impl_tac >- fs [blasterstate_ok_def] \\ strip_tac \\
+  
+  fs [] \\
+  drule_strip blast_cell_equalarray_correct_static \\
+  disch_then (qspecl_then [‘blast_s.tmpnum’, ‘regs’] mp_tac) \\
+  impl_tac >- simp [cell_input_lt_def, cell_input_ge_def, cell_input_not_pseudo_def] \\ strip_tac \\
+  drule_first \\
+
+  simp [] \\ rpt conj_tac
+  >- (match_mp_tac blasterstate_ok_insert \\ asm_exists_tac \\
+      fs [cell_output_ok_def, blast_cell_input_marked_ok_def, blast_cell_input_ok_alt,
+          cell_input_marked_not_pseudo_def] \\
+      rpt TOP_CASE_TAC \\ fs [cell_input_lt_def, var_lt_def, cell_input_ge_def, blasterstate_ok_def])
+  >- fs [blasterstate_ok_def, lookup_insert_var_cmp] \\
 
  simp [cell_run_def, sum_bind_INR] \\ rpt strip_tac \\
  qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
  qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
  fs [cell_output_ok_def] \\ rpt strip_tac \\ rveq \\
- qspec_then ‘in1’ assume_tac blast_cell_input_SOME \\ drule_first \\
- qspec_then ‘in2’ assume_tac blast_cell_input_SOME \\ drule_first \\
+
  fs [cell2_run_def, sum_bind_INR, sum_check_INR] \\ rveq \\
+
+ (* a little hack so we don't have to touch the proof: *)
+ imp_res_tac EVERY_blast_cell_input_ok_cell_input_lt \\
+
  drule_strip blast_cell_equalarray_correct \\ simp [cell_input_lt_def, cell_inp_run_def] \\
  disch_then (qspecl_then [‘b'’, ‘b’, ‘fext’, ‘bs’] mp_tac) \\ impl_tac >- simp [LIST_REL_EL_EQN] \\ strip_tac \\
  fs [blast_rel_def, cset_var_fbits, cget_var_cset_var] \\
  conj_tac >- (drule_strip run_cells_deterministic_netlist \\ simp []) \\
  rpt strip_tac \\ drule_first \\ rw []
- >- (fs [blasterstate_ok_def, lookup_insert_var_cmp] \\ reverse eq_tac >- metis_tac [] \\
+ >- (fs [blast_rel_bool_def, blasterstate_ok_def, lookup_insert_var_cmp] \\
+     reverse eq_tac >- metis_tac [] \\
      strip_tac \\ rewrite_tac [GSYM LIST_REL_eq, LIST_REL_EL_EQN] \\ rw [])
  \\ rpt TOP_CASE_TAC
- >- (fs [blasterstate_ok_def, lookup_insert_var_cmp]
-     >- (first_x_assum (qspec_then ‘VarInp var NONE’ mp_tac) \\
-         simp [cell_input_lt_def, cell_inp_run_def] \\
-         impl_tac >- (match_mp_tac var_lt_le \\ asm_exists_tac \\ simp []) \\ simp [])
-     >- (drule_last \\ first_x_assum (qspec_then ‘inp’ mp_tac) \\
-         impl_tac >- (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp []) \\ simp []))
- >- (fs [blasterstate_ok_def, lookup_insert_var_cmp] \\
-     drule_last \\ fs [EVERY_EL])))
+ >- (fs [blast_rel_bool_def, blasterstate_ok_def, lookup_insert_var_cmp]
+     >- (first_x_assum (qspec_then ‘VarInp (NetVar n) NoIndexing’ mp_tac) \\
+         simp [cell_input_lt_def, var_lt_def, cell_inp_run_def])
+     >- (TOP_CASE_TAC \\ drule_last \\ first_x_assum (qspec_then ‘c’ mp_tac) \\
+         impl_tac >- (fs [blast_cell_input_marked_ok_def] \\
+                      match_mp_tac blast_cell_input_ok_cell_input_lt \\ asm_exists_tac) \\ fs []))
+ >- (fs [blast_rel_array_def, blasterstate_ok_def, lookup_insert_var_cmp] \\
+     drule_last \\ rpt strip_tac \\ TOP_CASE_TAC \\ gs [EVERY_EL] \\ ntac 2 drule_first \\
+     gs [blast_cell_input_marked_ok_def] \\ drule_strip blast_cell_input_ok_cell_input_lt \\
+     drule_first \\ simp [])))
 
  >- (* CAdd case *)
- (simp [blast_cell_def] \\ rpt gen_tac \\ every_case_tac \\ rpt strip_tac' \\ rveq \\
+ (simp [blast_cell_def, blast_cell_add_def, CaseEq"inp_trans", sum_bind_INR, cell_output_def] \\
+  rpt strip_tac' \\ rveq \\
 
- TRY (rw [sum_foldM_def, cell_run_def, sum_bind_INR, deterministic_netlist_def] \\
-      drule_strip blast_cell_inp_run_correct_bool \\ fs [cell_output_ok_def] \\ strip_tac \\
+ TRY (rw [sum_foldM_def, cell_run_def, sum_bind_INR, deterministic_netlist_def]
+      >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp []) \\
+      drule_strip blast_cell_inp_run_correct_bool \\ impl_tac >- simp [] \\ strip_tac \\
       fs [cell2_run_bad_types] \\ NO_TAC) \\
 
- simp [cell_output_def] \\ pairarg_tac \\ fs [] \\ rveq \\ simp [] \\
- qspecl_then [‘LENGTH l'’, ‘4’] mp_tac arithmeticTheory.DA \\ impl_tac >- simp [] \\ strip_tac \\
- qspec_then ‘in1’ assume_tac blast_cell_input_SOME \\ drule_first \\
- qspec_then ‘in2’ assume_tac blast_cell_input_SOME \\ drule_first \\
- drule_strip blast_cell_add_correct_static_part \\
- rewrite_tac [LENGTH_REVERSE, cell_input_lt_def, EVERY_REVERSE] \\
- disch_then drule_strip \\
+ pairarg_tac \\ gvs [] \\
+ qspecl_then [‘LENGTH inps1’, ‘4’] mp_tac arithmeticTheory.DA \\ impl_tac >- simp [] \\ strip_tac \\
 
- rpt conj_tac
- >- (fs [blasterstate_ok_def, insert_thm_var_cmp, lookup_insert_var_cmp] \\ rw [] \\ simp [] \\ drule_first
-     >- (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
-     \\ irule EVERY_cell_input_lt_le \\ asm_exists_any_tac \\ simp [])
- >- simp []
- >- (fs [blasterstate_ok_def, lookup_insert_var_cmp] \\ strip_tac \\ rpt gen_tac \\ IF_CASES_TAC
-     >- (rw [] \\ simp [bsi_inp_trans_ok_def] \\
-         irule EVERY_MONOTONIC \\ qpat_x_assum ‘EVERY _ inps’ kall_tac \\ asm_exists_any_tac \\
-         rw [bsi_cell_input_ok_def] \\ disj2_tac \\ match_mp_tac cell_input_ge_le \\ asm_exists_tac \\ simp [])
-     >- (rw [] \\ drule_first))
- >- fs [blasterstate_ok_def, lookup_insert_var_cmp]
+ qspec_then ‘in1’ assume_tac blast_cell_input_cell_input_marked_ok \\ drule_first \\
+ impl_tac >- fs [blasterstate_ok_def] \\ disch_then (assume_tac o SIMP_RULE (srw_ss()) []) \\
+ drule_strip EVERY_blast_cell_input_ok_cell_input_lt \\
+  
+ qspec_then ‘in2’ assume_tac blast_cell_input_cell_input_marked_ok \\ drule_first \\
+ impl_tac >- fs [blasterstate_ok_def] \\ disch_then (assume_tac o SIMP_RULE (srw_ss()) []) \\
+ drule_strip EVERY_blast_cell_input_ok_cell_input_lt \\
+
+ drule_strip blast_cell_addarray_correct_static_part \\
+ rewrite_tac [LENGTH_REVERSE, cell_input_lt_def, EVERY_REVERSE] \\
+ disch_then drule_strip \\ pop_assum (qspec_then ‘regs’ strip_assume_tac) \\
+
+ rw []
+ >- (match_mp_tac blasterstate_ok_insert \\ asm_exists_tac \\
+     rw [EVERY_MAP, blast_cell_input_marked_ok_def, cell_input_marked_not_pseudo_def] \\
+     fs [EVERY_MEM] \\ rpt strip_tac \\ rpt drule_first \\
+     rw [blast_cell_input_ok_alt] \\ rpt TOP_CASE_TAC \\
+     fs [cell_input_lt_def, var_lt_def, cell_input_ge_def, blasterstate_ok_def])
  >- fs [blasterstate_ok_def, lookup_insert_var_cmp] \\
 
  rpt strip_tac' \\ fs [cell_run_def, sum_bind_INR] \\
- drule_strip blast_cell_inp_run_correct_array \\
+ qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
  qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
- rpt (impl_tac >- fs [cell_output_ok_def] \\ strip_tac) \\ rveq \\
- fs [cell2_run_def, sum_bind_INR, sum_check_INR] \\ rveq \\
- drule_strip inps2n_v2n_lem \\ qspec_then ‘l’ assume_tac inps2n_v2n_lem \\ drule_first \\
- qspecl_then [‘fext’, ‘bs’] assume_tac inps2n_F \\
- rfs [] \\ drule_strip blast_cell_add_correct \\
+ rpt (impl_tac >- simp [] \\ strip_tac) \\ rveq \\
+
+ fs [cell2_run_def, sum_bind_INR, sum_check_INR] \\
+ drule_strip inps2n_v2n_lem \\ qspec_then ‘inps2’ assume_tac inps2n_v2n_lem \\ drule_first \\
+ qspecl_then [‘fext’, ‘bs’] assume_tac inps2n_F \\ gs [] \\
+
+ drule_strip blast_cell_addarray_correct \\
  rewrite_tac [REVERSE_REVERSE, EVERY_REVERSE, LENGTH_REVERSE, cell_input_lt_def] \\
  disch_then drule_strip \\ simp [] \\
 
  fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var] \\ rpt strip_tac \\ IF_CASES_TAC
 
- >- (rw [lookup_insert_var_cmp] \\
+ >- (rw [lookup_insert_var_cmp, blast_rel_array_def, EL_MAP] \\
     qspec_then ‘outs’ assume_tac el_inps2n_lem \\ drule_first \\ disch_then (qspec_then ‘i’ mp_tac) \\
     simp [] \\ strip_tac \\
     drule_strip inps2n_lt \\ qspec_then ‘outs’ assume_tac inps2n_lt \\ drule_first \\ fs [] \\
     drule_strip fixwidth_sum_2pow \\ rfs [])
 
- \\ fs [lookup_insert_var_cmp] \\ drule_first \\ rpt TOP_CASE_TAC
- >- (fs []
-     >- (drule var_lt_le \\ disch_then (qspec_then ‘blast_s.tmpnum’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
-         drule_first \\ fs [])
-     \\ metis_tac [cell_inp_run_cong_lt])
+ \\ fs [] \\ drule_first \\ rpt TOP_CASE_TAC
+ >- (fs [blast_rel_bool_def, lookup_insert_var_cmp]
+     >- (first_x_assum (qspec_then ‘NetVar n’ mp_tac) \\ simp [var_lt_def])
+     \\ TOP_CASE_TAC \\ drule_last \\ fs [blast_cell_input_marked_ok_def] \\
+        drule_strip blast_cell_input_ok_cell_input_lt \\
+        metis_tac [cell_inp_run_cong_lt])
 
- >- (fs [] \\ rpt strip_tac \\ first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
-     rpt drule_first \\ fs [EVERY_EL] \\
+ >- (fs [blast_rel_array_def, lookup_insert_var_cmp] \\
+     rpt strip_tac \\ first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
+     drule_last \\ fs [EVERY_EL] \\
      first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
+     TOP_CASE_TAC \\
+     gs [blast_cell_input_marked_ok_def] \\
+     drule_strip blast_cell_input_ok_cell_input_lt \\
      drule_strip cell_inp_run_lt_cget_var_cong \\ simp [])))
 
  >- (* CellMux *)
  (rename1 ‘CellMux out in1 in2 in3’ \\
-  simp [blast_cell_def, cell_output_def] \\ rpt gen_tac \\ reverse TOP_CASE_TAC
-  >- (rpt strip_tac' \\ rveq \\ simp [deterministic_netlist_def, cell_run_def, sum_bind_INR] \\ rpt strip_tac' \\
+  rpt gen_tac \\ simp [blast_cell_def, sum_bind_INR, cell_output_def] \\
+  strip_tac \\ reverse (fs [CaseEq"inp_trans"])
+  >- (rveq \\ conj_tac >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp []) \\
+      simp [deterministic_netlist_def, cell_run_def, sum_bind_INR] \\ rpt strip_tac' \\
       drule_strip blast_cell_inp_run_correct_array \\ fs [cell_output_ok_def] \\ strip_tac \\ fs [cellMux_run_def]) \\
-  rpt TOP_CASE_TAC \\ rpt strip_tac' \\ rveq \\
-  simp [deterministic_netlist_def, deterministic_cell_def, sum_foldM_def, cell_run_def, sum_bind_INR] \\
-  rpt strip_tac' \\ qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-  fs [cell_output_ok_def] \\ strip_tac
+  
+  gvs [blaster_new_names_def]
 
-  >- (* bool, bool *)
-  (qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-   qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-   simp [] \\ rpt strip_tac \\ fs [cellMux_run_def] \\
-   drule_strip blast_rel_cset_var_cset_var_bool \\ simp [])
+  >- (* array, array *)
+  (rpt conj_tac
+   >- (match_mp_tac blasterstate_ok_insert_cell1 \\ asm_exists_tac \\ simp [])
+   >- simp [deterministic_netlist_def, EVERY_EL, indexedListsTheory.EL_MAP2i, deterministic_cell_def]
+   >- simp [EVERY_EL, indexedListsTheory.EL_MAP2i, blast_cell_output_ok_def, cell_output_def]
+   >- fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_def] \\
 
-  >- (* bool, array *)
-  (qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-   qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
-   simp [] \\ rpt strip_tac \\ fs [cellMux_run_def])
+  simp [sum_foldM_def, cell_run_def, sum_bind_INR] \\ rpt strip_tac' \\
+
+  qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
+  qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
+  qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
+  simp [] \\ rpt strip_tac \\ fs [cellMux_run_def, sum_bind_INR, sum_check_INR] \\ rveq \\
+
+  drule_strip blast_cell_input_cell_input_lt_bool \\ impl_tac >- fs [blasterstate_ok_def] \\ strip_tac \\
+  qspec_then ‘in2’ assume_tac blast_cell_input_cell_input_lt_array \\ drule_first \\
+  qspec_then ‘in3’ assume_tac blast_cell_input_cell_input_lt_array \\ drule_first \\
+
+  qspecl_then [‘inps1’, ‘inps2’] assume_tac blast_cellMux_correct \\ drule_first \\ simp [] \\
+
+  fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var] \\ rpt strip_tac \\
+  IF_CASES_TAC >- (fs [blast_rel_bool_def, blast_rel_array_def, lookup_insert_var_cmp] \\ rw []) \\
+
+  drule_last \\ rpt TOP_CASE_TAC
+  >- (fs [blast_rel_bool_def, lookup_insert_var_cmp]
+      >- (first_assum (qspec_then `VarInp (NetVar n) NoIndexing` mp_tac) \\ 
+          impl_tac >- simp [cell_input_lt_def, var_lt_def] \\ strip_tac \\
+          fs [cell_inp_run_def])
+      >- (TOP_CASE_TAC \\ drule_last \\ fs [blast_cell_input_marked_ok_def] \\
+          drule_strip blast_cell_input_ok_cell_input_lt \\
+          drule_first \\ fs [])) \\
+
+  fs [blast_rel_array_def, lookup_insert_var_cmp, EVERY_EL] \\
+  rpt strip_tac \\ TOP_CASE_TAC \\ gs [] \\ drule_first \\ gs [] \\
+  drule_last \\ disch_then (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\
+  simp [blast_cell_input_marked_ok_def] \\ strip_tac \\
+  drule_strip blast_cell_input_ok_cell_input_lt \\
+  drule_first \\ fs []) \\
+
+  (rpt conj_tac
+   >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp [])
+   >- simp [deterministic_netlist_def, deterministic_cell_def]
+   \\ simp [blast_cell_output_ok_def, cell_output_def]) \\
+
+  simp [cell_run_def, sum_bind_INR, sum_foldM_def] \\ rpt strip_tac' \\
+  rev_drule_strip blast_cell_inp_run_correct_bool \\ (impl_tac >- simp []) \\ strip_tac
 
   >- (* array, bool *)
   (qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
    qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
    simp [] \\ rpt strip_tac \\ fs [cellMux_run_def])
 
-  \\ (* array, array *)
-  fs [blaster_new_names_def] \\ rveq \\ simp [] \\ rpt strip_tac
-  >- (match_mp_tac blasterstate_ok_insert \\ simp [])
-  >- simp [EVERY_EL, indexedListsTheory.EL_MAP2i, deterministic_cell_def]
-  >- (rfs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_ok_def, cell_output_def] \\ every_case_tac
-     >- rw [EVERY_GENLIST, bsi_inp_trans_ok_def, bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def, var_lt_def, var_ge_def]
-     >- metis_tac [])
-  >- (fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_def])
-  >- (fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_def]) \\
+  >- (* bool, array *)
+  (qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
+   qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
+   simp [] \\ rpt strip_tac \\ fs [cellMux_run_def])
 
-  drule_first \\
-  qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
-  qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
-  simp [] \\ rpt strip_tac \\ fs [cellMux_run_def, sum_bind_INR, sum_check_INR] \\ rveq \\
-
-  drule_strip blast_cell_input_SOME_bool \\
-  impl_tac >- (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ fs [blasterstate_ok_def]) \\ strip_tac \\
-  qspec_then ‘in2’ assume_tac blast_cell_input_SOME \\ drule_first \\
-  qspec_then ‘in3’ assume_tac blast_cell_input_SOME \\ drule_first \\
-  qspecl_then [‘l’, ‘l'’] assume_tac blast_cellMux_correct \\ drule_first \\ simp [] \\
-
-  fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var, lookup_insert_var_cmp] \\ rpt strip_tac \\
-  IF_CASES_TAC >- rw [] \\
-
-  drule_last \\ rpt TOP_CASE_TAC \\ fs []
-  >- (first_assum (qspec_then `VarInp var NONE` mp_tac) \\ 
-      impl_tac >- (simp [cell_input_lt_def] \\ match_mp_tac var_lt_le \\ asm_exists_tac \\ simp []) \\
-      simp [cell_inp_run_def])
-
-  \\ fs [EVERY_EL] \\ metis_tac [])
+  >- (* bool, bool *)
+  (qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
+   qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
+   simp [] \\ rpt strip_tac \\ fs [cellMux_run_def] \\
+   drule_strip blast_rel_cset_var_cset_var_bool \\ simp []))
 
  \\ (* CellArrayWrite *)
  rename1 ‘CellArrayWrite out arr idx e’ \\
  simp [blast_cell_def, cell_output_ok_def, cell_output_def] \\
- rpt gen_tac \\ TOP_CASE_TAC
- >- (* bool as array *)
- (rw [cell_run_def, sum_bind_INR, deterministic_netlist_def] \\ simp [] \\
- Cases_on ‘in1’ \\ Cases_on ‘in2’ \\ fs [cellArrayWrite_run_def] \\ rveq \\
- drule_strip blast_cell_inp_run_correct_bool \\ simp [])
+ rpt gen_tac \\ ntac 2 TOP_CASE_TAC \\ simp [sum_bind_INR] \\ ntac 2 TOP_CASE_TAC \\
+ rpt strip_tac' \\ gvs [CaseEq"inp_trans"] \\
 
- \\ TOP_CASE_TAC \\ rpt strip_tac' \\ rveq
- >- (* array *)
- (simp [] \\ rpt strip_tac
- >- (fs [blasterstate_ok_def, insert_thm_var_cmp, lookup_insert_var_cmp] \\ conj_tac \\ rpt gen_tac \\
-     (reverse IF_CASES_TAC >- (rw [] \\ drule_first)) \\ rw []
-     >- (match_mp_tac IMP_EVERY_revLUPDATE \\ simp [] \\ conj_tac
-         >- (match_mp_tac blast_cell_input_bool_cell_input_lt \\ rpt asm_exists_tac \\ simp [] \\ conj_tac \\
-             first_x_assum MATCH_ACCEPT_TAC)
-         \\ (match_mp_tac blast_cell_input_array_cell_input_lt \\ rpt asm_exists_tac \\ simp [] \\
-             first_x_assum MATCH_ACCEPT_TAC))
-     \\ (match_mp_tac blast_cell_input_array_cell_input_lt \\ rpt asm_exists_tac \\ simp [] \\
-         first_x_assum MATCH_ACCEPT_TAC))
+ rpt strip_tac
+ >- (match_mp_tac blasterstate_ok_insert \\ asm_exists_tac \\ 
+     drule_strip blast_cell_input_not_pseudo \\ 
+     drule_strip blast_cell_input_cell_input_marked_ok \\ impl_tac >- fs [blasterstate_ok_def] \\
+     fs [blasterstate_ok_def, cell_output_ok_def] \\ rpt drule_first \\ rw []
+     >- (match_mp_tac EVERY_revLUPDATE_IMP \\ rw [blast_cell_input_marked_ok_def, cell_input_marked_not_pseudo_def]
+         >- (match_mp_tac blast_cell_input_ok_le \\ asm_exists_tac \\ simp [])
+         >- (match_mp_tac EVERY_blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []))
+     >- (match_mp_tac EVERY_revLUPDATE_IMP \\ simp [cell_input_marked_not_pseudo_def])
+     >- (match_mp_tac EVERY_blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []))
  >- simp [deterministic_netlist_def]
- >- (rfs [blasterstate_ok_def, lookup_insert_var_cmp] \\ 
-     pop_assum mp_tac \\ reverse IF_CASES_TAC >- metis_tac [] \\ rw [] \\ simp [bsi_inp_trans_ok_def]
-     >- (match_mp_tac IMP_EVERY_revLUPDATE \\
-         drule_strip blast_cell_input_bool_bsi_cell_input_ok \\
-         drule_strip blast_cell_input_array_bsi_cell_input_ok \\ metis_tac [bsi_inp_trans_ok_def])
-     \\ drule_strip blast_cell_input_array_bsi_cell_input_ok \\ metis_tac [bsi_inp_trans_ok_def])
- >- fs [blasterstate_ok_def, lookup_insert_var_cmp]
- >- fs [blasterstate_ok_def, lookup_insert_var_cmp]
+ >- fs [blasterstate_ok_def, lookup_insert_var_cmp] \\
 
- \\ fs [sum_foldM_def, cell_run_def, sum_bind_INR] \\ 
-    drule_strip blast_cell_inp_run_correct_array \\ drule_strip blast_cell_inp_run_correct_bool \\
-    simp [] \\ rpt strip_tac \\ rveq \\ fs [cellArrayWrite_run_def] \\ rveq \\
+ fs [sum_foldM_def, cell_run_def, sum_bind_INR] \\
+ drule_strip blast_cell_inp_run_correct_bool \\ impl_tac >- simp [] \\ strip_tac \\
+ Cases_on ‘in1’ \\ gvs [cellArrayWrite_run_def, cell_inp_run_def, cell_input_lt_def] \\
+ drule_strip blast_rel_blast_reg_rel_fext_array \\ impl_tac >- simp [] \\ strip_tac \\
 
-    fs [blast_rel_def, blasterstate_ok_def, lookup_insert_var_cmp, cset_var_fbits, cget_var_cset_var] \\
-    rpt strip_tac \\ reverse IF_CASES_TAC >- fs [] \\
-    rw [revLUPDATE_def, EL_LUPDATE] \\ rw [])
- 
- >- (* array as input *)
- (simp [cell_run_def, sum_bind_INR, deterministic_netlist_def] \\ rpt strip_tac \\
- Cases_on ‘in1’ \\ Cases_on ‘in2’ \\ fs [cellArrayWrite_run_def] \\ rveq \\
- drule_strip blast_cell_inp_run_correct_array \\ simp [])
-QED
-
-(* If we maintain this invariant we do not need to remove entries when "blasting" bools (i.e. doing nothing);
-   now also used for more purposes. *)
-val netlist_overlap_si_def = Define ‘
- netlist_overlap_si si tmpnum nl =
-  !n. MEM n (FLAT (MAP cell_output nl)) ==>
-      lookup var_cmp (NetVar n) si = NONE /\
-      (!var inps. lookup var_cmp var si = SOME (ArrayInp inps) ==> EVERY (bsi_cell_input_ok n tmpnum) inps) ∧
-      (!var inp. lookup var_cmp var si = SOME (BoolInp inp) ==> bsi_cell_input_ok n tmpnum inp)’;
-
-Triviality EVERY_bsi_cell_input_ok_out_le:
- !n m tmpnum inps. EVERY (bsi_cell_input_ok n tmpnum) inps /\ n <= m ==> EVERY (bsi_cell_input_ok m tmpnum) inps
-Proof
- rw [EVERY_MEM] \\ drule_first \\ fs [bsi_cell_input_ok_def] \\ metis_tac [cell_input_lt_le]
+ fs [blast_rel_def, blasterstate_ok_def, cget_var_cset_var] \\
+ rpt strip_tac \\ reverse IF_CASES_TAC >- fs [blast_rel_bool_def, blast_rel_array_def, lookup_insert_var_cmp] \\
+ rw [revLUPDATE_def, EL_LUPDATE, blast_rel_array_def, lookup_insert_var_cmp] \\ rw []
 QED
 
 Triviality sorted_append_snd_imp:
@@ -1637,82 +1952,748 @@ Proof
  Induct \\ fs [sortingTheory.SORTED_EQ] \\ metis_tac []
 QED
 
+Triviality sorted_all_distinct_lt:
+ !(l:num list). SORTED ($<) l ==> ALL_DISTINCT l
+Proof
+ rpt strip_tac' \\ irule sortingTheory.SORTED_ALL_DISTINCT \\ asm_exists_any_tac \\ 
+ rw [relationTheory.irreflexive_def]
+QED
+
+Theorem MEM_cell_output:
+ ∀c. ∃n. MEM n (cell_output c)
+Proof
+ Cases \\ simp [cell_output_def] \\ metis_tac []
+QED
+
+Theorem MEM_cell_neq_nil:
+ ∀c. cell_output c ≠ []
+Proof
+ Cases \\ simp [cell_output_def]
+QED
+
+Theorem SORTED_MEM_HD:
+ ∀l (n:num). SORTED $< l ∧ MEM n l ⇒ HD l ≤ n
+Proof
+ Cases \\ rw [sortingTheory.less_sorted_eq] \\ simp [] \\ drule_first \\ simp []
+QED
+
+(* ugly but does the job *)
+(*Theorem si_cells_inv_glue:
+ si_cell_out_inv (LAST (cell_output c) + 1) max si ∧
+ SORTED $< (cell_output c ⧺ FLAT (MAP cell_output cs)) ⇒
+ si_cells_inv si max cs
+Proof
+ simp [sortingTheory.SORTED_APPEND_GEN, si_cells_inv_def] \\ rpt strip_tac' \\
+ gs [FLAT_EQ_NIL, EVERY_MAP, MEM_cell_neq_nil] \\
+ irule si_cell_out_inv_le \\ asm_exists_any_tac \\
+ drule_strip SORTED_MEM_HD \\ simp []
+QED*)
+
+(*Triviality cell_ok_LAST_max:
+ ∀cell min max. cell_ok min max cell ⇒ LAST (cell_output cell) < max
+Proof
+ Cases \\ simp [cell_ok_def, cell_output_ok_def, cell_output_def]
+QED*)
+
+Triviality MEM_LAST_cell_output:
+ ∀cell. MEM (LAST (cell_output cell)) (cell_output cell)
+Proof
+ Cases \\ simp [cell_output_def]
+QED
+
+Triviality lte1_lt:
+ ∀(a:num) b. a + 1 ≤ b ⇔ a < b
+Proof
+ decide_tac
+QED
+
+(*Triviality cell_output_sorted_HD_LAST:
+ ∀cell. SORTED $< (cell_output cell) ⇒ 
+Proof
+ Cases \\ simp [cell_output_def]
+QED*)
+
+Triviality netlist_ok_split:
+ netlist_ok extenv min max (c::cs) ∧
+ netlist_sorted (c::cs) ⇒
+ LAST (cell_output c) + 1 ≤ max ∧
+ min ≤ HD (cell_output c) ∧
+ HD (cell_output c) ≤ LAST (cell_output c) ∧
+ cell_covered_by_extenv extenv c ∧
+ cell_ok (HD (cell_output c)) (LAST (cell_output c) + 1) c ∧
+ netlist_ok extenv (LAST (cell_output c) + 1) max cs
+Proof
+ simp [netlist_ok_def, netlist_sorted_def, MATCH_MP sortingTheory.SORTED_APPEND arithmeticTheory.transitive_LESS] \\
+ rpt strip_tac
+ THEN3 (Cases_on ‘c’ \\ fs [cell_ok_def, cell_output_ok_def, cell_output_def])
+ >- (fs [cell_ok_alt, cell_output_ok_def] \\ Cases_on ‘c’ \\ fs [cell_output_def]) \\
+
+ fs [EVERY_MEM] \\ rpt strip_tac \\ drule_first \\ fs [cell_ok_alt] \\ rpt strip_tac \\ drule_first \\
+ fs [cell_output_ok_def, lte1_lt] \\
+
+ first_x_assum irule \\ simp [MEM_LAST_cell_output, MEM_FLAT, MEM_MAP] \\ metis_tac []
+QED
+
+(*Theorem si_cells_inv_max_le:
+ ∀max max' globalmax si. si_cells_inv_max si globalmax max ∧ max ≤ max' ⇒ si_cells_inv_max si globalmax max'
+Proof
+ rw [si_cells_inv_max_def] \\ drule_strip si_cell_out_inv_le
+QED
+
+Theorem si_cells_inv_max_cell_ok:
+ si_cells_inv_max si globalmax min ∧
+ cell_ok min max cell ∧
+ max ≤ globalmax ⇒
+ ∀out. MEM out (cell_output cell) ⇒ si_cell_out_inv out globalmax si
+Proof
+ rw [si_cells_inv_max_def, si_cell_out_inv_def, cell_ok_alt, cell_output_ok_def]
+ >- (drule_first \\ fs []) \\
+ rpt drule_first \\
+ TRY (irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rpt strip_tac) \\
+ match_mp_tac inp_marked_NetVar_inv_le \\ asm_exists_tac \\ simp []
+QED*)
+
+(*Theorem cell_input_marked_ok_GoodInp_cell_input_lt:
+ cell_input_marked_ok (GoodInp inp) min globalmax tmpnum ⇒ cell_input_lt inp tmpnum
+Proof
+ simp [cell_input_marked_ok_alt] \\ every_case_tac \\ simp [cell_input_lt_def, var_lt_def]
+QED*)
+
+Theorem cells_run_cell_blast_cell_output_ok:
+ sum_foldM (cell_run fext) s c = INR s' ∧
+ EVERY (λc. blast_cell_output_ok c min globalmax tmpnum) c ∧
+ blast_cell_input_marked_ok (GoodInp inp) min globalmax tmpnum ⇒
+ cell_inp_run fext s' inp = cell_inp_run fext s inp
+Proof
+ rpt strip_tac \\ Cases_on ‘inp’ \\ simp [cell_inp_run_def] \\ Cases_on ‘v’
+ >- (drule_strip cells_run_cget_var_RegVar \\ simp []) \\
+ AP_THM_TAC \\ AP_TERM_TAC \\
+ drule_strip cells_run_unchanged \\ disch_then irule \\ strip_tac \\
+ gvs [EVERY_MEM, blast_cell_output_ok_def, MEM_FLAT, MEM_MAP] \\ drule_first \\
+ gs [blast_cell_input_marked_ok_def, blast_cell_input_ok_def]
+QED
+
 Theorem blast_netlist_correct:
- !nl nl' blast_s blast_s' tmpnum.
- blast_netlist blast_s nl = (blast_s', nl') /\
+ !nl nl' blast_s blast_s' min regs globalmax max.
+ blast_netlist blast_s nl = INR (blast_s', nl') /\
 
- deterministic_netlist nl /\ netlist_ok blast_s.extenv 0 tmpnum nl /\ netlist_sorted nl /\
+ netlist_ok blast_s.extenv min max nl /\
+ min ≤ max ∧
+ blasterstate_ok regs blast_s.si min globalmax blast_s.tmpnum ∧
+ max ≤ globalmax ∧
+ 
+ deterministic_netlist nl /\
+ netlist_sorted nl
 
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum ==>
+ (*si_cells_inv blast_s.si globalmax nl*)
+ (*si_cells_inv_max blast_s.si globalmax min*) ⇒
  blast_s'.extenv = blast_s.extenv /\
- blasterstate_ok blast_s'.si tmpnum blast_s'.tmpnum /\
-
+ blast_s.tmpnum ≤ blast_s'.tmpnum ∧
  (!reg i. lookup var_cmp (RegVar reg i) blast_s'.si = lookup var_cmp (RegVar reg i) blast_s.si) /\
- (!n. ~MEM n (FLAT (MAP cell_output nl)) ==>
-      lookup var_cmp (NetVar n) blast_s'.si = lookup var_cmp (NetVar n) blast_s.si) /\
 
  deterministic_netlist nl' /\
+
+ blasterstate_ok regs blast_s'.si max globalmax blast_s'.tmpnum /\
+ (*si_cells_inv_max blast_s'.si globalmax max ∧*)
  (!s s' bs fext.
    sum_foldM (cell_run fext) s nl = INR s' /\ rtltype_extenv_n blast_s.extenv fext /\
-   blast_rel fext blast_s.si tmpnum s bs /\
-   netlist_overlap_si blast_s.si tmpnum nl ==>
-   ?bs'. sum_foldM (cell_run fext) bs nl' = INR bs' /\ blast_rel fext blast_s'.si tmpnum s' bs')
+   blast_rel fext blast_s.si globalmax s bs /\ blast_reg_rel_fext fext blast_s.si s bs ==>
+   ?bs'. sum_foldM (cell_run fext) bs nl' = INR bs' /\ blast_rel fext blast_s'.si globalmax s' bs' ∧
+         (* might as well provide this one: *) blast_reg_rel_fext fext blast_s'.si s' bs')
 Proof
- Induct >- (rw [blast_netlist_def] \\ fs [sum_foldM_def] \\ rw []) \\
- simp [blast_netlist_def] \\ rpt strip_tac' \\ rpt (pairarg_tac \\ fs []) \\ rveq \\
- fs [deterministic_netlist_def, netlist_ok_def, netlist_sorted_def] \\
+ Induct >- simp [blast_netlist_def, sum_foldM_def, blasterstate_ok_le, SF SFY_ss] \\
+ simp [blast_netlist_def, sum_bind_INR] \\ rpt strip_tac' \\ rpt (pairarg_tac \\ fs [sum_bind_INR]) \\ rveq \\
+
+ drule_strip netlist_ok_split \\
+ fs [deterministic_netlist_def, netlist_sorted_def] \\
  drule_strip blast_cell_correct \\
- drule_first \\ drule_strip sorted_append_snd_imp \\ simp [] \\ pop_assum kall_tac \\ disch_then drule_strip \\
- fs [sum_foldM_def, sum_bind_INR, deterministic_netlist_def] \\ rpt strip_tac \\
+ disch_then (qspecl_then [‘regs’, ‘globalmax’] mp_tac) \\
+ impl_tac >- (simp [] \\ match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp []) \\ strip_tac \\
 
- drule_last \\ impl_tac >- (fs [netlist_overlap_si_def, blasterstate_ok_def] \\
-                            metis_tac [arithmeticTheory.LESS_LESS_EQ_TRANS]) \\ strip_tac \\
- simp [sum_foldM_append, sum_bind_def] \\
- drule_first \\ disch_then match_mp_tac \\
+ drule_strip sorted_append_snd_imp \\
+ drule_first \\ simp [] \\ disch_then drule_strip \\
+ qpat_x_assum ‘SORTED _ _’ kall_tac \\
+ fs [deterministic_netlist_def] \\
+ 
+ simp [sum_foldM_INR] \\ rpt strip_tac' \\ drule_last \\ drule_first \\ impl_tac
+ >- (fs [blast_reg_rel_fext_def] \\
+     simp [PULL_FORALL] \\ rpt gen_tac \\ first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac) \\
 
- full_simp_tac (srw_ss()++boolSimps.DNF_ss) [netlist_overlap_si_def] \\
- drule_strip sorted_all_distinct_lt \\ fs [ALL_DISTINCT_APPEND] \\ conj_tac >- metis_tac [] \\
- rpt strip_tac \\ (Cases_on ‘var’ >- metis_tac []) \\ Cases_on ‘MEM n' (cell_output h)’
- >- (first_x_assum (qspecl_then [‘NetVar n'’, ‘ArrayInp inps’, ‘n'’] mp_tac) \\
-     impl_tac >- (Cases_on ‘inp’ \\ metis_tac [bsi_inp_trans_ok_def]) \\ simp [bsi_inp_trans_ok_def] \\ strip_tac \\
-     irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rw [bsi_cell_input_ok_def] \\ simp [] \\
-     disj1_tac \\ match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ drule_strip sorted_append_lt \\ simp [])
- >- metis_tac []
- >- (first_x_assum (qspecl_then [‘NetVar n'’, ‘BoolInp inp’, ‘n'’] mp_tac) \\
-     impl_tac >- (rpt gen_tac \\ Cases_on ‘inp'’ \\ metis_tac [bsi_inp_trans_ok_def]) \\
-     simp [bsi_inp_trans_ok_def, bsi_cell_input_ok_def] \\ reverse strip_tac >- simp [] \\
-     disj1_tac \\ match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ drule_strip sorted_append_lt \\ simp [])
- >- metis_tac []
+     imp_res_tac cells_run_cget_var_RegVar \\ imp_res_tac cell_run_cget_var_RegVar \\
+     imp_res_tac run_cells_deterministic_netlist \\ gs [deterministic_netlist_def] \\
+     imp_res_tac run_cell_deterministic_cell \\
+
+     rpt TOP_CASE_TAC \\ fs []
+
+     >- (gs [blasterstate_ok_def] \\ rpt drule_first \\ drule_strip cells_run_cell_blast_cell_output_ok \\
+         disch_then (qspec_then ‘c’ mp_tac) \\
+         impl_tac >- (match_mp_tac blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []) \\
+         simp [])
+
+     >- (gvs [blast_rel_array_def] \\ rpt strip_tac \\ drule_first \\ TOP_CASE_TAC \\
+         fs [blasterstate_ok_def] \\ rpt drule_first \\
+         drule_strip cells_run_cell_blast_cell_output_ok \\ strip_tac \\
+         fs [EVERY_EL] \\
+         first_x_assum (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
+         first_x_assum (qspec_then ‘c’ mp_tac) \\
+         impl_tac >- (match_mp_tac blast_cell_input_marked_ok_le \\ gs [] \\ asm_exists_tac \\ simp []) \\
+         gs [])) \\
+
+ simp [sum_foldM_append, sum_bind_def]
 QED
 
-Theorem blast_regs_correct_bool:
- !fext snet sbase bsnet bsbase s blast_s h1 h2 h3 inp inp' tmpnum.
- blast_cell_input blast_s inp = BoolInp inp' /\
- reg_run fext snet sbase (CBool_t,h1,h2,h3,SOME inp) = INR s /\
- blast_rel fext blast_s.si tmpnum sbase bsbase /\
- blast_rel fext blast_s.si tmpnum snet bsnet /\
- rtltype_extenv_n blast_s.extenv fext /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum /\
- reg_ok blast_s.extenv tmpnum (CBool_t,h1,h2,h3,SOME inp) /\
- si_wf blast_s.si /\
- si_prefilled blast_s.si (CBool_t,h1,h2,h3,SOME inp) /\
- only_regs sbase ==>
- ?bs. reg_run fext bsnet bsbase (CBool_t,h1,h2,h3,SOME inp') = INR bs /\ (* <-- h4 must be output from blasting... *)
-      only_regs s /\
-      blast_rel fext blast_s.si tmpnum s bs
+(** blast regs **)
+
+(* Needed to be able to run regs (both init and update) after having built the initial si... *)
+(* TODO: add combs to name *)
+Definition si_consistent_with_regs_def:
+ si_consistent_with_regs si regs =
+ ∀reg i. lookup var_cmp (RegVar reg i) si =
+         OPTION_BIND (ALOOKUP regs (reg, i))
+                     (λrdata. OPTION_MAP SND (build_combs_si_reg_entry ((reg, i), rdata)))
+End
+
+Theorem si_consistent_with_regs_cong:
+ (∀reg i. lookup var_cmp (RegVar reg i) si' = lookup var_cmp (RegVar reg i) si) ⇒
+ si_consistent_with_regs si' regs = si_consistent_with_regs si regs
 Proof
- rw [reg_run_def, sum_bind_INR, si_prefilled_def, reg_ok_def] \\
- drule_strip blast_cell_inp_run_correct_bool \\ simp [] \\ strip_tac \\
- simp [only_regs_cset_var_RegVar] \\ 
- match_mp_tac blast_rel_cset_var_reg_bool \\ simp []
+ rpt strip_tac \\ simp [si_consistent_with_regs_def]
 QED
 
-Theorem blast_regs_correct_array_help:
+(* Needed to be able to run regs (both init and update) after having built the initial si... *)
+Definition ffs_si_consistent_with_regs_def:
+ ffs_si_consistent_with_regs s si regs =
+ ∀reg i. case ALOOKUP regs (reg, i) of
+           NONE => lookup var_cmp (RegVar reg i) si = NONE
+         | SOME rdata =>
+            ∃res. build_ffs_si_reg_entry s ((reg, i), rdata) = INR res ∧
+                  lookup var_cmp (RegVar reg i) si = OPTION_MAP SND res
+End
+
+(** blast regs + netlist **)
+
+Theorem only_regs_blast_rel:
+ ∀fext si tmpnum s bs.
+ only_regs s ∧
+ blast_reg_rel si s bs ⇒ (* just to get fbits equal *)
+ blast_rel fext si tmpnum s bs
+Proof
+ simp [only_regs_def, blast_reg_rel_def, blast_rel_def]
+QED
+
+Theorem blast_regs_no_PseudoRegs:
+ ∀regs regs' blast_s.
+ blast_regs blast_s regs = INR regs' ⇒ FILTER (λ(var,data). data.reg_type = PseudoReg) regs' = []
+Proof
+ Induct \\ TRY PairCases \\ simp [blast_regs_def] \\ rpt gen_tac \\
+ reverse TOP_CASE_TAC >- first_x_assum MATCH_ACCEPT_TAC \\
+ every_case_tac \\ simp [sum_bind_INR] \\ strip_tac \\ every_case_tac \\ fs [sum_bind_INR] \\ drule_first \\
+ gvs [FILTER_APPEND, FILTER_EQ_NIL, EVERY_GENLIST, EVERY_MAPi, EVERYi_T]
+QED
+
+Theorem ALL_DISTINCT_ALOOKUP_SOME_Reg_FILTER_PseudoReg:
+ ∀regs reg i rdata.
+ ALL_DISTINCT (MAP FST regs) ∧
+ ALOOKUP regs (reg,i) = SOME rdata ∧
+ rdata.reg_type = Reg ⇒
+ ALOOKUP (FILTER (λ(var,data). data.reg_type = PseudoReg) regs) (reg,i) = NONE
+Proof
+ Induct \\ TRY PairCases \\ rw [] \\ fs [GSYM ALOOKUP_NONE] \\
+ drule_strip ALL_DISTINCT_ALOOKUP_NONE_FILTER \\ simp []
+QED
+
+Theorem ALL_DISTINCT_ALOOKUP_SOME_PseudoReg_FILTER_PseudoReg:
+ ∀regs reg i rdata.
+ ALL_DISTINCT (MAP FST regs) ∧
+ ALOOKUP regs (reg,i) = SOME rdata ∧
+ rdata.reg_type = PseudoReg ⇒
+ ALOOKUP (FILTER (λ(var,data). data.reg_type = PseudoReg) regs) (reg,i) = SOME rdata
+Proof
+ Induct \\ TRY PairCases \\ rw [] \\ fs [reg_type_not_PseudoReg]
+QED
+
+Theorem regs_run_PseudoReg:
+ sum_foldM (reg_run fext s) s (FILTER (λ(var,data). data.reg_type = PseudoReg) regs) = INR s' ∧
+ blast_regs_distinct regs ⇒
+ s'.fbits = s.fbits ∧
+ (∀n. cget_var s' (NetVar n) = cget_var s (NetVar n)) ∧
+ (∀reg i. ALOOKUP regs (reg,i) = NONE ⇒ cget_var s' (RegVar reg i) = cget_var s (RegVar reg i)) ∧
+ (∀reg i rdata. ALOOKUP regs (reg,i) = SOME rdata ∧ rdata.reg_type = Reg ⇒
+                cget_var s' (RegVar reg i) = cget_var s (RegVar reg i)) ∧
+ (∀reg i rdata. ALOOKUP regs (reg,i) = SOME rdata ∧ rdata.reg_type = PseudoReg ⇒
+                case rdata.inp of
+                  NONE => cget_var s' (RegVar reg i) = cget_var s (RegVar reg i)
+                | SOME inp => ∃v. cell_inp_run fext s inp = INR v ∧
+                                  rtltype_v v rdata.type ∧
+                                  cget_var s' (RegVar reg i) = INR v)
+Proof
+ rewrite_tac [blast_regs_distinct_def, blast_reg_name_def] \\ rpt strip_tac' \\
+ drule_strip regs_run_fbits_const \\ drule_strip regs_run_cget_var \\
+ impl_tac >- simp [ALL_DISTINCT_MAP_FILTER] \\ rw [] \\ first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac)
+ >- (drule_strip ALL_DISTINCT_ALOOKUP_NONE_FILTER \\ simp [])
+ >- (drule_strip ALL_DISTINCT_ALOOKUP_SOME_Reg_FILTER_PseudoReg \\ simp [])
+ >- (drule_strip ALL_DISTINCT_ALOOKUP_SOME_PseudoReg_FILTER_PseudoReg \\ simp [] \\ TOP_CASE_TAC \\
+     strip_tac \\ simp [])
+QED
+
+Theorem regs_run_PseudoReg_blast_rel:
+ sum_foldM (reg_run fext s) s regs = INR s' ∧
+ blast_rel fext si max s bs ⇒
+ blast_rel fext si max s' bs
+Proof
+ simp [blast_rel_def] \\ rpt strip_tac' \\
+ drule_strip regs_run_fbits_const \\ drule_strip regs_run_cget_var_NetVar \\ simp []
+QED
+
+Theorem regs_run_PseudoReg_blast_reg_rel:
+ sum_foldM (reg_run fext s) s (FILTER (λ(var,data). data.reg_type = PseudoReg) regs) = INR s' ∧
+ blast_regs_distinct regs ∧
+ blast_reg_rel si s bs ∧
+ blasterstate_ok regs si processed max tmpnum ∧
+ si_consistent_with_regs si regs ∧
+ (* do we really need this? *) cenv_consistent_with_regs regs s ∧
+ (* little ugly to have this here? needed for idx = 0. *) regs_ok blast_s.extenv max' max'' regs ⇒
+ blast_reg_rel si s' bs
+Proof
+ simp [regs_ok_def,
+       blast_reg_rel_def, blasterstate_ok_def, si_consistent_with_regs_def, cenv_consistent_with_regs_def] \\
+ rpt strip_tac' \\
+ drule_strip regs_run_PseudoReg \\ simp [] \\ rpt gen_tac \\
+ Cases_on ‘ALOOKUP regs (reg, i)’
+ >- (drule_first \\ last_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+     rpt TOP_CASE_TAC \\ rpt strip_tac \\ gvs []) \\
+ Cases_on ‘x.reg_type’
+ >- (drule_last \\ last_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+     rpt TOP_CASE_TAC \\ rpt strip_tac \\ gvs []) \\
+ drule_strip ALOOKUP_EVERY \\ fs [reg_ok_def] \\
+ ntac 3 (last_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac)) \\ drule_first \\ strip_tac \\
+ simp [build_combs_si_reg_entry_def] \\ strip_tac \\
+ rpt (FULL_CASE_TAC \\ gvs []) \\
+ drule_first \\ gvs [rtltype_v_cases, optionTheory.IS_SOME_EXISTS, GENLIST_FUN_EQ, mk_inp_marked_def]
+QED
+
+Theorem regs_run_PseudoReg_blast_reg_rel_fext:
+ sum_foldM (reg_run fext s) s (FILTER (λ(var,data). data.reg_type = PseudoReg) regs) = INR s' ∧
+ blast_regs_distinct regs ∧
+ blast_reg_rel_fext fext si s bs ∧
+ blasterstate_ok regs si processed max tmpnum ∧
+ (* little ugly to have this here? needed for idx = 0. *) regs_ok blast_s.extenv max' max'' regs ∧
+ si_consistent_with_regs si regs ∧
+ (* do we really need this? *) cenv_consistent_with_regs regs s ⇒
+ blast_reg_rel_fext fext si s' bs
+Proof
+ simp [regs_ok_def,
+       blast_reg_rel_fext_def, blasterstate_ok_def, si_consistent_with_regs_def,
+       cenv_consistent_with_regs_def] \\
+ rpt strip_tac' \\
+ drule_strip regs_run_PseudoReg \\ simp [] \\ rpt gen_tac \\
+ Cases_on ‘ALOOKUP regs (reg, i)’
+ >- (drule_first \\ last_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+     rpt TOP_CASE_TAC \\ rpt strip_tac \\ gvs []) \\
+ Cases_on ‘x.reg_type’
+ >- (drule_last \\ last_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\ simp []) \\
+ drule_strip ALOOKUP_EVERY \\ fs [reg_ok_def] \\
+ ntac 3 (last_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac)) \\ drule_first \\ strip_tac \\
+ simp [build_combs_si_reg_entry_def, blast_rel_array_def] \\
+ rpt (FULL_CASE_TAC \\ gvs []) \\ drule_first \\
+ gvs [rtltype_v_cases, optionTheory.IS_SOME_EXISTS] \\
+ fs [GENLIST_FUN_EQ, mk_inp_marked_def, build_combs_si_reg_entry_def]
+QED
+
+Theorem cells_run_blast_reg_rel:
+ ∀nl bnl s s' bs bs' si fext.
+ sum_foldM (cell_run fext) s nl = INR s' ∧
+ deterministic_netlist nl ∧
+ sum_foldM (cell_run fext) bs bnl = INR bs' ∧
+ deterministic_netlist bnl ∧
+ blast_reg_rel si s bs ⇒
+ blast_reg_rel si s' bs'
+Proof
+ rpt strip_tac \\
+ imp_res_tac run_cells_deterministic_netlist \\
+ imp_res_tac cells_run_cget_var_RegVar \\
+ match_mp_tac blast_reg_rel_cong \\ asm_exists_tac \\ simp []
+QED
+
+Theorem invariant_FOLDR_insert_var_cmp:
+ ∀l si. invariant var_cmp si ⇒ invariant var_cmp (FOLDR (λ(k,v) t. insert var_cmp k v t) si l)
+Proof
+ Induct \\ TRY PairCases \\ simp [insert_thm_var_cmp]
+QED
+
+Triviality lookup_FOLDR_insert:
+ ∀es k si.
+ invariant var_cmp si ⇒  
+ lookup var_cmp k (FOLDR (λ(k,v) t. insert var_cmp k v t) si es) =
+ case ALOOKUP es k of
+   NONE => lookup var_cmp k si
+ | SOME v => SOME v
+Proof
+ Induct \\ TRY PairCases \\ rw [] \\ metis_tac [lookup_insert_var_cmp, invariant_FOLDR_insert_var_cmp]
+QED
+
+Triviality build_ffs_si_reg_entires_NetVar_lem:
+ ∀regs es s n. sum_option_flatMap (build_ffs_si_reg_entry s) regs = INR es ⇒ ALOOKUP es (NetVar n) = NONE 
+Proof
+ Induct \\ TRY PairCases \\ rw [sum_option_flatMap_def, sum_bind_INR] \\ every_case_tac
+ >- (drule_first \\ simp []) \\
+ fs [sum_bind_INR] \\ drule_first \\ gvs [build_ffs_si_reg_entry_def] \\
+ every_case_tac \\ fs [sum_bind_INR] \\ every_case_tac \\ gvs [sum_bind_INR]
+QED
+
+Theorem invariant_ffs_si:
+ ffs_si blast_s regs = INR si ∧
+ invariant var_cmp blast_s.si ⇒
+ invariant var_cmp si
+Proof
+ rw [ffs_si_def, sum_map_INR] \\ rw [invariant_FOLDR_insert_var_cmp]
+QED
+
+Theorem lookup_NetVar_ffs_si:
+ ∀regs blast_s si n.
+ ffs_si blast_s regs = INR si ∧
+ invariant var_cmp blast_s.si ⇒
+ lookup var_cmp (NetVar n) si = lookup var_cmp (NetVar n) blast_s.si
+Proof
+ rw [ffs_si_def, sum_map_INR] \\
+ drule_strip build_ffs_si_reg_entires_NetVar_lem \\
+ drule_strip lookup_FOLDR_insert \\ fs []
+QED
+
+Theorem ffs_si_blast_rel:
+ ∀regs fext s bs blast_s si max regs' tmpnum' max'.
+ ffs_si blast_s regs = INR si ∧
+ blasterstate_ok regs' blast_s.si processed max' tmpnum' ∧ (* <-- we need just invariant *)
+ blast_rel fext blast_s.si max s bs ⇒
+ blast_rel fext si max s bs
+Proof
+ rewrite_tac [blasterstate_ok_def] \\
+ rpt strip_tac \\ drule_strip lookup_NetVar_ffs_si \\ fs [blast_rel_def] \\ rpt strip_tac \\ drule_first \\
+ rpt TOP_CASE_TAC \\ gs [blast_rel_bool_def, blast_rel_array_def]
+QED
+
+Triviality not_in_regs_not_in_ffs_entries:
+ ∀regs reg i blast_s es.
+ sum_option_flatMap (build_ffs_si_reg_entry blast_s) regs = INR es ∧ ¬MEM (reg, i) (MAP FST regs) ⇒
+ ¬MEM (RegVar reg i) (MAP FST es)
+Proof
+ Induct \\ TRY PairCases \\ simp [sum_option_flatMap_def, sum_bind_INR] \\ rpt strip_tac' \\
+ every_case_tac >- drule_first \\ gvs [sum_bind_INR, build_ffs_si_reg_entry_def] \\
+ every_case_tac \\ gvs [sum_bind_INR] \\ drule_first \\ every_case_tac \\ gvs [sum_bind_INR]
+QED
+
+Triviality build_ffs_si_reg_entires_lem:
+ ∀regs es s.
+ sum_option_flatMap (build_ffs_si_reg_entry s) regs = INR es ∧
+ blast_regs_distinct regs ⇒
+ ∀reg i.
+ case ALOOKUP regs (reg,i) of
+   NONE => ALOOKUP es (RegVar reg i) = NONE
+ | SOME rdata =>
+     ∃res. build_ffs_si_reg_entry s ((reg,i),rdata) = INR res ∧
+           ALOOKUP es (RegVar reg i) = OPTION_MAP SND res
+Proof
+ rewrite_tac [blast_regs_distinct_def, blast_reg_name_def] \\
+ Induct \\ TRY PairCases \\ simp [sum_option_flatMap_def, sum_bind_INR] \\
+ rpt strip_tac' \\ IF_CASES_TAC
+ >- (gvs [] \\ every_case_tac
+     >- (drule_first \\ gs [GSYM ALOOKUP_NONE] \\ first_x_assum (qspecl_then [‘h0’, ‘h1’] mp_tac) \\
+         simp []) \\
+     gvs [sum_bind_INR, build_ffs_si_reg_entry_def] \\
+     every_case_tac \\ fs [sum_bind_INR] \\ every_case_tac \\ gvs [sum_bind_INR]) \\
+
+ Cases_on ‘x''’ \\ gvs [sum_bind_INR, build_ffs_si_reg_entry_def] \\
+
+ Cases_on ‘h2.reg_type’ \\ Cases_on ‘h2.type’ \\ Cases_on ‘h2.init’ \\ Cases_on ‘h2.inp’ \\
+ gvs [sum_bind_INR] \\
+ gvs [CaseEq"inp_trans_marked", sum_bind_INR] \\ IF_CASES_TAC \\ gs []
+QED
+
+Theorem ffs_si_ffs_si_consistent_with_regs:
+ ∀s regs si regs' tmpnum' max'.
+ ffs_si s regs = INR si ∧
+ blasterstate_ok regs' s.si processed max' tmpnum' ∧ (* <-- we need just invariant *)
+ blast_regs_distinct regs ∧
+ si_consistent_with_regs s.si regs ⇒
+ ffs_si_consistent_with_regs s si regs
+Proof
+ rw [ffs_si_def, blasterstate_ok_def, sum_map_INR,
+     si_consistent_with_regs_def, ffs_si_consistent_with_regs_def] \\
+ drule_strip build_ffs_si_reg_entires_lem \\
+ drule_strip lookup_FOLDR_insert \\
+ rpt (first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac)) \\ TOP_CASE_TAC \\ fs [] \\
+ fs [build_ffs_si_reg_entry_def, build_combs_si_reg_entry_def] \\ every_case_tac \\ fs [sum_bind_INR] \\
+ every_case_tac \\ gvs [sum_bind_INR]
+QED
+
+Theorem blast_cell_input_not_pseudo_in:
+ ∀inp blast_s regs tinp.
+ blast_cell_input blast_s inp = INR tinp ∧
+ si_consistent_with_regs blast_s.si regs ⇒
+ cell_input_not_pseudo regs inp ∨ tinp = ArrayInp []
+Proof
+ Cases \\ simp [cell_input_not_pseudo_def] \\ Cases_on ‘v’ \\ simp [cell_input_not_pseudo_def] \\
+ rename1 ‘RegVar reg i’ \\ rpt gen_tac \\
+ simp [blast_cell_input_def, si_consistent_with_regs_def] \\
+ TOP_CASE_TAC >- (rpt strip_tac \\ first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+                  rw [build_combs_si_reg_entry_def] \\ fs [] \\
+                  every_case_tac \\ fs [mk_inp_marked_def]) \\
+ TOP_CASE_TAC >- (TOP_CASE_TAC \\ rpt strip_tac \\ first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+                  rw [build_combs_si_reg_entry_def] \\ every_case_tac \\ gvs []) \\
+ TOP_CASE_TAC \\ rw [sum_map_INR] \\ first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+ rw [build_combs_si_reg_entry_def] \\ every_case_tac \\ gvs []
+ >- (Cases_on ‘n’ \\ gvs [sum_mapM_INR, GENLIST_CONS, mk_inp_marked_def, inp_marked_get_def])
+ >- (gs [inp_marked_get_INR, revEL_GENLIST, mk_inp_marked_def])
+ >- (Cases_on ‘v'’ \\ simp [] \\ drule_strip sum_mapM_MEM \\ disch_then (qspec_then ‘h’ mp_tac) \\
+     rw [inp_marked_get_INR] \\ strip_tac \\ drule_strip MEM_rev_slice \\ fs [MEM_GENLIST, mk_inp_marked_def])
+QED
+
+(* Maybe strange name for this thm? *)
+Theorem ffs_si_blast_reg_rel_fext:
+ ∀regs fext s bs blast_s si combs_max ffs_max processed.
+ si_consistent_with_regs blast_s.si regs ∧
+ ffs_si_consistent_with_regs blast_s si regs ∧
+ cenv_consistent_with_regs regs s ∧
+ blast_reg_rel_fext fext blast_s.si s bs ∧
+ blast_rel fext blast_s.si ffs_max s bs ∧
+ regs_ok blast_s.extenv combs_max ffs_max regs ∧
+ combs_max ≤ ffs_max ∧
+ blasterstate_ok regs blast_s.si processed ffs_max blast_s.tmpnum ∧
+ rtltype_extenv_n blast_s.extenv fext ∧
+ (∀reg i rdata.
+  ALOOKUP regs (reg,i) = SOME rdata ∧ rdata.reg_type = PseudoReg ⇒
+  OPTION_ALL (λinp. cell_input_not_pseudo regs inp ⇒
+                    ∃v. cell_inp_run fext s inp = INR v ∧
+                        rtltype_v v rdata.type ∧
+                        cget_var s (RegVar reg i) = INR v) rdata.inp) ⇒
+ blast_reg_rel_fext fext si s bs
+Proof
+ rw [ffs_si_consistent_with_regs_def, regs_ok_def] \\
+ qpat_assum ‘si_consistent_with_regs _ _’ (strip_assume_tac o REWRITE_RULE [si_consistent_with_regs_def]) \\
+ 
+ simp [blast_reg_rel_fext_def] \\ conj_tac >- fs [blast_reg_rel_fext_def] \\ rpt gen_tac \\
+ rpt (first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac)) \\ TOP_CASE_TAC \\
+ Cases_on ‘ALOOKUP regs (reg,i)’ >- (fs [cenv_consistent_with_regs_def] \\
+                                     first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac) \\ gs []) \\
+ drule_strip ALOOKUP_EVERY \\ gs [reg_ok_def] \\
+ Cases_on ‘x.reg_type’
+ (* Reg *)
+ >- (fs [blast_reg_rel_fext_def] \\
+     first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac) \\
+     gvs [build_combs_si_reg_entry_def, build_ffs_si_reg_entry_def] \\
+     every_case_tac \\ gvs [blast_rel_array_def, mk_inp_marked_def]) \\
+ (* PseudoReg *)
+ gvs [build_combs_si_reg_entry_def, build_ffs_si_reg_entry_def, sum_bind_INR] \\
+ gs [optionTheory.IS_SOME_EXISTS, blast_pseudoreg_inp_def, sum_bind_INR] \\
+
+ Cases_on ‘x.inp’
+ >- (Cases_on ‘x.init’ \\ fs [cenv_consistent_with_regs_def, blast_reg_rel_fext_def] \\
+     rpt (first_x_assum (qspecl_then [‘reg’, ‘0’] assume_tac)) \\
+     gvs [] \\
+     rename1 ‘ConstInp v’ \\ Cases_on ‘v’ \\
+     gvs [blast_cell_input_def, sum_bind_def, cell_inp_run_def, blast_rel_array_def, EL_MAP]) \\
+
+ fs [sum_bind_INR] \\
+ reverse (drule_strip blast_cell_input_not_pseudo_in)
+ >- (fs [] \\ every_case_tac \\ gvs [sum_bind_INR, sum_check_INR] \\
+     fs [cenv_consistent_with_regs_def] \\
+     first_x_assum (qspecl_then [‘reg’, ‘0’] mp_tac) \\ simp [rtltype_v_cases, blast_rel_array_def]) \\
+ 
+ TOP_CASE_TAC \\ fs [rtltype_v_cases, blast_rel_array_def] \\ Cases_on ‘binp’ \\ gvs []
+ >- (drule_strip blast_cell_inp_run_correct_bool) \\
+ fs [sum_bind_INR] \\ drule_strip blast_cell_inp_run_correct_array \\ gvs [EL_MAP]
+QED
+
+Theorem blast_pseudoreg_inp_props:
+ ∀inp blast_s regs max tinp processed tmpnum.
+ blast_pseudoreg_inp blast_s inp = INR tinp ∧
+ blasterstate_ok regs blast_s.si processed max tmpnum ∧
+ cell_input_lt inp processed ∧ processed ≤ tmpnum (* <-- only needed for less-than bool case *) ⇒
+ (case tinp of
+    MBoolInp minp => cell_input_marked_not_pseudo regs minp
+  | MArrayInp minps => EVERY (cell_input_marked_not_pseudo regs) minps) ∧
+ (case tinp of
+    MBoolInp minp => blast_cell_input_marked_ok minp processed max tmpnum
+  | MArrayInp minps => EVERY (λminp. blast_cell_input_marked_ok minp processed max tmpnum) minps)
+Proof
+ simp [blast_pseudoreg_inp_def, sum_bind_INR] \\ rpt strip_tac' \\
+ drule_strip blast_cell_input_cell_input_marked_ok \\
+ drule_strip blast_cell_input_not_pseudo \\
+ every_case_tac \\ simp [blast_cell_input_marked_ok_def, cell_input_marked_not_pseudo_def, EVERY_MAP, SF ETA_ss]
+QED
+
+Theorem ffs_si_consistent_with_regs_blasterstate_ok:
+ ffs_si blast_s regs = INR si ∧
+ ffs_si_consistent_with_regs blast_s si regs ∧
+ si_consistent_with_regs blast_s.si regs ∧
+ regs_ok blast_s'.extenv combs_max ffs_max regs ∧
+ combs_max ≤ ffs_max ∧
+ (*invariant var_cmp new_si ∧
+ (∀n. lookup var_cmp (NetVar m) si = lookup var_cmp (NetVar m) blast_s.si) ∧*)
+ blasterstate_ok regs blast_s.si combs_max ffs_max blast_s.tmpnum ⇒
+ blasterstate_ok regs si combs_max ffs_max blast_s.tmpnum
+Proof
+ rewrite_tac [ffs_si_consistent_with_regs_def, si_consistent_with_regs_def, regs_ok_def] \\
+ rpt strip_tac' \\ first_assum mp_tac \\ rewrite_tac [blasterstate_ok_def] \\ rw []
+ >- drule_strip invariant_ffs_si \\
+
+ drule_strip lookup_NetVar_ffs_si >- fs [] \\
+ 
+ TRY (reverse (Cases_on ‘var’) >- (fs [] \\ rpt drule_first)) \\ rename1 ‘RegVar reg i’ \\
+ rpt (first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac)) \\ FULL_CASE_TAC \\ gvs [] \\
+ fs [build_ffs_si_reg_entry_def] >- (rpt (every_case_tac \\ gvs [sum_bind_INR])) \\
+
+ (Cases_on ‘x.reg_type’ >- (fs [] \\ FULL_CASE_TAC \\
+                            gvs [EVERY_GENLIST, regs_ok_def,
+                                 blast_cell_input_marked_ok_def, blast_cell_input_ok_def,
+                                 cell_input_marked_not_pseudo_def, cell_input_not_pseudo_def] \\
+                            drule_strip ALOOKUP_EVERY \\ rpt strip_tac \\ drule_strip ALOOKUP_EVERY \\
+                            gvs [reg_ok_def])) \\
+
+ fs [sum_bind_INR, regs_ok_def] \\ drule_strip ALOOKUP_EVERY \\
+
+ (Cases_on ‘x.inp’ >- (every_case_tac \\ fs [] \\
+                       rename1 ‘ConstInp v’ \\ Cases_on ‘v’ \\
+                       gvs [blast_pseudoreg_inp_def, blast_cell_input_def, sum_bind_def,
+                            blast_cell_input_marked_ok_def, blast_cell_input_ok_def,
+                            cell_input_marked_not_pseudo_def, cell_input_not_pseudo_def,
+                            EVERY_MAP])) \\
+
+ gs [sum_bind_INR, reg_ok_def, optionTheory.IS_SOME_EXISTS] \\
+ drule_strip blast_pseudoreg_inp_props \\ (impl_tac >- simp [](* metis_tac [cell_input_lt_le]*)) \\
+ every_case_tac \\ gvs [sum_bind_INR]
+QED
+
+Triviality cell_ok_cell_output_ok:
+ ∀cell min max out. cell_ok min max cell ∧ MEM out (cell_output cell) ⇒ cell_output_ok min max out
+Proof
+ Cases \\ rw [cell_ok_def, cell_output_def]
+QED
+
+Theorem blast_netlist_blast_regs_correct_step:
+ !combs_nl ffs_nl combs_nl' ffs_nl' fext s s' bs blast_s blast_s' blast_s'' new_si regs regs' min combs_max ffs_max.
+ blast_netlist blast_s combs_nl = INR (blast_s', combs_nl') /\
+ ffs_si blast_s' regs = INR new_si ∧
+ blast_netlist (blast_s' with si := new_si) ffs_nl = INR (blast_s'', ffs_nl') ∧
+
+ blast_regs blast_s'' regs = INR regs' /\
+
+ netlist_step fext s combs_nl ffs_nl regs = INR s' /\
+
+ blast_regs_distinct regs ∧
+ cenv_consistent_with_regs regs s ∧
+ si_consistent_with_regs blast_s.si regs ∧
+ blast_reg_rel blast_s.si s bs /\
+
+ deterministic_netlist combs_nl /\ deterministic_netlist ffs_nl /\
+ netlist_ok blast_s.extenv min combs_max combs_nl /\ netlist_ok blast_s.extenv combs_max ffs_max ffs_nl /\
+ min ≤ combs_max ∧
+ combs_max ≤ ffs_max ∧
+ netlist_sorted (combs_nl ++ ffs_nl) /\
+ (*si_cells_inv blast_s.si ffs_max (*<--global max here!*) combs_nl /\ (*si_cells_inv blast_s.si ffs_max ffs_nl /\*)*)
+ regs_ok blast_s.extenv combs_max ffs_max regs /\
+
+ rtltype_extenv_n blast_s.extenv fext /\
+ blasterstate_ok regs blast_s.si min ffs_max blast_s.tmpnum /\
+ 
+ only_regs s ==>
+ blast_s''.extenv = blast_s.extenv ∧
+ (!reg i. lookup var_cmp (RegVar reg i) blast_s'.si = lookup var_cmp (RegVar reg i) blast_s.si) ∧
+ (!reg i. lookup var_cmp (RegVar reg i) blast_s''.si = lookup var_cmp (RegVar reg i) new_si) ∧
+ deterministic_netlist combs_nl' ∧ deterministic_netlist ffs_nl' ∧
+ blasterstate_ok regs blast_s'.si ffs_max ffs_max blast_s'.tmpnum /\
+ ?bs'. netlist_step fext bs combs_nl' ffs_nl' regs' = INR bs' ∧
+       blast_rel fext blast_s''.si ffs_max s' bs' ∧
+       blast_reg_rel blast_s.si s' bs' ∧
+       blast_reg_rel_fext fext blast_s''.si s' bs'
+Proof
+ rpt strip_tac' \\
+ qpat_x_assum ‘blast_netlist _ combs_nl = _’ assume_tac \\
+ drule_strip blast_netlist_correct \\
+ impl_tac >- fs [netlist_sorted_def, sortingTheory.SORTED_APPEND] \\ strip_tac \\
+
+ qpat_x_assum ‘blast_netlist _ ffs_nl = _’ assume_tac \\
+ drule_strip blast_netlist_correct \\ simp [] \\ disch_then drule_strip \\
+ disch_then (qspecl_then [‘regs’, ‘ffs_max’] mp_tac) \\
+ drule_strip ffs_si_ffs_si_consistent_with_regs \\
+ impl_keep_tac >- metis_tac [si_consistent_with_regs_cong] \\ strip_tac \\
+ impl_keep_tac >- (fs [netlist_sorted_def, sortingTheory.SORTED_APPEND] \\
+                   drule_strip ffs_si_consistent_with_regs_blasterstate_ok
+                   (*\\ drule_strip ffs_si_si_cells_inv \\ simp [] \\ disch_then drule_strip*)) \\ strip_tac \\
+
+ fs [netlist_step_def, sum_bind_INR] \\
+ conj_tac >- simp [blasterstate_ok_le, SF SFY_ss] \\
+ drule_last \\
+ drule_strip only_regs_blast_rel \\ first_x_assum (qspecl_then [‘fext’, ‘ffs_max’] assume_tac) \\
+ drule_strip blast_reg_rel_blast_reg_rel_fext \\ first_x_assum (qspec_then ‘fext’ assume_tac) \\
+ disch_then drule_strip \\
+
+ drule_strip blast_regs_no_PseudoRegs \\
+ simp [sum_foldM_def] \\
+
+ drule_strip regs_run_PseudoReg_blast_rel \\
+ qspecl_then [‘combs_nl’, ‘combs_nl'’] assume_tac cells_run_blast_reg_rel \\ drule_first \\
+ qpat_x_assum ‘sum_foldM _ _ combs_nl = _’ assume_tac \\
+ drule_strip cells_run_cenv_consistent_with_regs \\
+ drule_strip regs_run_PseudoReg_blast_reg_rel \\
+ drule_strip regs_run_PseudoReg_blast_reg_rel_fext \\
+ (*impl_keep_tac >- metis_tac [si_consistent_with_regs_cong] \\ fs [] \\ strip_tac \\*)
+  
+ drule_strip ffs_si_blast_rel \\
+ drule_strip regs_run_PseudoReg \\
+ drule_first \\
+ impl_tac >- (match_mp_tac ffs_si_blast_reg_rel_fext \\
+              rpt asm_exists_any_tac \\ simp [] \\
+              conj_tac >- metis_tac [regs_run_cenv_consistent_with_regs] \\
+
+              rpt strip_tac \\ drule_first \\ FULL_CASE_TAC \\ fs [] \\ strip_tac \\
+              rename1 ‘cell_inp_run _ _ inp = INR _’ \\ Cases_on ‘inp’ \\ fs [cell_inp_run_def] \\
+              rename1 ‘VarInp var idx’ \\ Cases_on ‘var’
+              >- (fs [sum_bind_INR, cell_input_not_pseudo_def] \\
+                  rename1 ‘VarInp (RegVar reg' i') idx’ \\
+                  Cases_on ‘ALOOKUP regs (reg', i')’ \\ fs []) \\
+              simp []) \\ strip_tac \\
+
+ simp [] \\
+ qspecl_then [‘ffs_nl’, ‘ffs_nl'’] assume_tac cells_run_blast_reg_rel \\ drule_first
+QED
+
+Theorem si_consistent_with_regs_ffs_si_consistent_with_regs_lookup_Reg:
+ si_consistent_with_regs blast_s.si regs ∧
+ ffs_si_consistent_with_regs blast_s si' regs ∧
+ ALOOKUP regs (reg, i) = SOME rdata ∧ rdata.reg_type = Reg ⇒
+ lookup var_cmp (RegVar reg i) si' = lookup var_cmp (RegVar reg i) blast_s.si
+Proof
+ rw [si_consistent_with_regs_def, ffs_si_consistent_with_regs_def] \\
+ rpt (first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac)) \\
+ gs [build_ffs_si_reg_entry_def, build_combs_si_reg_entry_def] \\
+ TOP_CASE_TAC \\ simp [GENLIST_FUN_EQ, mk_inp_marked_def]
+QED
+
+Triviality regs_run_no_inps:
+ ∀j n.
+ sum_foldM (reg_run fext snet) sreg
+ (FILTER (λ(var,data). data.reg_type = Reg)
+  (GENLIST (λi. ((reg,i+j), <|type := CBool_t; reg_type := Reg; init := init (i+j); inp := NONE|>))
+           n)) = INR sreg
+Proof
+ Induct_on ‘n’ \\ simp [sum_foldM_def, GENLIST_CONS, reg_run_def, sum_bind_def, combinTheory.o_DEF] \\
+ gen_tac \\ first_x_assum (qspec_then ‘j + 1’ mp_tac) \\ simp [arithmeticTheory.ADD1] \\
+ ‘∀i. i + (j + 1) = j + (i + 1)’ by decide_tac \\ pop_assum (REWRITE_TAC o sing)
+QED
+
+Triviality blast_regs_correct_array_help:
  !reg fext init inps vs shift bsnet bsbase.
  LENGTH vs = LENGTH inps /\
  (!i. i < LENGTH inps ==> cell_inp_run fext bsnet (EL i inps) = INR (CBool (EL i vs))) ==>
  (* init does not matter here, but have it to match later: *)
- ?bs. sum_foldM (reg_run fext bsnet) bsbase (MAPi (λi inp. (CBool_t,reg,i+shift,SOME (CBool (EL (i+shift) init)),SOME inp)) inps) = INR bs /\
+ ?bs. sum_foldM (reg_run fext bsnet) bsbase
+                (FILTER (λ(var,data). data.reg_type = Reg)
+                        (MAPi (λi inp. ((reg,i+shift),
+                                        <| type := CBool_t;
+                                           reg_type := Reg;
+                                           init := SOME (CBool (EL (i+shift) init));
+                                           inp := SOME inp|>)) inps)) = INR bs /\
       (!var. cget_var bs var = case var of
                RegVar reg' i' => if reg' = reg /\ shift <= i' /\ i' < LENGTH inps + shift then
                                   INR (CBool (EL (i'-shift) vs))
@@ -1732,171 +2713,248 @@ Proof
  >- (qpat_x_assum ‘sum_foldM _ _ _ = _’ (assume_tac o GSYM) \\
      simp [combinTheory.o_DEF, arithmeticTheory.ADD1] \\ f_equals_tac \\ simp [FUN_EQ_THM])
  >- (rpt strip_tac \\ simp [] \\ TOP_CASE_TAC
-  >- (simp [arithmeticTheory.ADD1] \\ Cases_on ‘n = shift’
-   >- (rveq \\ simp [cget_var_cset_var])
-   >- (simp [cget_var_cset_var] \\ IF_CASES_TAC \\ fs [] \\
-      Cases_on ‘n - shift’ \\ fs [] \\ f_equals_tac \\ decide_tac))
-  >- simp [cget_var_cset_var])
+     >- (simp [arithmeticTheory.ADD1] \\ Cases_on ‘n = shift’
+         >- (rveq \\ simp [cget_var_cset_var])
+         >- (simp [cget_var_cset_var] \\ IF_CASES_TAC \\ fs [] \\
+             Cases_on ‘n - shift’ \\ fs [] \\ f_equals_tac \\ rw []))
+     >- simp [cget_var_cset_var])
  \\ fs [cset_var_fbits]
 QED
 
-Theorem blast_regs_correct_array:
- !l x fext snet sbase bsnet bsbase s blast_s n reg i inp tmpnum.
- blast_cell_input blast_s inp = ArrayInp x /\
- reg_run fext snet sbase (CArray_t n,reg,i,SOME (CArray l),SOME inp) = INR s /\
- blast_rel fext blast_s.si tmpnum sbase bsbase /\
- blast_rel fext blast_s.si tmpnum snet bsnet /\
- LENGTH l = LENGTH x /\
- rtltype_extenv_n blast_s.extenv fext /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum /\
- reg_ok blast_s.extenv tmpnum (CArray_t n,reg,i,SOME (CArray l),SOME inp) /\
- si_wf blast_s.si /\
- si_prefilled blast_s.si (CArray_t n,reg,i,SOME (CArray l),SOME inp) /\
- only_regs sbase ==>
- ?bs. sum_foldM (reg_run fext bsnet) bsbase (MAPi (λi inp. (CBool_t,reg,i,SOME (CBool (EL i l)),SOME inp)) x) = INR bs /\
-      only_regs s /\
-      blast_rel fext blast_s.si tmpnum s bs
+Triviality blast_regs_correct_Reg_lem:
+ ∀regsall blast_s combs_max ffs_max regs regs' snet sreg bsnet bsreg s' si fext.
+ blast_regs blast_s regs = INR regs' ∧
+ (*blast_regs_distinct regs ∧*)
+ regs_ok blast_s.extenv combs_max ffs_max regs ∧
+ rtltype_extenv_n blast_s.extenv fext ∧
+ sum_foldM (reg_run fext snet)
+           sreg
+           (FILTER (λ(var,data). data.reg_type = Reg) regs) = INR s' ∧
+ 
+ blast_reg_rel_fext fext blast_s.si snet bsnet ∧
+ blast_rel fext blast_s.si ffs_max snet bsnet ∧
+ blast_reg_rel si sreg bsreg ∧
+
+ blast_regs_distinct regsall ∧
+ (∀r. MEM r regs ⇒ MEM r regsall) ∧
+ 
+ cenv_consistent_with_regs regsall sreg ⇒
+ ∃bs'. sum_foldM (reg_run fext bsnet)
+                 bsreg
+                 (FILTER (λ(var,data). data.reg_type = Reg) regs') = INR bs' ∧
+       blast_reg_rel si s' bs'
 Proof
- rw [reg_ok_def, has_rtltype_v_def, reg_run_def, sum_bind_INR] \\
- drule_strip blast_cell_inp_run_correct_array \\ simp [] \\ strip_tac \\
- drule_strip blast_regs_correct_array_help \\ pop_assum (qspecl_then [‘reg’, ‘l’, ‘0’, ‘bsbase’] strip_assume_tac) \\
- fs [only_regs_cset_var_RegVar, blast_rel_def, cset_var_fbits, cget_var_cset_var] \\
- rpt strip_tac \\ IF_CASES_TAC
- >- (rveq \\ fs [si_prefilled_def, si_wf_def] \\ rpt strip_tac \\ rpt drule_first \\
-     rfs [cell_inp_run_def, sum_bind_def, cget_fext_var_def]) \\
- drule_last \\ TOP_CASE_TAC \\ TOP_CASE_TAC \\ fs []
+ ntac 4 gen_tac \\ Induct \\ TRY PairCases \\
+ fs [blast_regs_def, sum_foldM_INR, blast_regs_distinct_def, blast_reg_name_def, regs_ok_def] \\ rpt gen_tac \\
+ reverse TOP_CASE_TAC >- (
+  rw [] \\ drule_first \\ fs [GSYM ALOOKUP_NONE] \\
+  disch_then irule \\ rw [] \\ 
+  first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\
+  IF_CASES_TAC \\ fs []) \\
+ 
+ TOP_CASE_TAC >- (
+  TOP_CASE_TAC >- (
+    rpt strip_tac \\ gvs [sum_bind_INR, sum_foldM_INR] \\ drule_first \\
+    gs [reg_run_def] \\ disch_then irule \\ fs [GSYM ALOOKUP_NONE] \\
+    metis_tac []) \\
 
- >- (rpt TOP_CASE_TAC \\ qpat_x_assum ‘only_regs _’ mp_tac \\ simp [only_regs_def] \\
-     disch_then (qspec_then ‘RegVar reg n’ assume_tac) \\ fs [] \\ rfs [])
+  simp [sum_bind_INR] \\ rpt strip_tac \\
+  every_case_tac \\ gvs [sum_bind_INR, sum_foldM_INR, reg_run_def, reg_ok_def] \\
+  drule_strip blast_cell_inp_run_correct_bool \\ impl_tac >- simp [] \\ strip_tac \\
+  simp [has_rtltype_v_correct, rtltype_v_cases] \\
+  first_x_assum match_mp_tac \\ rpt asm_exists_tac \\
 
- >- (qpat_x_assum ‘only_regs _’ mp_tac \\ simp [only_regs_def] \\
-     disch_then (qspec_then ‘var’ mp_tac) \\ Cases_on ‘var’ \\ simp [] \\
-     rfs [si_wf_def]) \\
+  fs [SF DNF_ss] \\
+  drule_strip ALOOKUP_ALL_DISTINCT_MEM \\
+  
+  conj_tac >- (
+    fs [blast_reg_rel_def, cget_var_cset_var] \\ rpt gen_tac \\
+    IF_CASES_TAC >- (
+      rw [] \\ fs [cenv_consistent_with_regs_def] \\
+      rpt (first_x_assum (qspecl_then [‘h0’, ‘0’] mp_tac)) \\ rw [rtltype_v_cases] \\ fs []) \\
+                   
+    first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\ rpt TOP_CASE_TAC \\ fs [] \\ metis_tac []) \\
 
- rpt strip_tac \\ first_x_assum (qspec_then ‘i’ mp_tac) \\
- impl_tac >- simp [] \\
+  fs [cenv_consistent_with_regs_def] \\ rw [cget_var_cset_var] \\
+  simp [rtltype_v_cases] \\ TOP_CASE_TAC) \\
 
- qpat_x_assum ‘only_regs _’ assume_tac \\ fs [only_regs_def] \\ first_x_assum (qspec_then ‘var’ mp_tac) \\
- TOP_CASE_TAC \\ fs [] \\ strip_tac \\ rveq \\ drule_strip si_wf_shape \\ fs [] \\ rveq \\
- first_assum (once_rewrite_tac o sing) \\ rw [EL_GENLIST, cell_inp_run_def, sum_bind_INR, cget_fext_var_def]
+ rpt TOP_CASE_TAC >- (
+  rw [sum_bind_INR] \\ fs [sum_foldM_INR, FILTER_APPEND, sum_foldM_append] \\
+  gvs [reg_run_def, sum_bind_def, Q.SPEC ‘0’ regs_run_no_inps |> SIMP_RULE (srw_ss()) []] \\
+  first_x_assum match_mp_tac \\ rpt asm_exists_tac) \\
+
+ simp [sum_bind_INR] \\ rpt strip_tac \\ every_case_tac \\ fs [sum_bind_INR, sum_check_INR] \\ rveq \\
+ gs [sum_foldM_INR, sum_bind_INR, reg_run_def, FILTER_APPEND, sum_foldM_append] \\ rveq \\
+ gvs [reg_ok_def] \\
+ drule_strip blast_cell_inp_run_correct_array \\ impl_tac >- simp [] \\ strip_tac \\
+ drule_strip blast_regs_correct_array_help \\
+ first_x_assum (qspecl_then [‘h0’, ‘l’, ‘0’, ‘bsreg’] strip_assume_tac) \\ fs [] \\
+
+ first_x_assum match_mp_tac \\ rpt asm_exists_tac \\
+ fs [SF DNF_ss] \\ drule_strip ALOOKUP_ALL_DISTINCT_MEM \\
+ conj_tac >- (
+  fs [blast_reg_rel_def, cget_var_cset_var] \\ rpt gen_tac \\
+  IF_CASES_TAC >- (
+    rw [] \\ fs [cenv_consistent_with_regs_def] \\
+    rpt (first_x_assum (qspecl_then [‘h0’, ‘0’] mp_tac)) \\
+    rw [] \\ gs [rtltype_v_cases, GENLIST_FUN_EQ]) \\
+
+  first_x_assum (qspecl_then [‘reg’, ‘i’] mp_tac) \\ rpt TOP_CASE_TAC \\ fs [] \\ metis_tac []) \\
+
+ fs [cenv_consistent_with_regs_def] \\ rw [cget_var_cset_var] \\ fs [rtltype_v_cases]
 QED
 
-Theorem blast_regs_correct_array_no_inp:
- !i fi fv fext bsnet bsbase t dest.
- sum_foldM (reg_run fext bsnet) bsbase (GENLIST (λi. (t,dest,fi i,fv i,NONE)) i) = INR bsbase
+Theorem blast_regs_correct_Reg:
+ ∀regs regs' si blast_s s s' bs fext combs_max ffs_max.
+ blast_regs blast_s regs = INR regs' ∧
+ blast_regs_distinct regs ∧
+ regs_ok blast_s.extenv combs_max ffs_max regs ∧
+ rtltype_extenv_n blast_s.extenv fext ∧
+ sum_foldM (reg_run fext s)
+           (s with env := FILTER (is_RegVar ∘ FST) s.env)
+           (FILTER (λ(var,data). data.reg_type = Reg) regs) = INR s' ∧
+
+ blast_rel fext blast_s.si ffs_max s bs ∧
+ blast_reg_rel_fext fext blast_s.si s bs ∧
+ blast_reg_rel si s bs ∧
+                    
+ cenv_consistent_with_regs regs s ⇒
+ ∃bs'. sum_foldM (reg_run fext bs)
+                 (bs with env := FILTER (is_RegVar ∘ FST) bs.env)
+                 (FILTER (λ(var,data). data.reg_type = Reg) regs') = INR bs' ∧
+       blast_reg_rel si s' bs'
 Proof
- Induct >- simp [sum_foldM_def] \\ simp [GENLIST, SNOC_APPEND, sum_foldM_append, sum_bind_def] \\
- simp [sum_foldM_def, reg_run_def, sum_bind_def]
+ rpt strip_tac \\
+ match_mp_tac blast_regs_correct_Reg_lem \\ rpt asm_exists_tac \\ qexists_tac ‘regs’ \\
+ fs [blast_reg_rel_def, cget_var_def, ALOOKUP_FILTER_FST, is_RegVar_def, cenv_consistent_with_regs_def]
 QED
 
-Theorem blast_regs_correct:
- !regs regs' blast_s fext snet sbase bsnet bsbase s tmpnum.
- blast_regs blast_s regs = INR regs' /\
- sum_foldM (reg_run fext snet) sbase regs = INR s /\
- blast_rel fext blast_s.si tmpnum sbase bsbase /\
- blast_rel fext blast_s.si tmpnum snet bsnet /\
- regs_ok blast_s.extenv tmpnum regs /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum /\
- si_wf blast_s.si /\
- si_prefilleds blast_s.si regs /\
- only_regs sbase /\
- rtltype_extenv_n blast_s.extenv fext  ==>
- ?bs. sum_foldM (reg_run fext bsnet) bsbase regs' = INR bs /\
-      only_regs s /\
-      blast_rel fext blast_s.si tmpnum s bs
-Proof
- Induct >- (rw [blast_regs_def] \\ fs [sum_foldM_def] \\ rw []) \\
- PairCases \\ fs [blast_regs_def, sum_foldM_def, sum_bind_INR, regs_ok_def, si_prefilleds_def] \\ rpt gen_tac \\
- TOP_CASE_TAC \\ every_case_tac \\ simp [sum_bind_INR] \\ strip_tac \\ rveq
- >- (* bool without inp *)
-    (fs [optionTheory.OPTION_MAP_EQ_NONE] \\ rveq \\
-    fs [sum_foldM_def, reg_run_def, sum_bind_INR] \\ rveq \\ drule_first \\ simp [])
- >- (* bool *)
-    (fs [optionTheory.OPTION_MAP_EQ_SOME] \\ qpat_x_assum ‘BoolInp _ = _’ (assume_tac o GSYM) \\ rveq \\
-     simp [sum_foldM_def] \\ drule_strip blast_regs_correct_bool \\ simp [sum_bind_INR] \\ drule_first \\ simp [])
- >- (* array without inp *)
-    (fs [sum_foldM_append, reg_run_def] \\ rveq \\
-    DEP_REWRITE_TAC [blast_regs_correct_array_no_inp] \\ simp [sum_bind_def] \\
-    drule_first \\ simp [])
- \\ (* array *)
-    fs [sum_foldM_append, sum_check_INR] \\ drule_strip blast_regs_correct_array \\ simp [sum_bind_INR] \\
-    drule_first \\ simp []
-QED
+Theorem blast_netlist_blast_regs_correct:
+ !combs_nl ffs_nl n combs_nl' ffs_nl' fext s s' bs blast_s blast_s' blast_s'' new_si regs regs' min combs_max ffs_max.
+ blast_netlist blast_s combs_nl = INR (blast_s', combs_nl') /\
+ ffs_si blast_s' regs = INR new_si ∧
+ blast_netlist (blast_s' with si := new_si) ffs_nl = INR (blast_s'', ffs_nl') ∧
 
-Theorem blast_netlist_correct_step:
- !tmpnum fext nl nl' s s' bs blast_s blast_s' regs regs'.
- blast_netlist blast_s nl = (blast_s', nl') /\
- blast_regs blast_s' regs = INR regs' /\
- netlist_step fext s nl regs = INR s' /\
- blast_rel fext blast_s.si tmpnum s bs /\
+ blast_regs blast_s'' regs = INR regs' /\
 
- deterministic_netlist nl /\ netlist_ok blast_s.extenv 0 tmpnum nl /\ netlist_sorted nl /\
- regs_ok blast_s.extenv tmpnum regs /\
+ netlist_run fext s combs_nl ffs_nl regs n = INR s' /\
 
- si_wf blast_s.si /\
- si_prefilleds blast_s.si regs /\
-
- netlist_overlap_si blast_s.si tmpnum nl /\
-
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum /\
- rtltype_extenv_n blast_s.extenv fext /\
-
- only_regs s ==>
- blast_s'.extenv = blast_s.extenv /\
- ?bs'. netlist_step fext bs nl' regs' = INR bs' /\
-       only_regs s' /\
-       blast_rel fext blast_s'.si tmpnum s' bs'
-Proof
- simp [netlist_step_def, sum_bind_INR] \\ rpt strip_tac' \\
-
- drule_strip blast_netlist_correct \\ drule_first \\ simp [] \\
-
- ‘si_wf blast_s'.si’ by metis_tac [si_wf_def] \\
- ‘blast_rel fext blast_s'.si tmpnum s bs’ by metis_tac [blast_rel_only_regs] \\
-
- drule_strip blast_regs_correct \\
- impl_tac >- (simp [] \\ drule_strip si_prefilleds_cong \\ simp []) \\ strip_tac \\
- simp [only_regs_fbits] \\ fs [blast_rel_def, cget_var_fbits, cell_inp_run_fbits]
-QED
-
-Theorem blast_netlist_correct_run:
- !n nl nl' fext s s' bs blast_s blast_s' tmpnum regs regs'.
- blast_netlist blast_s nl = (blast_s', nl') /\
- blast_regs blast_s' regs = INR regs' /\
- netlist_run fext s nl regs n = INR s' /\
+ blast_regs_distinct regs ∧
+ cenv_consistent_with_regs regs s ∧
+ si_consistent_with_regs blast_s.si regs ∧
  blast_reg_rel blast_s.si s bs /\
 
- si_wf blast_s.si /\
- si_prefilleds blast_s.si regs /\
-
- deterministic_netlist nl /\ netlist_ok blast_s.extenv 0 tmpnum nl /\ netlist_sorted nl /\ netlist_overlap_si blast_s.si tmpnum nl /\
- regs_ok blast_s.extenv tmpnum regs /\
+ deterministic_netlist combs_nl /\ deterministic_netlist ffs_nl /\
+ netlist_ok blast_s.extenv min combs_max combs_nl /\ netlist_ok blast_s.extenv combs_max ffs_max ffs_nl /\
+ min ≤ combs_max ∧
+ combs_max ≤ ffs_max ∧
+ netlist_sorted (combs_nl ++ ffs_nl) /\
+ (*si_cells_inv blast_s.si ffs_max combs_nl /\*)
+ regs_ok blast_s.extenv combs_max ffs_max regs /\
 
  rtltype_extenv blast_s.extenv fext /\
- blasterstate_ok blast_s.si tmpnum blast_s.tmpnum /\
+ blasterstate_ok regs blast_s.si min ffs_max blast_s.tmpnum /\
  
  only_regs s ==>
- ?bs'. netlist_run fext bs nl' regs' n = INR bs' /\
-       blasterstate_ok blast_s'.si tmpnum blast_s'.tmpnum /\
-       only_regs s' /\
-       blast_reg_rel blast_s.si s' bs'
+ blast_s''.extenv = blast_s.extenv ∧
+ (!reg i. lookup var_cmp (RegVar reg i) blast_s'.si = lookup var_cmp (RegVar reg i) blast_s.si) ∧
+ (!reg i. lookup var_cmp (RegVar reg i) blast_s''.si = lookup var_cmp (RegVar reg i) new_si) ∧
+ deterministic_netlist combs_nl' ∧ deterministic_netlist ffs_nl' ∧
+ blasterstate_ok regs blast_s'.si ffs_max ffs_max blast_s'.tmpnum /\
+ ?bs'. netlist_run fext bs combs_nl' ffs_nl' regs' n = INR bs' ∧
+       blast_rel (fext n) blast_s''.si ffs_max s' bs' ∧
+       blast_reg_rel blast_s.si s' bs' ∧
+       blast_reg_rel_fext (fext n) blast_s''.si s' bs'
 Proof
- Induct >- (simp [netlist_run_def] \\ rpt strip_tac' \\ drule_strip blast_netlist_correct) \\
+ ntac 2 gen_tac \\ Induct >- (
+  simp [netlist_run_def] \\ rpt strip_tac' \\
+  qspecl_then [‘combs_nl’, ‘ffs_nl’] assume_tac blast_netlist_blast_regs_correct_step \\ drule_first \\
+  fs [rtltype_extenv_rtltype_extenv_n]) \\
 
- rw [netlist_run_def, sum_bind_INR] \\ drule_first \\
- drule_strip blast_netlist_correct_step \\
- disch_then (qspecl_then [‘tmpnum’, ‘bs'’] mp_tac) \\ fs [rtltype_extenv_rtltype_extenv_n] \\ 
- impl_tac >- (drule_strip blast_reg_rel_blast_rel \\ simp []) \\ strip_tac \\
+ simp_tac bool_ss [netlist_run_def, sum_bind_INR] \\ rpt strip_tac' \\ drule_first \\ simp [] \\
 
- drule_strip blast_netlist_correct \\ simp [] \\
- ‘si_wf blast_s'.si’ by metis_tac [si_wf_def] \\
- metis_tac [blast_rel_only_regs, blast_rel_blast_reg_rel]
+ drule_strip ffs_si_ffs_si_consistent_with_regs \\
+ impl_keep_tac >- metis_tac [si_consistent_with_regs_cong] \\ strip_tac \\
+
+ drule_strip rtltype_extenv_rtltype_extenv_n \\ first_x_assum (qspec_then ‘n’ assume_tac) \\
+ rev_drule_strip netlist_run_cenv_consistent_with_regs \\
+ drule_strip blast_regs_correct_Reg \\ simp [] \\ disch_then drule_strip \\ simp [] \\
+
+ rev_drule_strip regs_run_cenv_consistent_with_regs \\
+ impl_tac >- fs [cenv_consistent_with_regs_def, cget_var_def, ALOOKUP_FILTER_FST, is_RegVar_def] \\ strip_tac \\
+ rev_drule_strip regs_run_only_regs \\
+ impl_tac >- simp [only_regs_def, cget_var_def, ALOOKUP_FILTER_FST, is_RegVar_def] \\ strip_tac \\
+
+ qspecl_then [‘combs_nl’, ‘ffs_nl’] assume_tac blast_netlist_blast_regs_correct_step \\ drule_first \\
+ impl_tac >- fs [rtltype_extenv_rtltype_extenv_n] \\ simp []
+QED
+
+(** blast_regs + init_run **)
+
+(* TODO: Rename to reg_idx_ok or something like that? *)
+Definition reg_init_ok_def:
+ reg_init_ok ((reg,i),rdata) ⇔ i = 0 (*∧ OPTION_ALL (λv. rtltype_v v rdata.type) rdata.init*)
+End
+
+Theorem regs_ok_EVERY_reg_init_ok:
+ ∀extenv combs_max ffs_max regs. regs_ok extenv combs_max ffs_max regs ⇒ EVERY reg_init_ok regs
+Proof
+ rw [regs_ok_def] \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ PairCases \\ rw [reg_ok_def, reg_init_ok_def]
+QED
+
+Definition blast_reg_init_rel_def:
+ blast_reg_init_rel regs s bs <=>
+  bs.fbits = s.fbits /\
+  ∀reg. case cget_var s (RegVar reg 0) of
+          INL e => T
+        | INR (CBool b) => ∀rdata. ALOOKUP regs (reg, 0) = SOME rdata ∧ rdata.reg_type = Reg ⇒
+                                   cget_var bs (RegVar reg 0) = INR (CBool b)
+        | INR (CArray b) =>
+           ∀rdata. ALOOKUP regs (reg, 0) = SOME rdata ∧ rdata.reg_type = Reg ⇒ 
+                   ∀i. i < LENGTH b ⇒ cget_var bs (RegVar reg i) = INR (CBool (EL i b))
+End
+
+Theorem blast_reg_init_rel_cset_var_bool:
+ blast_reg_init_rel si s bs ∧ rtltype_v v CBool_t ⇒
+ blast_reg_init_rel si (cset_var s (RegVar reg 0) v) (cset_var bs (RegVar reg 0) v)
+Proof
+ rw [blast_reg_init_rel_def, rtltype_v_cases, cset_var_fbits] \\ rw [cget_var_cset_var]
+QED
+
+Theorem blast_reg_init_rel_blast_reg_rel:
+ ∀regs si s bs.
+ blast_reg_init_rel regs s bs ∧
+ si_consistent_with_regs si regs ∧
+ EVERY reg_init_ok regs ∧
+ (∀reg i v. cget_var s (RegVar reg i) = INR v ⇒ ∃rdata. ALOOKUP regs (reg, i) = SOME rdata) ⇒
+ cenv_consistent_with_regs regs s ⇒
+ blast_reg_rel si s bs
+Proof
+ rw [blast_reg_init_rel_def, si_consistent_with_regs_def, cenv_consistent_with_regs_def, blast_reg_rel_def] \\
+ TOP_CASE_TAC \\ drule_first \\ 
+ rpt (first_x_assum (qspecl_then [‘reg’, ‘i’] assume_tac)) \\
+ imp_res_tac ALOOKUP_EVERY \\ gs [reg_init_ok_def] \\
+ first_x_assum (qspec_then ‘reg’ mp_tac) \\ rpt TOP_CASE_TAC \\ rw [] \\
+ fs [build_combs_si_reg_entry_def, rtltype_v_cases] \\ every_case_tac \\
+ gvs [GENLIST_FUN_EQ] \\ Cases_on ‘rdata.reg_type’ \\ fs [mk_inp_marked_def]
+QED
+
+Theorem blast_reg_rel_blast_reg_init_rel:
+ ∀regs si s bs.
+ blast_reg_rel si s bs ∧ si_consistent_with_regs si regs ∧ 
+ cenv_consistent_with_regs regs s ⇒
+ blast_reg_init_rel regs s bs
+Proof
+ rw [blast_reg_rel_def, si_consistent_with_regs_def, blast_reg_init_rel_def] \\
+ rpt (first_x_assum (qspecl_then [‘reg’, ‘0’] mp_tac)) \\ every_case_tac \\ rw [] \\ imp_res_tac ALOOKUP_EVERY \\
+ gs [build_combs_si_reg_entry_def] \\ every_case_tac \\
+ gvs [rtltype_v_cases, mk_inp_marked_def, GENLIST_FUN_EQ_gen]
 QED
 
 Theorem init_run_blasted_array_help:
- !finp reg vs l bs shift.
+ !finp reg reg_type vs l bs shift.
  LENGTH l = LENGTH vs ==>
- ?bs'. init_run bs (MAPi (λi inp. (CBool_t,reg,i+shift,SOME (CBool (EL i l)),finp inp)) vs) = INR bs' /\
+ ?bs'. init_run bs (MAPi (λi inp. ((reg, i+shift), <| type := CBool_t; reg_type := reg_type; init := SOME (CBool (EL i l)); inp := finp inp|>)) vs) = INR bs' /\
        (!var. cget_var bs' var = case var of
                 RegVar reg' i' => if reg' = reg /\ shift <= i' /\ i' < LENGTH l + shift then
                                    INR (CBool (EL (i'-shift) l))
@@ -1905,7 +2963,7 @@ Theorem init_run_blasted_array_help:
               | _ => cget_var bs var) /\
        bs'.fbits = bs.fbits
 Proof
- ntac 2 gen_tac \\ Induct >- (rw [init_run_def] \\ TOP_CASE_TAC) \\ rpt strip_tac \\ Cases_on ‘l’ \\ fs [] \\
+ ntac 3 gen_tac \\ Induct >- (rw [init_run_def] \\ TOP_CASE_TAC) \\ rpt strip_tac \\ Cases_on ‘l’ \\ fs [] \\
  simp [init_run_def, has_rtltype_v_def] \\ qmatch_goalsub_abbrev_tac ‘init_run bs' _’ \\
  drule_first \\ pop_assum (qspecl_then [‘bs'’, ‘shift + 1’] strip_assume_tac) \\
  unabbrev_all_tac \\ qexists_tac ‘bs''’ \\ rpt conj_tac
@@ -1914,29 +2972,33 @@ Proof
   >- (simp [arithmeticTheory.ADD1] \\ Cases_on ‘n = shift’
    >- (rveq \\ simp [cget_var_cset_var])
    >- (simp [cget_var_cset_var] \\ IF_CASES_TAC \\ fs [] \\
-      Cases_on ‘n - shift’ \\ fs [] \\ f_equals_tac \\ decide_tac))
+      Cases_on ‘n - shift’ \\ fs [] \\ f_equals_tac \\ fs [] \\ rw []))
   >- simp [cget_var_cset_var])
  \\ fs [cset_var_fbits]
 QED
 
+(* Holds for any reg_type but that's more general than we need *)
 Theorem init_run_blasted_array:
- !finp inps inp n l s s' bs si reg.
- init_run s [(CArray_t n,reg,0,SOME (CArray l),inp)] = INR s' /\
- si_prefilled si (CArray_t n,reg,0,SOME (CArray l),inp) /\
- si_wf si /\
- only_regs s /\
- blast_reg_rel si s bs /\
+ !finp inps s s' bs reg rdata l regs.
+ init_run s [((reg, 0), rdata)] = INR s' /\
+ rdata.init = SOME (CArray l) ∧
+
+ blast_regs_distinct regsall ∧
+ MEM ((reg, 0), rdata) regsall ∧ 
+
+ blast_reg_init_rel regs s bs ∧
  LENGTH l = LENGTH inps ==>
- only_regs s' /\
- ?bs'. init_run bs (MAPi (λi inp. (CBool_t,reg,i,SOME (CBool (EL i l)),finp inp)) inps) = INR bs' /\
-       blast_reg_rel si s' bs'
+ ?bs'. init_run bs (MAPi (λi inp. ((reg, i), <|type := CBool_t; reg_type := Reg; init := SOME (CBool (EL i l)); inp := finp inp|>)) inps) = INR bs' /\
+       blast_reg_init_rel regs s' bs'
 Proof
- rpt strip_tac' \\ drule_strip init_run_blasted_array_help \\ 
- pop_assum (qspecl_then [‘finp’, ‘reg’, ‘bs’, ‘0’] strip_assume_tac) \\
- fs [init_run_def, blast_reg_rel_def, cset_var_fbits, only_regs_cset_var_RegVar] \\ rpt strip_tac \\ simp [cget_var_cset_var] \\ IF_CASES_TAC
- >- (fs [has_rtltype_v_def, si_prefilled_def, si_wf_def] \\ rveq \\ drule_last \\ rpt strip_tac \\ rfs [cell_inp_run_def, sum_bind_def, cget_fext_var_def])
- \\ rpt TOP_CASE_TAC \\ fs [] \\
-    rpt strip_tac \\ first_x_assum (qspec_then ‘reg'’ mp_tac) \\ simp []
+ simp [blast_regs_distinct_def, blast_reg_name_def] \\ rpt strip_tac' \\
+ drule_strip ALOOKUP_ALL_DISTINCT_MEM \\
+ drule_strip init_run_blasted_array_help \\
+ pop_assum (qspecl_then [‘finp’, ‘reg’, ‘Reg’, ‘bs’, ‘0’] strip_assume_tac) \\
+ fs [init_run_def, blast_reg_init_rel_def, cset_var_fbits] \\ rpt strip_tac \\ simp [cget_var_cset_var] \\ IF_CASES_TAC
+ >- (gs [has_rtltype_v_correct, rtltype_v_cases, build_combs_si_reg_entry_def] \\
+     gen_tac \\ CASE_TAC)
+ >- fs []
 QED
 
 Triviality MAPi_ignore_second_arg_GENLIST':
@@ -1954,48 +3016,64 @@ Proof
 QED
 
 Theorem blast_regs_init_correct:
- !tmpnum regs regs' s s' bs blast_s.
+ !regs regs' s s' bs blast_s.
  init_run s regs = INR s' /\
  blast_regs blast_s regs = INR regs' /\
- regs_ok blast_s.extenv tmpnum regs /\
+ EVERY reg_init_ok regs /\
  deterministic_regs regs /\
- only_regs s /\
- blast_reg_rel blast_s.si s bs /\
- si_wf blast_s.si /\
- si_prefilleds blast_s.si regs ==>
+ blast_regs_distinct regsall ∧
+ (∀reg. MEM reg regs ⇒ MEM reg regsall) ∧
+ blast_reg_init_rel regsall s bs ==>
  ?bs'. init_run bs regs' = INR bs' /\
-       blast_reg_rel blast_s.si s' bs'
+       blast_reg_init_rel regsall s' bs'
 Proof
- gen_tac \\ Induct >- simp [init_run_def, blast_regs_def] \\
- PairCases \\ rename1 `(t, reg, i, v, inp)` \\
- fs [regs_ok_def, reg_ok_def, deterministic_regs_def, blast_regs_def, si_prefilleds_def] \\
- rpt gen_tac \\ TOP_CASE_TAC
+ Induct >- simp [init_run_def, blast_regs_def] \\
+ PairCases \\ rename1 `((reg, i), rdata)` \\
+ fs [blast_regs_def, deterministic_regs_def, deterministic_reg_def, reg_init_ok_def] \\
+ rpt gen_tac \\ reverse TOP_CASE_TAC
 
- >- (* bool *)
- (rpt TOP_CASE_TAC \\ (simp [sum_bind_INR] \\ rpt strip_tac' \\ rveq \\ fs [init_run_def] \\
-                       TOP_CASE_TAC >- fs [deterministic_reg_def] \\ fs [] \\ FULL_CASE_TAC \\ fs [] \\
-                       first_x_assum match_mp_tac \\ rpt asm_exists_tac \\
-                       fs [only_regs_cset_var_RegVar, si_prefilled_def, has_rtltype_v_CBool_t] \\
-                       metis_tac [blast_rel_cset_var_reg_bool, blast_reg_rel_blast_rel, blast_rel_blast_reg_rel]))
+ (* PseudoReg *) >- (
+ simp [init_run_def, build_combs_si_reg_entry_def] \\ rpt CASE_TAC \\ rpt strip_tac \\
+ gs [mk_inp_marked_def, has_rtltype_v_correct, rtltype_v_cases] \\
+ first_x_assum match_mp_tac \\ rpt asm_exists_tac \\
+ fs [blast_reg_init_rel_def, cset_var_fbits, cget_var_cset_var] \\ rw [] \\ fs [] \\
+ full_simp_tac (srw_ss()++boolSimps.DNF_ss) [] \\ drule_strip ALOOKUP_MEM \\
+ imp_res_tac regsall_lem \\ fs [])
 
- \\ every_case_tac
+ (* Reg *) \\ TOP_CASE_TAC
+ 
+ >- (* bool *) (simp [build_combs_si_reg_entry_def] \\ rpt TOP_CASE_TAC
+ >- (rw [sum_bind_INR] \\ fs [init_run_def] \\ rpt TOP_CASE_TAC \\ gs [] \\
+     first_x_assum match_mp_tac \\ rpt asm_exists_tac \\ fs [has_rtltype_v_correct, blast_reg_init_rel_cset_var_bool])
+ >- (rw [sum_bind_INR] \\ every_case_tac \\ fs [sum_bind_INR] \\ rveq \\ fs [init_run_def] \\
+     every_case_tac \\ fs [] \\
+     first_x_assum match_mp_tac \\ rpt asm_exists_tac \\ gs [has_rtltype_v_correct, blast_reg_init_rel_cset_var_bool]))
+
+ \\ every_case_tac \\ simp [sum_bind_INR, rtltype_v_cases]
  >- (* array -- genlist case (no inps) *)
- (rw [sum_check_INR, sum_bind_INR] \\ fs [init_run_append, Once init_run_cons] \\
- simp [GSYM MAPi_ignore_second_arg_GENLIST] \\
+ (rw [] \\ fs [init_run_append, Once init_run_cons] \\
+ full_simp_tac (srw_ss()++boolSimps.DNF_ss) [GSYM MAPi_ignore_second_arg_GENLIST] \\
  qspecl_then [‘K NONE : 'a -> cell_input option’, ‘l’] mp_tac init_run_blasted_array \\ disch_then drule_strip \\
  simp [combinTheory.K_THM] \\ strip_tac \\ simp [] \\
- first_x_assum match_mp_tac \\ asm_exists_tac \\ simp [])
+ first_x_assum match_mp_tac \\ rpt asm_exists_tac)
 
  \\ (* array -- mapi case (inps) *)
- rw [sum_check_INR, sum_bind_INR] \\ fs [init_run_append, Once init_run_cons] \\
- qspecl_then [‘SOME’, ‘l’] mp_tac init_run_blasted_array \\ disch_then drule_strip \\
- simp [] \\ first_x_assum match_mp_tac \\ asm_exists_tac \\ simp []
+ rpt strip_tac \\ full_case_tac \\ fs [sum_bind_INR, sum_check_INR] \\ rveq \\
+ full_simp_tac (srw_ss()++boolSimps.DNF_ss) [init_run_append, Once init_run_cons] \\
+ qspecl_then [‘SOME’, ‘l'’] mp_tac init_run_blasted_array \\ disch_then drule_strip \\
+ simp [] \\ first_x_assum match_mp_tac \\ rpt asm_exists_tac
 QED
 
-Triviality mem_map_blast_reg_name_reg_name:
- ∀regs reg i. MEM (reg,i) (MAP blast_reg_name regs) ⇒ MEM reg (MAP reg_name regs)
+Triviality mem_map_blast_reg_name_mem_map_reg_name:
+ ∀regs reg i rdata. MEM (blast_reg_name ((reg, i), rdata)) (MAP blast_reg_name regs) ⇒ MEM reg (MAP reg_name regs)
 Proof
- rw [MEM_MAP] \\ qexists_tac ‘y’ \\ PairCases_on ‘y’ \\ fs [blast_reg_name_def, reg_name_def]
+ rw [MEM_MAP] \\ asm_exists_any_tac \\ PairCases_on ‘y’ \\ fs [blast_reg_name_def, reg_name_def]
+QED
+
+Triviality mem_map_blast_reg_name_mem_map_reg_name_unfolded:
+ ∀regs reg i. MEM (reg,i) (MAP FST regs) ⇒ MEM reg (MAP reg_name regs)
+Proof
+ rw [MEM_MAP] \\ asm_exists_any_tac \\ PairCases_on ‘y’ \\ fs [reg_name_def]
 QED
 
 Theorem blast_regs_distinct:
@@ -2004,247 +3082,308 @@ Theorem blast_regs_distinct:
  (∀reg. MEM reg (MAP reg_name regs') ⇒ MEM reg (MAP reg_name regs)) ∧ blast_regs_distinct regs'
 Proof
  Induct >- rw [blast_regs_def, blast_regs_distinct_def] \\
- TRY PairCases \\ simp [blast_regs_def] \\ rpt gen_tac \\ TOP_CASE_TAC
+ TRY PairCases \\ simp [blast_regs_def] \\ rpt gen_tac \\ reverse TOP_CASE_TAC
+ >- (* PseudoReg *) (rpt strip_tac' \\ drule_strip regs_distinct_tl \\ drule_first \\ simp []) \\
 
- >- (rpt TOP_CASE_TAC \\ simp [sum_bind_INR] \\ rpt strip_tac' \\ rveq \\
+ (* Reg *) TOP_CASE_TAC
+ >- (every_case_tac \\ simp [sum_bind_INR] \\ rpt strip_tac' \\ every_case_tac \\ fs [sum_bind_INR] \\ rveq \\
     drule_strip regs_distinct_tl \\ drule_first \\ (rw [reg_name_def]
     >- (drule_first \\ simp [])
-    >- (fs [blast_regs_distinct_def, regs_distinct_def, blast_reg_name_def, reg_name_def] \\
-        metis_tac [mem_map_blast_reg_name_reg_name])))
+    >- (fs [blast_regs_distinct_def, regs_distinct_def] \\
+        metis_tac [mem_map_blast_reg_name_mem_map_reg_name, reg_name_def])))
 
- \\ every_case_tac \\ simp [sum_bind_INR] \\ rpt strip_tac' \\ rveq \\
+ \\ every_case_tac \\ simp [sum_bind_INR] \\ rpt strip_tac' \\ every_case_tac \\ fs [sum_bind_INR] \\ rveq \\
     drule_strip regs_distinct_tl \\ drule_first \\ (rw [reg_name_def]
     >- fs [MAP_GENLIST, MEM_GENLIST, indexedListsTheory.MEM_MAPi, reg_name_def]
     >- (drule_first \\ simp [])
     >- (fs [blast_regs_distinct_def, regs_distinct_def, blast_reg_name_def, reg_name_def,
             MAP_GENLIST, ALL_DISTINCT_GENLIST, indexedListsTheory.MAPi_GENLIST, ALL_DISTINCT_APPEND] \\
         rw [MEM_GENLIST, indexedListsTheory.MEM_MAPi, blast_reg_name_def] \\
-        metis_tac [mem_map_blast_reg_name_reg_name]))
+        metis_tac [mem_map_blast_reg_name_mem_map_reg_name_unfolded]))
 QED
 
-Theorem init_run_only_regs_ok:
- !regs (extenv : (string, rtltype) alist) s s' tmpnum.
- init_run s regs = INR s' /\ regs_ok extenv tmpnum regs /\ only_regs s ==> only_regs s'
+Theorem blast_regs_deterministic:
+ ∀regs regs' blast_s. blast_regs blast_s regs = INR regs' ∧ deterministic_regs regs ⇒ deterministic_regs regs'
 Proof
- Induct >- (EVAL_TAC \\ simp []) \\ PairCases \\ fs [init_run_def, regs_ok_def, reg_ok_def] \\ rpt gen_tac \\ TOP_CASE_TAC
- >- (pairarg_tac \\ simp [] \\ strip_tac \\ drule_first \\ simp [only_regs_cset_var_RegVar, only_regs_fbits])
- \\ rw [] \\ drule_first \\ simp [only_regs_cset_var_RegVar]
+ Induct \\ TRY PairCases \\ fs [blast_regs_def, deterministic_regs_def] \\
+ rpt gen_tac \\ every_case_tac \\ rw [sum_bind_INR] \\
+ every_case_tac \\ gvs [sum_bind_INR, deterministic_reg_def, EVERY_GENLIST, EVERY_MAPi, EVERYi_T, SF SFY_ss]
 QED
 
-Theorem blast_rel_nil:
- !fext si tmpnum fbits. blast_rel fext si tmpnum <| env := []; fbits := fbits |> <| env := []; fbits := fbits |>
+Theorem blast_regs_reg_props:
+ ∀regs regs' blast_s.
+ blast_regs blast_s regs = INR regs' ⇒
+ EVERY (λ(_,rdata). rdata.reg_type = Reg) regs' ∧
+ EVERY (λ(_,rdata). rdata.type = CBool_t) regs'
 Proof
- rw [blast_rel_def, cget_var_def]
+ Induct \\ TRY PairCases \\ simp [blast_regs_def] \\ rpt gen_tac \\
+ every_case_tac \\ rw [sum_bind_INR] \\
+ every_case_tac \\ gvs [sum_bind_INR, EVERY_GENLIST, EVERY_MAPi, EVERYi_T, SF SFY_ss]
 QED
 
-Theorem blast_reg_rel_nil:
- !si fbits. blast_reg_rel si <| env := []; fbits := fbits |> <| env := []; fbits := fbits |>
+Triviality MEM_MAP_reg_name_FST_glue:
+ ∀reg regs. MEM reg (MAP reg_name regs) ⇔ ∃i. MEM (reg, i) (MAP FST regs)
 Proof
- rw [blast_reg_rel_def, cget_var_def]
+ rw [MEM_MAP, pairTheory.EXISTS_PROD, reg_name_def]
 QED
 
-Theorem only_regs_nil:
- !fbits. only_regs <|env := []; fbits := fbits|>
+Triviality blast_regs_reverse_lookup_Reg:
+ ∀combs_max ffs_max regs regs' blast_s.
+ blast_regs blast_s regs = INR regs' ∧
+ regs_ok blast_s.extenv combs_max ffs_max regs ∧
+ regs_distinct regs ⇒
+ (∀reg. MEM reg (MAP reg_name regs') ⇒ MEM reg (MAP reg_name regs)) ∧
+ ∀reg i. MEM reg (MAP reg_name regs') ⇒ ∃rdata. ALOOKUP regs (reg,0) = SOME rdata ∧ rdata.reg_type = Reg
 Proof
- rw [only_regs_def, cget_var_def] \\ TOP_CASE_TAC
+ ntac 2 gen_tac \\ Induct \\ TRY PairCases \\ fs [blast_regs_def, regs_distinct_def] \\ rpt gen_tac \\
+ reverse TOP_CASE_TAC >- (rpt strip_tac' \\ fs [regs_ok_def, reg_name_def] \\ metis_tac []) \\
+ TOP_CASE_TAC >- (TOP_CASE_TAC \\ simp [sum_bind_INR] \\ rpt strip_tac' \\ every_case_tac \\
+                  gvs [sum_bind_INR, regs_ok_def, reg_ok_def, reg_name_def] \\
+                  metis_tac []) \\
+ every_case_tac \\ rw [sum_bind_INR] \\
+ every_case_tac \\ gvs [sum_bind_INR, regs_ok_def, reg_ok_def, reg_name_def,
+                        MEM_GENLIST, MAP_GENLIST, indexedListsTheory.MAPi_GENLIST, SF SFY_ss]
 QED
 
-(** Initial si properties **)
+(** initial_si **)
 
-Theorem MEM_reg_regs_shape:
- !reg regs. MEM reg (MAP reg_name regs) <=> ?t i v inp. MEM (t,reg,i,v,inp) regs
+(*Theorem EVERY_ALOOKUP:
+ ∀P l. ALL_DISTINCT (MAP FST l) ⇒ (EVERY P l ⇔ ∀k v. ALOOKUP l k = SOME v ⇒ P (k, v))
 Proof
- rw [MEM_MAP] \\ eq_tac \\ strip_tac
- >- (rveq \\ PairCases_on ‘y’ \\ simp [reg_name_def] \\ asm_exists_tac)
- \\ asm_exists_any_tac \\ simp [reg_name_def]
+ rw [EVERY_MEM, pairTheory.FORALL_PROD] \\ metis_tac [ALOOKUP_ALL_DISTINCT_MEM, ALOOKUP_MEM]
 QED
 
-Theorem regs_ok_RegVar_idx_0:
- !regs extenv t reg i v inp tmpnum. regs_ok extenv tmpnum regs /\ MEM (t,reg,i,v,inp) regs ==> i = 0
+Theorem lookup_fromList_var_cmp:
+ ∀l k v. lookup var_cmp k (fromList var_cmp l) = ALOOKUP l k
 Proof
- rw [regs_ok_def, EVERY_MEM] \\ drule_first \\ fs [reg_ok_def]
-QED
-
-(*Theorem regs_wf_RegVar_idx_not_0:
- !regs t reg i v inp. regs_wf regs /\ i <> 0 ==> ~MEM (t,reg,i,v,inp) regs
-Proof
- metis_tac [regs_wf_RegVar_idx_0]
+ Induct >- (EVAL_TAC \\ simp []) \\
+ PairCases \\ simp [fromList_cons, lookup_insert_var_cmp, fromList_thm_var_cmp] \\ rw []
 QED*)
 
-Theorem fromList_cons:
- !cmp k v xs. fromList cmp ((k,v)::xs) = insert cmp k v (fromList cmp xs)
+Triviality lookup_initial_si_not_in_regs:
+ ∀regs reg i. ¬MEM (reg, i) (MAP FST regs) ⇒ lookup var_cmp (RegVar reg i) (initial_si regs) = NONE
 Proof
- simp [fromList_def]
+ Induct >- (EVAL_TAC \\ simp []) \\ PairCases \\ fs [initial_si_def, reg_name_def] \\
+ rw [option_flatMap_def, build_combs_si_reg_entry_def] \\
+ every_case_tac \\ simp [fromList_cons, lookup_insert_var_cmp, fromList_thm_var_cmp] \\ rw []
 QED
 
-Theorem lookup_initial_si_NetVar:
- !regs n. lookup var_cmp (NetVar n) (fromList var_cmp (option_flatMap build_si_entry regs)) = NONE
+Triviality MEM_IMP_reg_name:
+ ∀reg i rdata regs. MEM ((reg, i), rdata) regs ⇒ MEM reg (MAP reg_name regs)
 Proof
- Induct >- (EVAL_TAC \\ simp []) \\ PairCases \\ rpt strip_tac \\ simp [option_flatMap_def, build_si_entry_def] \\
- every_case_tac \\ simp [fromList_cons] \\ DEP_REWRITE_TAC [lookup_insert_var_cmp] \\ simp [fromList_thm_var_cmp]
+ rw [MEM_MAP, pairTheory.EXISTS_PROD, reg_name_def] \\ asm_exists_tac
 QED
 
-Triviality lookup_initial_si_RegVar_bool:
- !regs reg i inp.
- lookup var_cmp (RegVar reg i) (fromList var_cmp (option_flatMap build_si_entry regs)) ≠ SOME (BoolInp inp)
+Triviality lookup_initial_si_in_regs:
+ ∀regs reg i rdata.
+ MEM ((reg, i), rdata) regs ∧ ALL_DISTINCT (MAP FST regs) ⇒
+ lookup var_cmp (RegVar reg i) (initial_si regs) = OPTION_MAP SND (build_combs_si_reg_entry ((reg, i), rdata))
 Proof
- Induct >- (EVAL_TAC \\ simp []) \\ PairCases \\ rpt strip_tac' \\ simp [option_flatMap_def, build_si_entry_def] \\
- every_case_tac \\ simp [fromList_cons] \\ DEP_REWRITE_TAC [lookup_insert_var_cmp] \\ rw [fromList_thm_var_cmp]
+ Induct >- (EVAL_TAC \\ simp []) \\
+ PairCases \\ rw []
+ >- (simp [initial_si_def, option_flatMap_def, build_combs_si_reg_entry_def] \\ every_case_tac \\
+     fs [fromList_cons, lookup_insert_var_cmp, fromList_thm_var_cmp, reg_name_def] \\
+     drule_strip lookup_initial_si_not_in_regs \\ fs [initial_si_def]) \\
+ drule_first \\
+ ‘reg ≠ h0 ∨ i ≠ h1’ by (simp [] \\ rpt strip_tac \\ rveq \\ fs [MEM_MAP]) \\
+ fs [initial_si_def, option_flatMap_def, build_combs_si_reg_entry_def] \\
+ every_case_tac \\ gvs [fromList_cons, lookup_insert_var_cmp, fromList_thm_var_cmp] \\ rw [GENLIST_FUN_EQ]
 QED
 
-Theorem lookup_initial_si_bool:
- !regs var inp.
- lookup var_cmp var (fromList var_cmp (option_flatMap build_si_entry regs)) ≠ SOME (BoolInp inp)
+(* Alternative name: si_consistent_with_regs_initial_si *)
+Theorem lookup_RegVar_initial_si:
+ ∀regs. regs_distinct regs (*∧ EVERY reg_init_ok regs*) ⇒ si_consistent_with_regs (initial_si regs) regs
 Proof
- Cases_on ‘var’ \\ simp [lookup_initial_si_NetVar, lookup_initial_si_RegVar_bool]
+ rpt strip_tac \\ drule_strip regs_distinct_blast_regs_distinct \\
+ fs [regs_distinct_def, blast_regs_distinct_def, blast_reg_name_def, si_consistent_with_regs_def] \\
+ rpt gen_tac \\ Cases_on ‘ALOOKUP regs (reg, i)’
+ >- (fs [ALOOKUP_NONE] \\ drule_strip lookup_initial_si_not_in_regs) \\
+ drule_strip ALOOKUP_MEM \\ drule_strip lookup_initial_si_in_regs \\ simp []
 QED
 
-Theorem lookup_initial_si_RegVar_not_mem:
- !regs reg i.
- ~MEM reg (MAP reg_name regs) ==>
- lookup var_cmp (RegVar reg i) (fromList var_cmp (option_flatMap build_si_entry regs)) = NONE
+Theorem lookup_NetVar_initial_si:
+ ∀regs n. lookup var_cmp (NetVar n) (initial_si regs) = NONE
 Proof
- Induct >- (EVAL_TAC \\ simp []) \\ PairCases \\ rpt strip_tac \\ simp [option_flatMap_def, build_si_entry_def] \\
- every_case_tac \\ fs [fromList_cons, reg_name_def] \\
- DEP_REWRITE_TAC [lookup_insert_var_cmp] \\ simp [fromList_thm_var_cmp]
+ Induct >- (EVAL_TAC \\ simp []) \\
+ PairCases \\ rpt strip_tac \\ fs [initial_si_def, option_flatMap_def, build_combs_si_reg_entry_def] \\
+ every_case_tac \\ simp [fromList_cons] \\ dep_rewrite.DEP_REWRITE_TAC [lookup_insert_var_cmp] \\
+ simp [fromList_thm_var_cmp]
 QED
 
-Theorem lookup_initial_si_RegVar_idx_not_0:
- !i regs reg.
- i <> 0 ==> lookup var_cmp (RegVar reg i) (fromList var_cmp (option_flatMap build_si_entry regs)) = NONE
+Theorem regs_distinct_alookup_alookup:
+ ∀regs reg i i' rdata rdata'.
+ regs_distinct regs ∧
+ ALOOKUP regs (reg,i) = SOME rdata ∧
+ ALOOKUP regs (reg,i') = SOME rdata' ⇒
+ i' = i ∧ rdata' = rdata
 Proof
- Induct_on ‘regs’ >- (EVAL_TAC \\ simp []) \\ PairCases \\ rpt strip_tac \\ simp [option_flatMap_def, build_si_entry_def] \\
- every_case_tac \\ fs [fromList_cons, reg_name_def] \\
- DEP_REWRITE_TAC [lookup_insert_var_cmp] \\ simp [fromList_thm_var_cmp]
-QED
-
-Theorem lookup_initial_si_RegVar_idx_not_0':
- !reg regs i v. lookup var_cmp (RegVar reg i) (fromList var_cmp (option_flatMap build_si_entry regs)) = SOME v ==> i = 0
-Proof
- (* Terrible but short: *)
- rpt strip_tac \\ qspec_then ‘i’ mp_tac lookup_initial_si_RegVar_idx_not_0 \\
- Cases_on ‘i’ \\ fs [] \\ metis_tac [optionTheory.NOT_NONE_SOME]
-QED
-
-Theorem lookup_initial_si_RegVar_mem:
- !regs extenv t reg i v inp tmpnum.
- MEM (t,reg,i,v,inp) regs /\ regs_ok extenv tmpnum regs /\ regs_distinct regs ==>
- lookup var_cmp (RegVar reg i) (fromList var_cmp (option_flatMap build_si_entry regs)) =
- OPTION_MAP SND (build_si_entry (t,reg,i,v,inp))
-Proof
- Induct >- (EVAL_TAC \\ simp []) \\ rpt strip_tac \\
- fs [regs_ok_def, regs_distinct_def, option_flatMap_def, build_si_entry_def]
- >- (rveq \\ Cases_on ‘t’ \\ simp [build_si_entry_def]
-  >- fs [reg_name_def, lookup_initial_si_RegVar_not_mem]
-  \\ fs [fromList_cons, reg_ok_def] \\ DEP_REWRITE_TAC [lookup_insert_var_cmp] \\ simp [fromList_thm_var_cmp])
- \\ TOP_CASE_TAC
-  >- drule_first
-  \\ PairCases_on ‘h’ \\ Cases_on ‘h0’ \\ fs [reg_name_def, build_si_entry_def] \\ rveq \\ simp [fromList_cons] \\
-     fs [MEM_MAP] \\ first_x_assum (qspec_then ‘(t,reg,i,v,inp)’ strip_assume_tac) \\ fs [reg_name_def] \\
-     DEP_REWRITE_TAC [lookup_insert_var_cmp] \\ simp [fromList_thm_var_cmp] \\ drule_first
-QED
-
-Theorem si_prefilleds_initial_si:
- !regs extenv tmpnum.
- regs_ok extenv tmpnum regs /\ regs_distinct regs ==>
- si_prefilleds (fromList var_cmp (option_flatMap build_si_entry regs)) regs
-Proof
- rw [si_prefilleds_def, EVERY_MEM] \\ PairCases_on ‘e’ \\ simp [si_prefilled_def] \\
- drule_strip lookup_initial_si_RegVar_mem \\ TOP_CASE_TAC \\ fs [build_si_entry_def]
-QED
-
-Theorem lookup_initial_si_RegVar_array:
- !reg i regs inps extenv tmpnum.
- regs_ok extenv tmpnum regs /\ regs_distinct regs /\
- lookup var_cmp (RegVar reg i) (fromList var_cmp (option_flatMap build_si_entry regs)) = SOME (ArrayInp inps) ==>
- i = 0 /\
- ∃v inp. MEM (CArray_t (LENGTH inps),reg,0,v,inp) regs /\
-         ArrayInp inps = SND (THE (build_si_entry (CArray_t (LENGTH inps),reg,0,v,inp)))
-Proof
- rpt strip_tac' \\ drule_strip lookup_initial_si_RegVar_idx_not_0' \\
- reverse (Cases_on ‘MEM reg (MAP reg_name regs)’) >- fs [lookup_initial_si_RegVar_not_mem] \\
- fs [MEM_reg_regs_shape] \\ drule_strip regs_ok_RegVar_idx_0 \\ drule_strip lookup_initial_si_RegVar_mem \\
- Cases_on ‘t’ \\ fs [build_si_entry_def] \\
- reverse (Cases_on ‘n = LENGTH inps’) >- metis_tac [LENGTH_GENLIST] \\ rveq \\
- asm_exists_tac \\ fs []
-QED
-
-Theorem build_si_entry_SOME:
- !t reg v inp inps.
- build_si_entry (t,reg,0,v,inp) = SOME inps <=>
- ?l. t = CArray_t l /\ inps = (RegVar reg 0,ArrayInp (GENLIST (\i. VarInp (RegVar reg i) NONE) l))
-Proof
- rw [build_si_entry_def] \\ TOP_CASE_TAC \\ metis_tac []
+ rewrite_tac [regs_distinct_def] \\ Induct \\ TRY PairCases \\ rw [] \\ fs [reg_name_def] \\
+ TRY (drule_strip ALOOKUP_MEM) \\ fs [MEM_MAP, pairTheory.FORALL_PROD, reg_name_def] \\ metis_tac []
 QED
 
 Theorem blasterstate_ok_initial_si:
- !regs extenv n tmpnum.
- regs_ok extenv tmpnum regs /\ regs_distinct regs ==>
- blasterstate_ok (fromList var_cmp (option_flatMap build_si_entry regs)) n n
+ ∀regs tmpnum max. regs_distinct regs ∧ max ≤ tmpnum ⇒ blasterstate_ok regs (initial_si regs) 0 max tmpnum
 Proof
- rw [blasterstate_ok_def, fromList_thm_var_cmp] \\ Cases_on ‘var’ \\
- fs [lookup_initial_si_NetVar, lookup_initial_si_RegVar_bool] \\
- drule_strip lookup_initial_si_RegVar_array \\ fs [build_si_entry_def] \\
- pop_assum (fn th => once_rewrite_tac [th]) \\ simp [EVERY_GENLIST, cell_input_lt_def, var_lt_def]
+ rw [blasterstate_ok_def]
+ >- simp [initial_si_def, fromList_thm_var_cmp]
+ >- fs [lookup_NetVar_initial_si]
+ >- (drule_strip lookup_RegVar_initial_si \\ fs [si_consistent_with_regs_def, build_combs_si_reg_entry_def] \\
+     TOP_CASE_TAC) \\
+ 
+ (reverse (Cases_on ‘var’) >- fs [lookup_NetVar_initial_si]) \\
+ drule_strip lookup_RegVar_initial_si \\ fs [si_consistent_with_regs_def] \\
+ first_x_assum (qspecl_then [‘s’, ‘n’] assume_tac)  \\
+ gs [build_combs_si_reg_entry_def] \\ every_case_tac \\
+ gvs [blast_cell_input_marked_ok_def, blast_cell_input_ok_def, mk_inp_marked_def, 
+      cell_input_marked_not_pseudo_def, cell_input_not_pseudo_def, EVERY_GENLIST] \\
+ rpt strip_tac \\ metis_tac [regs_distinct_alookup_alookup]
 QED
 
-Theorem si_wf_initial_si:
- !regs extenv tmpnum.
- regs_ok extenv tmpnum regs /\ regs_distinct regs ==>
- si_wf (fromList var_cmp (option_flatMap build_si_entry regs))
+(*Theorem si_cells_inv_initial_si:
+ ∀regs max nl. regs_distinct regs ⇒ si_cells_inv (initial_si regs) max nl
 Proof
- rw [si_wf_def, lookup_initial_si_NetVar, lookup_initial_si_RegVar_idx_not_0, lookup_initial_si_RegVar_bool] \\
- drule_strip lookup_initial_si_RegVar_array \\ fs [build_si_entry_def]
+ rw [si_cells_inv_def, si_cell_out_inv_def] \\ TRY (Cases_on ‘var’) \\ fs [lookup_NetVar_initial_si] \\
+ drule_strip lookup_RegVar_initial_si \\ fs [si_consistent_with_regs_def] \\
+ first_x_assum (qspecl_then [‘s’, ‘n'’] assume_tac) \\ rfs [build_combs_si_reg_entry_def] \\
+ every_case_tac \\ gvs [inp_marked_NetVar_inv_def, EVERY_GENLIST, mk_inp_marked_def]
+QED*)
+
+(** Outs **)
+
+Definition same_state_outs_def:
+ same_state_outs cenv cenv' ⇔ ∀var. sum_alookup cenv' var = sum_alookup cenv var
+End
+
+Theorem blast_out_correct:
+ blast_out blast_s (var, out) = INR varout' ∧
+ out_ok (var, out) ∧
+ blast_reg_rel_fext fext blast_s.si s bs ∧
+ out_run fext s (var, out) = INR r ⇒
+ out_run fext bs varout' = INR r
+Proof
+ Cases_on ‘out’ \\ rw [blast_out_def, sum_bind_INR, out_ok_def, out_run_def] \\ TOP_CASE_TAC \\
+ fs [blast_reg_rel_fext_def, blast_rel_array_def, cell_inp_run_def, blast_cell_input_def] \\
+ every_case_tac \\ fs [] \\
+ first_x_assum (qspecl_then [‘var’, ‘0’] mp_tac) \\ simp [] \\ TOP_CASE_TAC \\ strip_tac \\
+ gvs [out_run_def, cell_inp_run_def, sum_map_INR, sum_bind_INR, sum_mapM_EL, inp_marked_get_def] \\
+ qexists_tac ‘MAP CBool l''’ \\ simp [EL_MAP, get_bool_def] \\ rpt strip_tac \\ rpt drule_first \\
+ fs [inp_marked_get_INR]
 QED
 
-Theorem netlist_overlap_si_initial_si:
- !regs extenv tmpnum nl.
- regs_ok extenv tmpnum regs /\ regs_distinct regs ==>
- netlist_overlap_si (fromList var_cmp (option_flatMap build_si_entry regs)) tmpnum nl
+Triviality same_state_outs_cons:
+ ∀x x' xs xs'. x = x' ∧ same_state_outs xs xs' ⇒ same_state_outs (x::xs) (x'::xs')
 Proof
- rw [netlist_overlap_si_def, lookup_initial_si_NetVar, lookup_initial_si_bool] \\ 
- Cases_on ‘var’ \\ fs [lookup_initial_si_NetVar] \\ drule_strip lookup_initial_si_RegVar_array \\
- fs [build_si_entry_def] \\ first_assum (once_rewrite_tac o sing) \\ simp [EVERY_GENLIST] \\
- simp [bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def, var_lt_def, var_ge_def]
+ ntac 2 Cases \\ rw [same_state_outs_def, sum_alookup_cons]
+QED
+
+Theorem blast_out_correct:
+ ∀outs outs' blast_s s s' bs bs' fext si.
+ blast_outs blast_s outs = INR outs' ∧
+ EVERY out_ok outs ∧
+ blast_reg_rel_fext fext blast_s.si s bs ∧
+ sum_mapM (out_run fext s) outs = INR s' ⇒
+ ∃bs'. sum_mapM (out_run fext bs) outs' = INR bs' ∧
+       same_state_outs s' bs'
+Proof
+ Induct >- simp [blast_outs_def, sum_mapM_def, same_state_outs_def] \\
+ PairCases \\ fs [blast_outs_def, sum_mapM_INR] \\ rpt strip_tac \\ rveq \\ simp [sum_mapM_INR] \\
+ drule_strip blast_out_correct \\ drule_first \\ simp [same_state_outs_cons]
 QED
 
 (** Top level thm **)
 
-Theorem blast_circuit_correct:
- !circuit circuit' blast_s n fext fbits s tmpnum.
- blast_circuit circuit tmpnum = INR (circuit', blast_s) /\
- circuit_run fext fbits circuit n = INR s /\
- rtltype_extenv (circuit_extenv circuit) fext /\
- circuit_ok 0 tmpnum circuit /\ circuit_sorted circuit /\ deterministic_circuit circuit ==>
- blasted_circuit circuit' ∧
- ?s'. circuit_run fext fbits circuit' n = INR s' /\
-      blast_reg_rel blast_s.si s s'
+Definition blasted_circuit_def:
+ blasted_circuit (Circuit _ _ regs combs_nl ffs_nl) ⇔
+  blast_regs_distinct regs ∧
+  EVERY (λ(_, rdata). rdata.reg_type = Reg) regs ∧
+  EVERY (λ(_, rdata). rdata.type = CBool_t) regs ∧
+  deterministic_regs regs ∧
+  deterministic_netlist combs_nl ∧
+  ffs_nl = []
+End
+
+Theorem blasted_circuit_alt:
+ ∀cir.
+ blasted_circuit cir ⇔
+  blast_regs_distinct (circuit_regs cir) ∧
+  EVERY (λ(_, rdata). rdata.reg_type = Reg) (circuit_regs cir) ∧
+  EVERY (λ(_, rdata). rdata.type = CBool_t) (circuit_regs cir) ∧
+  deterministic_regs (circuit_regs cir) ∧
+  deterministic_netlist (circuit_nl_combs cir) ∧
+  (circuit_nl_ffs cir) = []
 Proof
- Cases \\ rename1 `Circuit extenv regs nl` \\
- simp [blast_circuit_def, circuit_extenv_def, circuit_ok_def, circuit_sorted_def, deterministic_circuit_def] \\
+ Cases \\ simp [blasted_circuit_def, circuit_regs_def, circuit_nl_combs_def, circuit_nl_ffs_def]
+QED
+
+Triviality netlist_step_nl_ffs_nil:
+ ∀fext s nl_combs nl_ffs regs.
+ EVERY (λ(_,rdata). rdata.reg_type = Reg) regs ⇒
+ netlist_step fext s (nl_combs ++ nl_ffs) [] regs = netlist_step fext s nl_combs nl_ffs regs
+Proof
+ simp [netlist_step_def, EVERY_Reg_FILTER_PseudoReg_lem, sum_foldM_append, sum_foldM_def, sum_bind_def]
+QED
+
+Triviality netlist_run_nl_ffs_nil:
+ ∀n fext s nl_combs nl_ffs regs.
+ EVERY (λ(_,rdata). rdata.reg_type = Reg) regs ⇒
+ netlist_run fext s (nl_combs ++ nl_ffs) [] regs n = netlist_run fext s nl_combs nl_ffs regs n
+Proof
+ Induct \\ simp [netlist_run_def, netlist_step_nl_ffs_nil]
+QED
+
+Triviality MEM_reg_i_reg_name_lem:
+ MEM (reg, i) (MAP FST regs) ⇒ MEM reg (MAP reg_name regs)
+Proof
+ simp [MEM_MAP, pairTheory.EXISTS_PROD, reg_name_def] \\ metis_tac []
+QED
+       
+Theorem blast_circuit_correct:
+ !circuit circuit' blast_s n fext fbits fbits' s keep combs_max ffs_max.
+ blast_circuit circuit ffs_max = INR (circuit', blast_s) /\
+ circuit_run fext fbits circuit n = INR (s, fbits') /\
+ rtltype_extenv (circuit_extenv circuit) fext /\
+ circuit_ok 0 combs_max ffs_max circuit /\ circuit_sorted circuit /\ deterministic_circuit circuit ==>
+ circuit_extenv circuit' = circuit_extenv circuit ∧
+ (∀reg i. MEM (reg, i) (MAP FST (circuit_regs circuit')) ⇒
+          ∃rdata. ALOOKUP (circuit_regs circuit) (reg, 0) = SOME rdata ∧ rdata.reg_type = Reg) ∧
+ blasted_circuit circuit' ∧
+ ?s' fbits''. circuit_run fext fbits circuit' n = INR (s', fbits'') /\
+              same_state_outs s s'
+Proof
+ namedCases ["extenv outs regs combs_nl ffs_nl"] \\ rpt gen_tac \\
+ simp [blast_circuit_def, sum_bind_INR, sum_map_INR, circuit_extenv_def, circuit_ok_def,
+       circuit_sorted_def, deterministic_circuit_def] \\
  rpt strip_tac' \\
- pairarg_tac \\ fs [sum_bind_INR] \\ rveq \\
- fs [circuit_run_def, sum_bind_INR] \\
+ rpt (pairarg_tac \\ fs [sum_bind_INR]) \\ rveq \\ fs [circuit_run_def, sum_bind_INR] \\
 
- drule_strip blast_netlist_correct \\ simp [] \\ disch_then drule_strip \\
- impl_tac >- (drule_strip blasterstate_ok_initial_si \\ simp []) \\ strip_tac \\ rveq \\
+ (* regs_init *)
+ drule_strip regs_ok_EVERY_reg_init_ok \\
+ drule_strip lookup_RegVar_initial_si \\
+ drule_strip regs_distinct_blast_regs_distinct \\
+ drule_strip blast_regs_init_correct \\
+ disch_then (qspec_then ‘<|env := []; fbits := fbits|>’ mp_tac) \\
+ impl_tac >- (simp [blast_reg_init_rel_def, cget_var_def]) \\
 
- conj_tac >- (drule_strip blast_regs_distinct \\ simp [blasted_circuit_def]) \\
+ drule_strip init_run_cenv_consistent_with_reg \\ impl_tac >- simp [] \\
+ drule_strip init_run_bound \\ simp [] \\
+ drule_strip init_run_only_regs \\ impl_tac >- simp [only_regs_nil] \\
+ rpt strip_tac' \\
+ 
+ (* netlist *)
+ drule_strip blast_reg_init_rel_blast_reg_rel \\
+ qspecl_then [‘combs_nl’, ‘ffs_nl’] assume_tac blast_netlist_blast_regs_correct \\
+ drule_first \\ simp [] \\ disch_then drule_strip \\
+ impl_tac >- simp [blasterstate_ok_initial_si] \\ strip_tac \\ rveq \\
 
- drule_strip blast_regs_init_correct \\ disch_then (qspec_then ‘<|env := []; fbits := fbits|>’ mp_tac) \\
- simp [blast_reg_rel_nil, only_regs_nil] \\ impl_tac >- (conj_tac
- >- (rw [si_wf_def, lookup_initial_si_RegVar_idx_not_0, lookup_initial_si_bool] \\
-     drule_strip lookup_initial_si_RegVar_array \\ fs [build_si_entry_def])
- \\ drule_strip si_prefilleds_cong \\ metis_tac [si_prefilleds_initial_si]) \\ strip_tac \\
-
- qpat_x_assum ‘init_run _ regs = _’ assume_tac \\
- drule_strip init_run_only_regs_ok \\ impl_tac >- simp [only_regs_nil] \\ strip_tac \\
-
- drule_strip blast_netlist_correct_run \\ disch_then (qspecl_then [‘bs'’, ‘tmpnum’] mp_tac) \\ simp [] \\
- ‘si_wf blast_s.si’ by metis_tac [si_wf_def, lookup_initial_si_bool, si_wf_initial_si] \\
- impl_tac >- metis_tac [blast_rel_only_regs, blast_rel_blast_reg_rel, blast_reg_rel_blast_rel, si_wf_initial_si, si_prefilleds_initial_si, netlist_overlap_si_initial_si, blasterstate_ok_initial_si] \\
- strip_tac \\ simp [] \\
- metis_tac [blast_reg_rel_only_regs, si_wf_initial_si]
+ (* lift back up to top level *)
+ drule_strip blast_regs_distinct \\
+ drule_strip blast_regs_reg_props \\
+ drule_strip blast_regs_deterministic \\
+ drule_strip blast_regs_reverse_lookup_Reg \\
+ drule_strip blast_out_correct \\
+ fs [circuit_extenv_def, circuit_regs_def, blasted_circuit_def, deterministic_netlist_def, netlist_run_nl_ffs_nil] \\
+ (* ad-hoc fix: *)
+ metis_tac [MEM_MAP_reg_name_FST_glue]
 QED
 
 val _ = export_theory ();
