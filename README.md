@@ -6,9 +6,9 @@ The formal Verilog semantics is located in the directory `verilog`.
 
 The verified Verilog synthesis tool Lutsig is located in the `compiler` directory. The (latest) proof-producing code generator is located in `newTranslator`.
 
-Some examples on how to use Lutsig and the code generator in practice are available in the `example` directory. There is also a test-suite for Lutsig available, based on unverified parsing of Verilog text files, in the `verilog_parser` directory.
+Some examples on how to use Lutsig and the code generator in practice are available in the `examples` directory. There is also a test-suite for Lutsig available, based on unverified parsing of Verilog text files, in the `verilog_parser` directory.
 
-Silver-related theories are spread out into multiple directories, but the most important ones are `ag32` and `cakeml_connection`.
+Silver-related theories and tools are located in the `ag32` directory.
 
 # Installation and setup
 
@@ -18,7 +18,7 @@ For Silver (ag32), additional setup is required, as described below.
 
 ## Silver setup
 
-To build Silver-related theories, such as the processor itself and `cakeml_connection`, you need to point `$CAKEMLDIR` to your CakeML compiler directory.
+To build Silver-related theories, you need to point `$CAKEMLDIR` to your CakeML compiler directory.
 
 Because the Verilog semantics has been updated since Silver was developed, the Silver theories will not build using the latest commit. If you want to build Silver, use e.g. dc281059bd3a19e478fb211aadda1c2ac7891fa9. (This is just a temporary workaround.)
 
