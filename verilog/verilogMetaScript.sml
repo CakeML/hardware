@@ -87,7 +87,8 @@ Theorem nd_value_VArray_t_correct:
  nd_value oracle (VArray_t l) = (v, oracle') ==> vertype_v v (VArray_t l) /\ oracle' = shift_seq l oracle
 Proof
  simp [Once vertype_v_cases, nd_value_def] \\ rpt strip_tac' \\
- pairarg_tac \\ drule_strip oracle_bits_correct \\ fs [] \\ rw []
+ pairarg_tac \\ drule_strip oracle_bits_correct \\ fs [v2ver_def] \\ rw [EVERY_MAP] \\
+ simp [Once vertype_v_cases]
 QED
 
 Theorem nd_value_correct: (* <-- strange name *)

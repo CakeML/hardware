@@ -7,8 +7,18 @@ open verilogTheory sumExtraTheory;
 val _ = new_theory "verilogType";
 
 Inductive vertype_v:
- (vertype_v (VBool v) VBool_t) /\
- (i = LENGTH vs (*/\ i <> 0*) ==> vertype_v (VArray vs) (VArray_t i))
+ (vertype_v (VBool v) VBool_t) ∧
+ (i = LENGTH vs /\ EVERY (λv. vertype_v v VBool_t) vs ==>
+  vertype_v (VArray vs) (VArray_t i)) ∧
+ (d = LENGTH vs /\ EVERY (λv. vertype_v v (VArray_t w)) vs ==>
+  vertype_v (VArray vs) (VArray2_t w d))
+End
+
+(* Types that can occur "inside" programs -- all types except 2d-arrays *)
+Definition program_type_def:
+ (program_type VBool_t ⇔ T) ∧
+ (program_type (VArray_t _) ⇔ T) ∧
+ (program_type (VArray2_t _ _) ⇔ F)
 End
 
 val vertype_fext_def = Define `
@@ -77,7 +87,7 @@ Proof
 QED
 
 Inductive vertype_exp:
- (vertype_v v t ==> vertype_exp extenv env (Const v) t) /\
+ (vertype_v v t ∧ program_type t ==> vertype_exp extenv env (Const v) t) /\
 
  (env var = SOME t ==> vertype_exp extenv env (Var var) t) /\
 
@@ -393,9 +403,10 @@ Proof
 QED
 
 Theorem vertype_v_deterministic:
- ∀v t t'. vertype_v v t ∧ vertype_v v t' ⇒ t' = t
+ ∀v t. vertype_v v t ⇒ ∀t'. program_type t ∧ program_type t' ∧ vertype_v v t' ⇒ t' = t
 Proof
- rw [vertype_v_cases]
+ ho_match_mp_tac vertype_v_ind \\ simp [program_type_def] \\ rpt conj_tac \\ rpt strip_tac' \\
+ pop_assum mp_tac \\ simp [Once vertype_v_cases] \\ rw [] \\ fs [program_type_def]
 QED
 
 Theorem vertype_exp_deterministic:
@@ -502,13 +513,16 @@ QED
 
 (* len = 0 check needed to handle empty list (as both [] and [F] are interpreted as zero elsewhere) *)
 val n2VArray_def = Define ‘
- n2VArray len n = if len = 0 then VArray [] else VArray (zero_extend len (n2v n))’;
+ n2VArray len n = if len = 0 then VArray [] else v2ver (zero_extend len (n2v n))’;
 
 Theorem vertype_v_n2VArray:
  !n len. n < 2**len ==> vertype_v (n2VArray len n) (VArray_t len)
 Proof
- rw [vertype_v_cases, n2VArray_def] \\ dep_rewrite.DEP_REWRITE_TAC [length_zero_extend] \\ rw [length_n2v] \\
- ‘n <= 2 ** len - 1’ by decide_tac \\ ‘0 < n’ by decide_tac \\ drule_strip bitTheory.LOG2_LE_MONO \\ rfs [log2_twoexp_sub1, bitTheory.LOG2_def]
+ reverse (rw [Once vertype_v_cases, n2VArray_def, v2ver_def])
+ >- (rw [EVERY_MAP, Once vertype_v_cases]) \\
+ dep_rewrite.DEP_REWRITE_TAC [length_zero_extend] \\ rw [length_n2v] \\
+ ‘n <= 2 ** len - 1’ by decide_tac \\ ‘0 < n’ by decide_tac \\
+ drule_strip bitTheory.LOG2_LE_MONO \\ rfs [log2_twoexp_sub1, bitTheory.LOG2_def]
 QED
 
 Triviality pad_left_dropWhile:
@@ -544,27 +558,32 @@ Proof
 QED
 
 Theorem n2VArray_v2n:
- !l. n2VArray (LENGTH l) (v2n l) = VArray l
+ !l. n2VArray (LENGTH l) (v2n l) = v2ver l
 Proof
- rw [n2VArray_def, n2v_v2n, bitstringTheory.zero_extend_def, pad_left_dropWhile] \\
- Cases_on ‘l’ \\ fs [PAD_LEFT, genlist_k_append, GENLIST_CONS, every_eq_genlist]
+ rw [n2VArray_def, v2ver_def, n2v_v2n, bitstringTheory.zero_extend_def, pad_left_dropWhile] \\
+ Cases_on ‘l’ \\ fs [PAD_LEFT, genlist_k_append, GENLIST_CONS, every_eq_genlist] \\ metis_tac []
 QED
 
 Theorem ver2n_n2VArray:
  !bs n. ver2n (VArray bs) = INR n ==> n2VArray (LENGTH bs) n = VArray bs
 Proof
- rw [n2VArray_def, ver2n_def, ver2v_def, sum_map_def] \\ rw [n2v_v2n]
- >- (simp [bitstringTheory.zero_extend_def, PAD_LEFT, genlist_k_append] \\ fs [arithmeticTheory.ADD1, every_eq_genlist] \\
-    Cases_on ‘bs’ \\ fs [arithmeticTheory.ADD1])
- >- rw [bitstringTheory.zero_extend_def, pad_left_dropWhile]
+ rw [n2VArray_def, ver2n_def, ver2v_def, v2ver_def, sum_map_INR] \\ rw [n2v_v2n] \\
+ fs [sum_mapM_ver2bool_INR]
+ >- (match_mp_tac MAP_CONG \\
+     simp [bitstringTheory.zero_extend_def, PAD_LEFT, genlist_k_append] \\
+     fs [arithmeticTheory.ADD1, every_eq_genlist] \\
+     Cases_on ‘v'’ \\ fs [arithmeticTheory.ADD1])
+ >- (rw [bitstringTheory.zero_extend_def, pad_left_dropWhile])
 QED
 
 Theorem n2VArray_ver2n:
  !bs n. n < 2 ** LENGTH bs /\ n2VArray (LENGTH bs) n = VArray bs ==> ver2n (VArray bs) = INR n
 Proof
- rw [n2VArray_def, ver2n_def, ver2v_def, sum_map_def]
+ rw [n2VArray_def, ver2n_def, ver2v_def, v2ver_def, sum_map_def]
  >- (EVAL_TAC \\ decide_tac)
- >- (first_assum (once_rewrite_tac o sing o GSYM) \\ simp [v2n_zero_extend])
+ >- (pop_assum (once_rewrite_tac o sing o GSYM) \\
+     simp [sum_mapM_ver2bool_VBool, sum_map_def] \\
+     simp [v2n_zero_extend])
 QED
 
 (** Mostly old messy runtime type system and same shape things below here,
@@ -664,9 +683,22 @@ val WORD_ARRAY_WORD_ARRAY_WORD_eq = Q.store_thm("WORD_ARRAY_WORD_ARRAY_WORD_eq",
  rpt (first_x_assum (qspec_then `x'` assume_tac)) \\
  fs [w2ver_bij]);*)
 
+Theorem verlength_VBool:
+ verlength ∘ VBool = K 1
+Proof
+ rw [FUN_EQ_THM, verlength_def]
+QED
+
+Theorem SUM_MAP_K:
+ ∀l. SUM (MAP (K 1) l) = LENGTH l
+Proof
+ Induct \\ simp []
+QED
+
 val WORD_verlength = Q.store_thm("WORD_verlength",
  `!w v. WORD (w:'a word) v ==> verlength v = dimindex(:'a)`,
- rw [WORD_def, w2ver_def, verlength_def]);
+ rw [WORD_def, w2ver_def, v2ver_def, verlength_def, MAP_MAP_o,
+     SF ETA_ss, verlength_VBool, SUM_MAP_K]);
 
 (*val vars_has_type_append = Q.store_thm("vars_has_type_append",
  `!vs tys1 tys2. vars_has_type vs (tys1 ++ tys2) <=> vars_has_type vs tys1 /\ vars_has_type vs tys2`,

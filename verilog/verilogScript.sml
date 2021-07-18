@@ -14,26 +14,34 @@ val _ = new_theory "verilog";
 (** Verilog values **)
 Datatype:
  value = VBool bool
-       | VArray (bool list)
+       | VArray (value list)
 End
 
 Datatype:
  vertype = VBool_t 
          | VArray_t num
+         (* could have more general array type and merge VArray_t and VArray2_t,
+            but this is fine for now:
+
+                     /---------- width
+                     v   v------ depth *)
+         | VArray2_t num num
 End
 
 val value_size_def = definition "value_size_def";
 
-(*val MEM_IMP_value_size = Q.store_thm("MEM_IMP_value_size",
-  `!xs x. MEM x xs ==> value_size x < value1_size xs`,
-  Induct \\ rw [value_size_def] \\ res_tac \\ DECIDE_TAC);*)
+Theorem MEM_IMP_value_size:
+ !xs x. MEM x xs ==> value_size x < value1_size xs
+Proof
+ Induct \\ rw [value_size_def] \\ res_tac \\ DECIDE_TAC
+QED
 
 val _ = type_abbrev("envT", ``:(string, value) alist``);
 
-Definition show_vertype_def:
+(*Definition show_vertype_def:
  (show_vertype VBool_t = "logic") ∧
- (show_vertype (VArray_t l) = "logic[" ++ toString l ++ ":0]")
-End
+ (show_vertype (VArray_t l) = "logic[" ++ toString l ++ ":0]") ∧
+End*)
 
 val isVBool_def = Define `
  (isVBool (VBool _) = T) /\
@@ -44,28 +52,36 @@ val ver2bool_def = Define `
   (ver2bool (VBool b) = INR b) /\
   (ver2bool (VArray _) = INL TypeError)`;
 
+Theorem ver2bool_INR:
+ ∀v b. ver2bool v = INR b ⇔ v = VBool b
+Proof
+ Cases \\ rw [ver2bool_def]
+QED
+
 (* Verilog to bitstring (1-dim VArray) *)
 val ver2v_def = Define `
   (ver2v (VBool _) = INL TypeError) /\
-  (ver2v (VArray vs) = INR vs)`;
+  (ver2v (VArray vs) = sum_mapM ver2bool vs)`;
 
 Theorem ver2v_INR:
- !v bs. ver2v v = INR bs <=> v = VArray bs
+ !v bs. ver2v v = INR bs <=> v = VArray (MAP VBool bs)
 Proof
- Cases \\ rw [ver2v_def]
+ Cases \\ rw [ver2v_def, sum_mapM_EL, ver2bool_INR] \\ eq_tac \\ strip_tac
+ >- (match_mp_tac LIST_EQ \\ rw [EL_MAP])
+ >- rw [EL_MAP]
 QED
 
 val ver2n_def = Define `
   ver2n v = sum_map v2n (ver2v v)`;
 
 val v2ver_def = Define `
-  v2ver bs = VArray bs`;
+  v2ver bs = VArray (MAP VBool bs)`;
 
 val n2ver_def = Define `
   n2ver n = v2ver (n2v n)`;
 
 val w2ver_def = Define `
-  w2ver w = VArray (w2v w)`;
+  w2ver w = v2ver (w2v w)`;
 
 val ver2w_def = Define `
  ver2w v = sum_map v2w (ver2v v)`;
@@ -75,28 +91,36 @@ val ver2w_def = Define `
 Theorem ver2n_lt:
  !bs n. ver2n (VArray bs) = INR n ==> n < 2 ** LENGTH bs
 Proof
- rw [ver2n_def, sum_map_INR, ver2v_def] \\ rw [bitstringTheory.v2n_lt]
+ rw [ver2n_def, sum_map_INR, ver2v_def, sum_mapM_EL] \\ metis_tac [bitstringTheory.v2n_lt]
 QED
 
-Theorem ver2n_VArray:
+(*Theorem ver2n_VArray:
  !bs. ver2n (VArray bs) = INR (v2n bs)
 Proof
  simp [ver2n_def, ver2v_def, sum_map_def]
-QED
+QED*)
 
 Theorem ver2n_INR:
- ∀v n. ver2n v = INR n ⇔ ∃bs. v = VArray bs ∧ v2n bs = n
+ ∀v n. ver2n v = INR n ⇔ ∃bs. v = VArray (MAP VBool bs) ∧ v2n bs = n
 Proof
  simp [ver2n_def, sum_map_INR, ver2v_INR]
 QED
 
-val sum_mapM_VBool = Q.store_thm("sum_mapM_VBool",
+val sum_mapM_ver2bool_VBool = Q.store_thm("sum_mapM_ver2bool_VBool",
  `!l. sum_mapM ver2bool (MAP VBool l) = INR l`,
  Induct \\ rw [sum_mapM_def, ver2bool_def, sum_map_def]);
 
+Theorem sum_mapM_ver2bool_INR:
+ ∀vs bs. sum_mapM ver2bool vs = INR bs ⇔ vs = MAP VBool bs
+Proof
+ rpt strip_tac \\ eq_tac \\ rw [sum_mapM_ver2bool_VBool] \\
+ fs [sum_mapM_EL, ver2bool_INR] \\
+ match_mp_tac LIST_EQ \\ rw [EL_MAP]
+QED
+
 val ver2v_w2ver = Q.store_thm("ver2v_w2ver",
  `!w. ver2v (w2ver w) = INR (w2v w)`,
- rw [ver2v_def, w2ver_def, sum_mapM_VBool]);
+ rw [ver2v_def, w2ver_def, v2ver_def, sum_mapM_ver2bool_VBool]);
 
 val v2ver_w2v = Q.store_thm("v2ver_w2v",
  `!w. v2ver (w2v w) = w2ver w`,
@@ -115,7 +139,7 @@ val w2v_w2w = Q.store_thm("w2v_w2w",
 
 val ver2w_w2ver = Q.store_thm("ver2w_w2ver",
  `!v. ver2w (w2ver v) = INR v`,
- simp [ver2w_def, w2ver_def, ver2v_def, sum_mapM_VBool, sum_map_def]);
+ simp [ver2w_def, w2ver_def, v2ver_def, ver2v_def, sum_mapM_ver2bool_VBool, sum_map_def]);
 
 (*
 val GENLIST_K_APPEND = Q.store_thm("GENLIST_K_APPEND",
@@ -128,10 +152,6 @@ val GENLIST_K_F_APPEND_F = Q.store_thm("GENLIST_K_F_APPEND_F",
  rw [GSYM GENLIST_K_APPEND, DIMINDEX_GT_0]);
 *)
 
-val sum_mapM_ver2bool_VBool = Q.store_thm("sum_mapM_ver2bool_VBool",
- `!l. sum_mapM ver2bool (MAP VBool l) = INR l`,
- Induct \\ rw [sum_mapM_def, ver2bool_def, sum_map_def]);
-
 val ver2v_n2ver = Q.store_thm("ver2v_n2ver",
  `!n. ver2v (n2ver n) = INR (n2v n)`,
  rw [n2ver_def, ver2v_def, v2ver_def, ver2v_def, sum_mapM_ver2bool_VBool]);
@@ -142,7 +162,7 @@ val ver2n_n2ver = Q.store_thm("ver2n_n2ver",
 
 val ver2n_w2ver = Q.store_thm("ver2n_w2ver",
  `!w. ver2n (w2ver w) = INR (w2n w)`,
- rw [ver2n_def, w2ver_def, ver2v_def, sum_mapM_ver2bool_VBool, sum_map_def, v2n_w2v]);
+ rw [ver2n_def, w2ver_def, ver2v_def, v2ver_def, sum_mapM_ver2bool_VBool, sum_map_def, v2n_w2v]);
 
 val w2v_inj = Q.store_thm("w2v_bij",
  `!x y. w2v x = w2v y <=> x = y`,
@@ -150,16 +170,20 @@ val w2v_inj = Q.store_thm("w2v_bij",
 
 val w2ver_bij = Q.store_thm("w2ver_bij",
  `!x y. w2ver x = w2ver y <=> x = y`,
- rpt strip_tac \\ EQ_TAC \\ rw [w2ver_def, MAP_inj, w2v_inj]);
+ rpt strip_tac \\ eq_tac \\ rw [w2ver_def, v2ver_def, MAP_inj, w2v_inj]);
 
 Definition verlength_def:
- (verlength (VBool _) = 1) /\
- (verlength (VArray bs) = LENGTH bs)
+ (verlength (VBool _) = 1) ∧
+ (verlength (VArray bs) = SUM (MAP verlength bs))
+Termination
+ WF_REL_TAC `measure value_size` \\ rw [] \\
+ drule_strip MEM_IMP_value_size \\ decide_tac
 End
 
 Definition build_zero_def:
  (build_zero VBool_t = VBool F) /\
- (build_zero (VArray_t l) = VArray $ REPLICATE l F)
+ (build_zero (VArray_t l) = VArray $ REPLICATE l (VBool F)) ∧
+ (build_zero (VArray2_t w d) = VArray $ REPLICATE d (VArray $ REPLICATE w (VBool F)))
 End
 
 (* Verilog ASTs *)
@@ -416,9 +440,10 @@ Proof
 QED
 
 (* Misc *)
-val array_type_length_def = Define ‘
- (array_type_length VBool_t = INL TypeError) /\
- (array_type_length (VArray_t l) = INR l)’;
+Definition array_type_length_def:
+ (array_type_length (VArray_t l) = INR l) ∧
+ (array_type_length _ = INL TypeError)
+End
 
 Theorem array_type_length_INR:
  !t len. array_type_length t = INR len <=> t = VArray_t len
@@ -485,25 +510,27 @@ Proof
 QED
 
 val ver_to_VArray_def = Define `
-  (ver_to_VArray (VBool b) = VArray [b]) /\
+  (ver_to_VArray (VBool b) = VArray [VBool b]) /\
   (ver_to_VArray v = v)`;
 
 (* Only makes sense for 1-dim arrays *)
 val ver_msb_def = Define `
-  (ver_msb (VArray (h::t)) = INR h) /\
+  (ver_msb (VArray (VBool h::t)) = INR h) /\
   (ver_msb _ = INL TypeError)`;
 
 (** Oracle misc for non-deterministic values **)
 
 val nd_value_def = Define `
- (nd_value oracle VBool_t <=> let (b, oracle') = oracle_bit oracle in (VBool b, oracle')) /\
- (nd_value oracle (VArray_t len) <=> let (bs, oracle') = oracle_bits oracle len in (VArray bs, oracle'))`;
+ (nd_value oracle VBool_t <=>
+  let (b, oracle') = oracle_bit oracle in (VBool b, oracle')) /\
+ (nd_value oracle (VArray_t len) <=>
+  let (bs, oracle') = oracle_bits oracle len in (v2ver bs, oracle'))`;
 
 val nd_reset_def = Define `
  (nd_reset s (VBool _) = let (b, fbits) = oracle_bit s.fbits in
                           (s with fbits := fbits, VBool b)) /\
  (nd_reset s (VArray bs) = let (bs, fbits) = oracle_bits s.fbits (LENGTH bs) in
-                            (s with fbits := fbits, VArray bs))`
+                            (s with fbits := fbits, v2ver bs))`
 
 (** Expressions **)
 
@@ -511,13 +538,13 @@ val nd_reset_def = Define `
 val ver_fixwidth_def = Define `
   ver_fixwidth n v =
     let l = LENGTH v in
-      if l < n then (PAD_LEFT F n v) else DROP (l − n) v`;
+      if l < n then (PAD_LEFT (VBool F) n v) else DROP (l − n) v`;
 
-Theorem ver_fixwidth_fixwidth:
+(*Theorem ver_fixwidth_fixwidth:
  ∀n v. ver_fixwidth n v = fixwidth n v
 Proof
  simp [ver_fixwidth_def, fixwidth_def, zero_extend_def]
-QED
+QED*)
 
 val erun_bbop_def = Define `
  (erun_bbop And l r = (l /\ r)) /\
@@ -532,8 +559,8 @@ val erun_abop_def = Define `
 
 val erun_shift_def = Define `
  (erun_shift ShiftArithR l r = TAKE (LENGTH l) (GENLIST (K (HD l)) r ++ l)) /\
- (erun_shift ShiftLogicalL l r = ver_fixwidth (LENGTH l) (PAD_RIGHT F (LENGTH l + r) l)) /\
- (erun_shift ShiftLogicalR l r = TAKE (LENGTH l) (GENLIST (K F) r ++ l))`;
+ (erun_shift ShiftLogicalL l r = ver_fixwidth (LENGTH l) (PAD_RIGHT (VBool F) (LENGTH l + r) l)) /\
+ (erun_shift ShiftLogicalR l r = TAKE (LENGTH l) (GENLIST (K (VBool F)) r ++ l))`;
 
 val erun_arith_def = Define `
  (erun_arith Plus (l:num) r _ = INR (l + r)) /\
@@ -573,18 +600,18 @@ val erun_cmp_def = Define `
  od)`;
 
 val erun_resize_def = Define `
- (erun_resize ZeroExtend l r = if LENGTH l < r then INR (PAD_LEFT F r l)
+ (erun_resize ZeroExtend l r = if LENGTH l < r then INR (PAD_LEFT (VBool F) r l)
                                                else INR (DROP (LENGTH l - r) l)) /\
  (erun_resize SignExtend l r = if LENGTH l <= r then INR (PAD_LEFT (HD l) r l)
                                                 else INL TypeError)`;
 
 val get_array_index_def = Define `
-  (get_array_index i (VArray vs) = sum_map VBool (sum_revEL i vs)) /\
+  (get_array_index i (VArray vs) = sum_revEL i vs) /\
   (get_array_index _ _ = INL TypeError)`;
 
 Theorem get_array_index_INR:
  !v v' i. get_array_index i v = INR v' <=>
-          ?bs. v = VArray bs /\ v' = VBool (revEL i bs) /\ i < LENGTH bs
+          ?bs. v = VArray bs /\ v' = revEL i bs /\ i < LENGTH bs
 Proof
  Cases \\ rw [get_array_index_def] \\ eq_tac \\ rpt strip_tac'
  >- fs [sum_map_INR, sum_revEL_INR]
@@ -748,8 +775,8 @@ val assn_def = Define ‘
   sum_bind (ver2n ie) (\inum.
   sum_bind (get_use_nbq_var s use_nbq vname) (\v.
   sum_bind (get_VArray_data v) (\vd.
-  sum_bind (get_VBool_data rhse) (\rhse.
-  prun_set_var_index vname inum vd rhse)))))) /\
+  (*sum_bind (get_VBool_data rhse) (\rhse.*)
+  prun_set_var_index vname inum vd rhse))))) /\
 
  (assn fext s use_nbq (SliceIndexing vname ih il) rhs =
   sum_bind (get_use_nbq_var s use_nbq vname) (\v.

@@ -205,7 +205,7 @@ Proof
  rw [Eval_exp_def, erun_def, WORD_def] \\ res_tac \\ PURE_REWRITE_TAC [GSYM WORD_NEG_MUL] \\
  rw [sum_bind_def, sum_map_def,
      w2ver_def, ver2n_def, n2ver_def, v2ver_def, ver2v_def, v2n_w2v, w2v_n2w,
-     ver_mapVArray_def, sum_mapM_VBool, ver_liftVArray_def, erun_arith_def,
+     ver_mapVArray_def, sum_mapM_ver2bool_VBool, ver_liftVArray_def, erun_arith_def,
      ver_fixwidth_fixwidth,
      (* specific for add *) word_add_def, word_mul_def, word_2comp_def, dimword_def]
 QED

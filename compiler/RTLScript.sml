@@ -165,10 +165,10 @@ Definition cell_inputs_def:
  (cell_inputs (Carry4 _ _ in1 lhs rhs) = in1 :: lhs ++ rhs)
 End
 
-(*
-  component 1) regs (type, name, optional initial value, connection to netlist)
-  component 2) combinational netlist
-*)
+Datatype:
+ out_spec = OutInp cell_input
+          | OutInps (cell_input list)
+End
 
 Datatype:
  reg_type = Reg | PseudoReg
@@ -189,14 +189,20 @@ Datatype:
 End
 
 Datatype:
- out_spec = OutInp cell_input
-          | OutInps (cell_input list)
+ mem =
+  <| name : string;
+     init : value;
+     we1 : cell_input; (* write enable *)
+     addr1 : cell_input;
+     data1_in : cell_input;
+     data1_out : string |>
 End
 
 Datatype:
  circuit = Circuit ((string, rtltype) alist)
                    ((string, out_spec) alist)
                    (((string # num), reg_metadata) alist)
+                   (mem list)
                    (cell list) (* nl_combs *)
                    (cell list) (* nl_ffs *)
 End
@@ -204,22 +210,25 @@ End
 val _ = type_abbrev("regty", ``:((string # num) # reg_metadata)``);
 
 val circuit_extenv_def = Define `
- circuit_extenv (Circuit extenv _ _ _ _) = extenv`;
+ circuit_extenv (Circuit extenv _ _ _ _ _) = extenv`;
 
 val circuit_outs_def = Define `
- circuit_outs (Circuit _ outs _ _ _) = outs`;
+ circuit_outs (Circuit _ outs _ _ _ _) = outs`;
 
 val circuit_regs_def = Define `
- circuit_regs (Circuit _ _ regs _ _) = regs`;
+ circuit_regs (Circuit _ _ regs _ _ _) = regs`;
+
+val circuit_mems_def = Define `
+ circuit_mems (Circuit _ _ _ mems _ _) = mems`;
 
 val circuit_nl_combs_def = Define `
- circuit_nl_combs (Circuit _ _ _ nl _) = nl`;
+ circuit_nl_combs (Circuit _ _ _ _ nl _) = nl`;
 
 val circuit_nl_ffs_def = Define `
- circuit_nl_ffs (Circuit _ _ _ _ nl) = nl`;
+ circuit_nl_ffs (Circuit _ _ _ _ _ nl) = nl`;
 
 Theorem Circuit_components:
- ∀c. Circuit (circuit_extenv c) (circuit_outs c) (circuit_regs c) (circuit_nl_combs c) (circuit_nl_ffs c) = c
+ ∀c. Circuit (circuit_extenv c) (circuit_outs c) (circuit_regs c) (circuit_mems c) (circuit_nl_combs c) (circuit_nl_ffs c) = c
 Proof
  Cases \\ EVAL_TAC
 QED
@@ -227,10 +236,12 @@ QED
 (* semantics *)
 
 val _ = type_abbrev("env", ``:(var, value) alist``);
+val _ = type_abbrev("mem_env", ``:(string, value list) alist``);
 
 val _ = Datatype `
  rtlstate =
   <| env : env
+   ; mem : mem_env
    ; fbits : num -> bool |>`;
 
 val cget_var_def = Define `
@@ -437,6 +448,32 @@ Proof
  Cases \\ simp [is_RegVar_def]
 QED
 
+Definition mem_run_def:
+ mem_run fext s_old s mem_ = do
+  we1 <- cell_inp_run fext s_old mem_.we1;
+  we1 <- get_bool we1;
+
+  addr1 <- cell_inp_run fext s_old mem_.addr1;
+  addr1 <- get_array addr1;
+  sum_check (LENGTH addr1 = 14) TypeError; (* Can be relaxed? *)
+  addr1 <<- v2n addr1;
+
+  data1_in <- cell_inp_run fext s_old mem_.data1_in;
+  sum_check (has_rtltype_v data1_in (CArray_t 16)) TypeError;
+
+  (* Read *)
+  contents <- sum_alookup s.mem mem_.name;
+  d <- sum_revEL addr1 contents;
+  s <<- cset_var s (RegVar mem_.data1_out 0) d;
+
+  (* Write if enabled, todo: add out of bounds check here? *)
+  return (if we1 then
+           s with mem := (mem_.name, revLUPDATE data1_in addr1 contents) :: s.mem
+          else
+           s)
+ od
+End
+
 (* Common part of all netlist cycle steps *)
 Definition netlist_step_def:
  netlist_step fext s comb_cells ff_cells regs = do
@@ -447,15 +484,17 @@ Definition netlist_step_def:
 End
 
 Definition netlist_run_def:
- (netlist_run fext s comb_cells ff_cells regs 0 = netlist_step (fext 0) s comb_cells ff_cells regs) ∧
- (netlist_run fext s comb_cells ff_cells regs (SUC n) = do
-  s <- netlist_run fext s comb_cells ff_cells regs n;
+ (netlist_run fext s comb_cells ff_cells regs mems 0 = netlist_step (fext 0) s comb_cells ff_cells regs) ∧
+ (netlist_run fext s comb_cells ff_cells regs mems (SUC n) = do
+  s <- netlist_run fext s comb_cells ff_cells regs mems n;
 
   (* Note that we cannot re-run the pseudo regs here,
      since we do not know if they actually represent combinational behavior! *)
-  s <- sum_foldM (reg_run (fext n) s)
+  s_old <<- s;
+  s <- sum_foldM (reg_run (fext n) s_old)
                  (s with env := FILTER (is_RegVar o FST) s.env)
                  (FILTER (λ(var, data). data.reg_type = Reg) regs);
+  s <- sum_foldM (mem_run (fext n) s_old) s mems;
 
   netlist_step (fext (SUC n)) s comb_cells ff_cells regs
  od)
@@ -490,9 +529,9 @@ Definition out_run_def:
 End
 
 Definition circuit_run_def:
- circuit_run fext fbits (Circuit extenv outs regs comb_cells ff_cells) n = do
+ circuit_run fext fbits (Circuit extenv outs regs mems comb_cells ff_cells) n = do
   s <- init_run <| fbits := fbits; env := [] |> regs;
-  s <- netlist_run fext s comb_cells ff_cells regs n;
+  s <- netlist_run fext s comb_cells ff_cells regs mems n;
   res <- sum_mapM (out_run (fext n) s) outs;
   return (res, s.fbits)
  od
@@ -501,20 +540,22 @@ End
 (* Semantics for circuits without pseudo-regs *)
 
 Definition netlist_run_no_pseudos_def:
- (netlist_run_no_pseudos fext s cells regs 0 =
+ (netlist_run_no_pseudos fext s cells regs mems 0 =
   sum_foldM (cell_run (fext 0)) s cells) ∧
- (netlist_run_no_pseudos fext s cells regs (SUC n) = do
-  s <- netlist_run_no_pseudos fext s cells regs n;
+ (netlist_run_no_pseudos fext s cells regs mems (SUC n) = do
+  s <- netlist_run_no_pseudos fext s cells regs mems n;
   (* Note that we cannot start from the empty list here since some regs have NONE as input *)
-  s <- sum_foldM (reg_run (fext n) s) (s with env := FILTER (is_RegVar o FST) s.env) regs;
+  s_old <<- s;
+  s <- sum_foldM (reg_run (fext n) s_old) (s with env := FILTER (is_RegVar o FST) s.env) regs;
+  s <- sum_foldM (mem_run (fext n) s_old) s mems;
   sum_foldM (cell_run (fext (SUC n))) s cells
  od)
 End
 
 Definition circuit_run_no_pseudos_def:
- circuit_run_no_pseudos fext fbits (Circuit extenv outs regs comb_cells ff_cells) n = do
+ circuit_run_no_pseudos fext fbits (Circuit extenv outs regs mems comb_cells ff_cells) n = do
   s <- init_run <| fbits := fbits; env := [] |> regs;
-  s <- netlist_run_no_pseudos fext s comb_cells regs n;
+  s <- netlist_run_no_pseudos fext s comb_cells regs mems n;
   res <- sum_mapM (out_run (fext n) s) outs;
   return (res, s.fbits)
  od
