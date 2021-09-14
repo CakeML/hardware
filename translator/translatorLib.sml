@@ -59,12 +59,18 @@ in
  inst [ alpha |-> value_ty ] tm
 end;
 
+(* Prioritize "-" since we might be translating interactively *)
 fun get_def theory tm = let
  val name = tm |> dest_const |> fst
+
+ fun get_first_def [(t, name)] = fetch t name
+   | get_first_def ((t, name) :: defs) =
+      case total (fetch t) (name) of
+          NONE => get_first_def defs
+        | SOME def => def
 in
- case total (fetch theory) (name ^ "_trans") of
-    NONE => fetch theory (name ^ "_def")
-  | SOME def => def
+ get_first_def [("-", name ^ "_trans"), ("-", name ^ "_def"),
+                (theory, name ^ "_trans"), (theory, name ^ "_def")]
 end;
 
 fun procs2hardware tstate theory procs = let
@@ -109,8 +115,13 @@ end;
 fun build_module_rel_init module_rel init decls =
  prove(“^module_rel ^init (SND (run_decls fbits ^decls []))”, EVAL_TAC \\ simp []);
 
-(* Expected input format: name = mk_cirucit (procs seqs) (procs combs) init *)
-fun module2hardware module_def outputs comms = let
+(*
+module_def = expected input format: name = mk_cirucit (procs seqs) (procs combs) init
+abstract_fields = fields of fext only used for "abstract" modeling, i.e. never read or written to by circuit directly (used e.g. to model state machines outside of the circuit)
+outputs = outputs of circuit
+comms = variables that should be written to nonblockingly
+*)
+fun module2hardware module_def abstract_fields outputs comms = let
  val (module, def) = module_def |> concl |> dest_eq
  val module_name = module |> dest_const |> fst
 
@@ -144,6 +155,7 @@ fun module2hardware module_def outputs comms = let
 
  val fextv_vars =
  TypeBase.fields_of fext_ty
+ |> filter (fn (f, _) => not (mem f abstract_fields))
  |> map build_fextv_var;
 
  (* This was needed for Silver at some point to hide fext lifting from theorems,
@@ -160,7 +172,7 @@ fun module2hardware module_def outputs comms = let
  |> inst [ alpha |-> ``:error`` ]
  |> (fn tm => Define `fextv_rel fextv fext = ^tm`);
 
- val tstate = build_tstate fextv_rel_def state_rel_def module_state_rel_def comms fext_ty state_ty
+ val tstate = build_tstate fextv_rel_def state_rel_def module_state_rel_def abstract_fields comms fext_ty state_ty
 
  (* Build the Verilog module... *)
 

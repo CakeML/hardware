@@ -26,6 +26,12 @@ val MEM_disj_impl = Q.store_thm("MEM_disj_impl",
 
 (** listTheory extra **)
 
+(* "Generalized" GENLIST *)
+Definition ggenlist_def:
+ ggenlist f start len = GENLIST (λi. f (i + start)) len
+End
+
+(* TODO: Should move rev-variants to separate theory... *)
 Definition revEL_def:
  revEL n l = EL (LENGTH l - 1 - n) l
 End
@@ -68,6 +74,27 @@ Proof
  rw [revLUPDATE_def, IMP_EVERY_LUPDATE]
 QED
 
+Theorem revLUPDATE_MAP:
+ ∀x n l f. MAP f (revLUPDATE x n l) = revLUPDATE (f x) n (MAP f l)
+Proof
+ simp [revLUPDATE_def, LUPDATE_MAP]
+QED
+
+Theorem revEL_revLUPDATE:
+ ∀ys x i k. revEL i (revLUPDATE x k ys) = if ys ≠ [] ∧ (i = k ∨ (LENGTH ys - 1 ≤ k ∧ LENGTH ys - 1 ≤ i)) then
+                                           x
+                                          else
+                                           revEL i ys
+Proof
+ simp [revEL_def, revLUPDATE_def, EL_LUPDATE] \\ rw [] \\ gs []
+QED
+
+Theorem revEL_revLUPDATE_valid_idxes:
+ ∀ys x i k. k < LENGTH ys ∧ i < LENGTH ys ⇒ revEL i (revLUPDATE x k ys) = if i = k then x else revEL i ys
+Proof
+ simp [revEL_def, revLUPDATE_def, EL_LUPDATE] \\ rw []
+QED
+
 Theorem revEL_GENLIST:
  ∀f n x. x < n ⇒ revEL x (GENLIST f n) = f (n - 1 - x)
 Proof
@@ -79,12 +106,6 @@ Theorem EVERY_revEL:
 Proof
  rw [revEL_def, EVERY_EL] \\ eq_tac \\ rpt strip_tac \\
  first_x_assum (qspec_then ‘LENGTH l − (n + 1)’ assume_tac) \\ gs []
-QED
-
-Theorem EVERY_revLUPDATE_IMP:
- ∀xs x i P. P x ∧ EVERY P xs ⇒ EVERY P (revLUPDATE x i xs)
-Proof
- rw [revLUPDATE_def] \\ match_mp_tac IMP_EVERY_LUPDATE \\ simp []
 QED
 
 (* Bad rewrite, lhs in rhs -- do not move to list theory *)
@@ -134,6 +155,24 @@ Theorem EVERYi_T:
  ∀l. EVERYi (λi x. T) l
 Proof
  simp [EVERYi_EL]
+QED
+
+Theorem MAP_PAD_LEFT:
+ !f x n l. MAP f (PAD_LEFT x n l) = PAD_LEFT (f x) n (MAP f l)
+Proof
+ rw [PAD_LEFT, MAP_GENLIST]
+QED
+
+Theorem HD_MAP:
+ !l f. l <> [] ==> HD (MAP f l) = f (HD l)
+Proof
+ Induct \\ rw []
+QED
+
+Theorem GENLIST_NIL:
+ !f n. GENLIST f n = [] <=> n = 0
+Proof
+ Cases_on `n` \\ simp [GENLIST]
 QED
 
 (** pairTheory extra **)
@@ -290,6 +329,7 @@ Proof
  simp [bitstringTheory.bitify_reverse_map, rich_listTheory.EVERY_REVERSE, EVERY_MAP] \\ rw [EVERY_MEM] \\ rw []
 QED
 
+(* Useful thm, disgusting proof *)
 Theorem n2v_v2n:
  !v. n2v (v2n v) = (if EVERY ($= F) v then [F] else dropWhile ($= F) v)
 Proof

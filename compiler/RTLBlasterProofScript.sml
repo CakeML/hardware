@@ -1921,10 +1921,10 @@ Proof
      drule_strip blast_cell_input_not_pseudo \\ 
      drule_strip blast_cell_input_cell_input_marked_ok \\ impl_tac >- fs [blasterstate_ok_def] \\
      fs [blasterstate_ok_def, cell_output_ok_def] \\ rpt drule_first \\ rw []
-     >- (match_mp_tac EVERY_revLUPDATE_IMP \\ rw [blast_cell_input_marked_ok_def, cell_input_marked_not_pseudo_def]
+     >- (match_mp_tac IMP_EVERY_revLUPDATE \\ rw [blast_cell_input_marked_ok_def, cell_input_marked_not_pseudo_def]
          >- (match_mp_tac blast_cell_input_ok_le \\ asm_exists_tac \\ simp [])
          >- (match_mp_tac EVERY_blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []))
-     >- (match_mp_tac EVERY_revLUPDATE_IMP \\ simp [cell_input_marked_not_pseudo_def])
+     >- (match_mp_tac IMP_EVERY_revLUPDATE \\ simp [cell_input_marked_not_pseudo_def])
      >- (match_mp_tac EVERY_blast_cell_input_marked_ok_le \\ asm_exists_tac \\ simp []))
  >- simp [deterministic_netlist_def]
  >- fs [blasterstate_ok_def, lookup_insert_var_cmp] \\

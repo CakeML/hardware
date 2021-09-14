@@ -1,63 +1,34 @@
 open hardwarePreamble;
 
 open alignmentTheory alistTheory;
+open ag32MachineTheory (*ag32AddAcceleratorTheory ag32EqTheory*);
 
-open verilogTranslatorLib moduleTranslatorTheory;
-open verilogTranslatorConfigLib verilogLiftLib;
-
-open ag32MachineTheory ag32AddAcceleratorTheory ag32EqTheory;
+open translatorLib;
 
 val _ = new_theory "ag32Verilog";
 
-guess_lengths ();
-prefer_num ();
+val _ = guess_lengths ();
+val _ = prefer_num ();
 
 (*
-(* Based on Magnus' code from mail *)
-fun rename_vars tm = let
-  val seen_names = ref ([]:term list)
-
-  fun new_var v = let
-    val v = if (type_of v = state_ty) then v else variant (!seen_names) v
-    val _ = seen_names := (v :: (!seen_names))
-  in v end
-
-  fun change_name tm =
-    let
-      val (v,body) = dest_abs tm
-    in ALPHA_CONV (new_var v) tm end
-
-  fun walk_once c tm =
-    if is_abs tm then (c THENC ABS_CONV (walk_once c)) tm else
-    if is_comb tm then (RATOR_CONV (walk_once c) THENC
-                                   RAND_CONV (walk_once c)) tm else
-    ALL_CONV tm
-in QCONV (walk_once change_name) tm end;
+val module_def = ag32_def;
+val abstract_fields = ["mem", "io_events", "interrupt_state"];
+val outputs = ["PC"];
+val comms = ["PC", "data_out",
+             "command", "data_addr", "data_wdata", "data_wstrb",
+             "acc_arg", "acc_arg_ready",
+             "acc_res", "acc_res_ready",
+             "interrupt_req"];
 *)
 
-val cvars_def = Define `
- cvars = ["PC"; "data_out";
-          "command"; "data_addr"; "data_wdata"; "data_wstrb";
-          "acc_arg"; "acc_arg_ready";
-          "acc_res"; "acc_res_ready";
-          "interrupt_req"]`;
-
-fun intro_cvars_for_prog prog =
-  list_mk_comb (``intro_cvars``, [``cvars``, prog])
-  |> computeLib.RESTR_EVAL_CONV (append (decls "n2ver") (decls "w2ver"))
-  |> concl |> rhs;
-
-val cpu_step_def = cpu_Next_def
- |> REWRITE_RULE [cpu_Next_0w_def, cpu_Next_1w_def, cpu_Next_2w_def, cpu_Next_3w_def, cpu_Next_4w_def,
-                  (* 0w: *) align_addr_def, decode_instruction_def, DecodeReg_imm_def, ALU_def, shift_def, execute_instruction_def,
-                  (* 1w: *) delay_write_Next_def];
-(*
- |> CONV_RULE instruction_let_CONV
- |> PURE_REWRITE_RULE [ImplRun_def]
- |> CONV_RULE (DEPTH_CONV BETA_CONV)
- (* Cannot use usual priming, because ' is not valid in Verilog identifiers *)
- |> CONV_RULE (with_flag (priming, SOME "_") rename_vars); <-- might want to re-enable this
-*)
+val trans_thm = module2hardware ag32_def
+                                ["mem", "io_events", "interrupt_state"]
+                                ["PC"]
+                                ["PC"; "data_out";
+                                 "command"; "data_addr"; "data_wdata"; "data_wstrb";
+                                 "acc_arg"; "acc_arg_ready";
+                                 "acc_res"; "acc_res_ready";
+                                 "interrupt_req"]
 
 (* Cpu *)
 val trans = hol2hardware_step_function cpu_step_def;

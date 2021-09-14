@@ -8,6 +8,10 @@ open verilogTheory;
 open translatorTheory;
 open translatorCoreLib translatorExpLib;
 
+(* TODO: Move *)
+val Eval_get_hol_prog = rand o rator
+val Eval_exp_get_pred_exp = rand o rand o rator
+
 (*
 Testing:
 
@@ -71,6 +75,11 @@ fun strip_word_case tm = let
 in
  (exp, var, last_case, second_last_exp, second_last_case, tms)
 end;
+
+fun first_PART_MATCH proj ths tm =
+ case ths of
+   nil => failwith "No match in list"
+ | th::ths => PART_MATCH proj th tm handle HOL_ERR _ => first_PART_MATCH proj ths tm;
 
 (* For debugging: val tm = (!tm_trace) |> hd *)
 (* val s = ``s:state_circuit`` *)
@@ -210,10 +219,6 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
   case lookup_opt key (#write_thms tstate) of
    SOME (base_thm, base_bit_thm, step_thm) =>
    if is_fcp_update newval then let
-    (* TODO: Move *)
-    val Eval_get_hol_prog = rand o rator
-    val Eval_exp_get_pred_exp = rand o rand o rator
-
     val th = valOf base_bit_thm (* should be fine doing valOf here... *)
     val th = PART_MATCH (Eval_get_hol_prog o snd o dest_imp) th tm
     val (precond_eval, precond) = th |> concl |> dest_imp |> fst |> dest_conj
@@ -231,9 +236,21 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
    in
     MATCH_MP step_thm (CONJ newval' arg') |> EVAL_MP
    end
+ | NONE =>
+   case lookup_opt key (#write_2d_thms tstate) of
+    SOME (base_thm, base_slice_thm) => let
+     val th = first_PART_MATCH (Eval_get_hol_prog o snd o dest_imp) [base_thm, base_slice_thm] tm
+     val (precond_eval, precond) = th |> concl |> dest_imp |> fst |> dest_conj
+     val precond_eval_th = EVAL_PROVE precond_eval
+     val precond_th = precond |> strip_conj
+                              |> map (hol2hardware_exp tstate s s' o Eval_exp_get_pred_exp)
+                              |> LIST_CONJ
+    in
+     MATCH_MP th (CONJ precond_eval_th precond_th)
+    end
   | NONE => failwith "Unknown state update"
  end
-
+  
  else
   raise UnableToTranslate (tm, "Unknown case")
 

@@ -151,18 +151,4 @@ Proof
  rpt TOP_CASE_TAC \\ fs [same_value_cases]
 QED
 
-Triviality compile_correct_alt:
- !m circuit fbits vfbits' vfext rtlfext venv' n.
- compile m = INR circuit ∧
- vertype_fext m.fextty vfext ∧
- same_fext vfext rtlfext ⇒
- ?cenv' fbits'. circuit_run_no_pseudos rtlfext fbits circuit n = INR (cenv', fbits') /\
-                ?vfbits. sort_run vfext vfbits m n = INR (venv', vfbits') ⇒ verilog_netlist_rel m venv' cenv'
-Proof
- rpt strip_tac \\
- drule_strip compile_correct \\
- first_x_assum (qspecl_then [‘fbits’, ‘n’] strip_assume_tac) \\
- simp [] \\ qexists_tac ‘vfbits’ \\ every_case_tac \\ strip_tac \\ rveq \\ simp []
-QED
-
 val _ = export_theory ();

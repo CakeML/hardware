@@ -10,7 +10,7 @@ Inductive vertype_v:
  (vertype_v (VBool v) VBool_t) ∧
  (i = LENGTH vs /\ EVERY (λv. vertype_v v VBool_t) vs ==>
   vertype_v (VArray vs) (VArray_t i)) ∧
- (d = LENGTH vs /\ EVERY (λv. vertype_v v (VArray_t w)) vs ==>
+ (w = LENGTH vs /\ EVERY (λv. vertype_v v (VArray_t d)) vs ==>
   vertype_v (VArray vs) (VArray2_t w d))
 End
 
@@ -612,6 +612,13 @@ val WORD_ARRAY_def = Define `
      | VArray vs => LENGTH vs = dimword(:'a) /\
                     !i. ?w. sum_revEL (w2n i) vs = INR w /\ pred (arr i) w`;
 
+Theorem WORD_ARRAY_cases:
+ ∀pred arr v.
+ WORD_ARRAY pred (arr:'a word -> 'b) v ⇔
+ ∃vs. v = VArray vs ∧ LENGTH vs = dimword(:'a) ∧ ∀i. ∃w. sum_revEL (w2n i) vs = INR w /\ pred (arr i) w
+Proof
+ rw [WORD_ARRAY_def] \\ CASE_TAC
+QED
 
 val var_has_value_def = Define `
  var_has_value (env:envT) var P = ?v. ALOOKUP env var = SOME v /\ P v`;

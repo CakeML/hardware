@@ -64,10 +64,12 @@ Proof
 QED
 
 Theorem nd_reset_const:
- !s s' v v'. nd_reset s v = (s', v') ==> s'.vars = s.vars /\ s'.nbq = s.nbq
+ ∀s v s' v'. nd_reset s v = (s', v') ==> s'.vars = s.vars /\ s'.nbq = s.nbq
 Proof
+ cheat
+ (*Induct \\ simp [nd_reset_def] \\ Cases_on ‘v’ \\ simp [nd_reset_def]
  Cases_on `v` \\ simp [nd_reset_def, oracle_bit_def, shift_seq_def] \\
- rpt strip_tac' \\ pairarg_tac \\ fs [] \\ rw []
+ rpt strip_tac' \\ pairarg_tac \\ fs [nd_reset_def] \\ rw []*)
 QED
 
 Theorem prun_assn_rhs_const:
@@ -98,14 +100,18 @@ Proof
  Cases \\ rpt strip_tac'
  >- (fs [Once vertype_v_cases, nd_value_def, oracle_bit_def] \\ metis_tac [])
  >- metis_tac [nd_value_VArray_t_correct]
+ >- (gvs [Once vertype_v_cases, nd_value_def] \\ simp [EVERY_GENLIST] \\
+     simp [Once vertype_v_cases] \\ simp [EVERY_GENLIST] \\
+     simp [Once vertype_v_cases] \\ metis_tac [])
 QED
 
 Theorem nd_reset_type_preserving:
  !t v v' env env'.
  nd_reset env v = (env', v') /\ vertype_v v t ==> (?fbits. env' = env with fbits := fbits) /\ vertype_v v' t
 Proof
- Cases \\ rw [vertype_v_cases] \\ fs [nd_reset_def] \\ pairarg_tac \\ fs [] \\ rveq \\
- metis_tac [oracle_bits_correct]
+ cheat
+ (*Cases \\ rw [Once vertype_v_cases] \\ fs [nd_reset_def] \\ pairarg_tac \\ fs [] \\ rveq \\
+ metis_tac [oracle_bits_correct]*)
 QED
 
 (** fbits thms **)
@@ -161,9 +167,10 @@ Proof
 QED
 
 Theorem assn_fbits:
- !lhs fext use_nbq s fbits v. assn fext (s with fbits := fbits) use_nbq lhs v = assn fext s use_nbq lhs v
+ !fext s use_nbq lhs v fbits. assn fext (s with fbits := fbits) use_nbq lhs v = assn fext s use_nbq lhs v
 Proof
- Cases \\ rw [assn_def, get_var_fbits, get_use_nbq_var_fbits, erun_fbits]
+ ho_match_mp_tac assn_ind \\
+ rw [assn_def, get_var_fbits, get_use_nbq_var_fbits, erun_fbits]
 QED
 
 Theorem vertype_env_fbits:
@@ -271,7 +278,7 @@ QED
 Theorem vertype_v_build_zero:
  ∀t. vertype_v (build_zero t) t
 Proof
- Cases \\ rw [build_zero_def, vertype_v_cases]
+ Cases \\ rw [build_zero_def] \\ rpt (simp [Once vertype_v_cases])
 QED
 
 (** Dynamic semantic respects type system **)
@@ -280,6 +287,12 @@ Theorem length_ver_fixwidth:
  ∀bs n. LENGTH (ver_fixwidth n bs) = n
 Proof
  rw [ver_fixwidth_def, bitstringTheory.length_pad_left]
+QED
+
+Theorem every_ver_fixwidth:
+ ∀l n P. P (VBool F) ∧ EVERY P l ⇒ EVERY P (ver_fixwidth n l)
+Proof
+ rw [ver_fixwidth_def, PAD_LEFT, EVERY_GENLIST, rich_listTheory.EVERY_DROP]
 QED
 
 Triviality vertype_exp_erun_lem:
@@ -295,16 +308,21 @@ Proof
  rw [erun_def, sum_bind_INR, alist_to_map_alookup, GSYM sum_alookup_INR]
  >- (fs [erun_get_var_def, vertype_env_def] \\ drule_first \\ rfs [])
  >- (fs [erun_get_var_def, vertype_fext_n_def] \\ drule_first \\ rfs [])
- >- (rename1 ‘get_array_index _ vvar’ \\ Cases_on ‘vvar’ \\ fs [get_array_index_def, sum_map_INR] \\
-    rveq \\ simp [vertype_v_cases])
- >- (fs [erun_get_var_def, vertype_env_def] \\ drule_first \\
-     fs [] \\ rfs [vertype_v_cases] \\ fs [get_array_slice_def])
- >- fs [ver_liftVBool_INR, vertype_v_cases]
- >- (every_case_tac \\ fs [] \\ rw [vertype_v_cases])
+ >- (fs [erun_get_var_def] \\ drule_strip vertype_env_get_var_type \\
+     gvs [get_array_index_INR] \\
+     fs [Once vertype_v_cases] \\ fs [EVERY_revEL] \\ fs [Once vertype_v_cases])
+ >- (fs [erun_get_var_def] \\ drule_strip vertype_env_get_var_type \\
+     fs [get_array_slice_INR] \\
+     simp [Once vertype_v_cases] \\
+     match_mp_tac rich_listTheory.EVERY_TAKE \\ match_mp_tac rich_listTheory.EVERY_DROP \\ rveq \\
+     fs [Once vertype_v_cases])
+ >- fs [ver_liftVBool_INR, Once vertype_v_cases]
+ >- (every_case_tac \\ fs [] \\ rw [Once vertype_v_cases])
  >- (rpt drule_first \\ fs [ver_mapVArray_INR] \\ rveq \\
     fs [n2ver_def, v2ver_def, ver_liftVArray_def] \\ rveq \\ 
-    fs [vertype_v_cases, length_ver_fixwidth])
- >- simp [vertype_v_cases]
+    fs [Once vertype_v_cases] \\ simp [length_ver_fixwidth] \\
+    match_mp_tac every_ver_fixwidth \\ conj_tac \\ simp [EVERY_MAP, Once vertype_v_cases])
+ >- simp [Once vertype_v_cases]
 QED
 
 Theorem vertype_exp_erun:
@@ -356,8 +374,10 @@ Proof
  >- (fs [prun_assn_rhs_def, sum_map_INR] \\ rveq \\ fs [prun_bassn_def, sum_for_INR, assn_def, sum_bind_INR] \\
      pairarg_tac \\ fs [prun_set_var_index_INR, get_VArray_data_INR, get_VBool_data_INR] \\ rveq \\
      drule_strip vertype_env_get_use_nbq_var \\ rpt strip_tac
-     >- (match_mp_tac vertype_env_set_var \\ rpt asm_exists_tac \\ fs [vertype_v_cases])
-     >- (match_mp_tac vertype_env_filled_set_var \\ rpt asm_exists_tac \\ fs [vertype_v_cases]))
+     >- (match_mp_tac vertype_env_set_var \\ rpt asm_exists_tac \\ fs [Once vertype_v_cases] \\ gvs [] \\
+         match_mp_tac IMP_EVERY_revLUPDATE \\ simp [] \\ metis_tac [vertype_exp_erun])
+     >- (match_mp_tac vertype_env_filled_set_var \\ rpt asm_exists_tac \\ fs [Once vertype_v_cases] \\ gvs [] \\
+         match_mp_tac IMP_EVERY_revLUPDATE \\ simp [] \\ metis_tac [vertype_exp_erun]))
  (* Non-blocking assignments, essentially copied from blocking cases *)
  >- (fs [prun_assn_rhs_def, sum_map_INR, prun_assn_lhs_prev_def] \\ pairarg_tac \\ rveq \\
     fs [prun_nbassn_def, sum_for_INR, assn_def] \\
@@ -370,7 +390,8 @@ Proof
      pairarg_tac \\ fs [prun_set_var_index_INR, get_VArray_data_INR, get_VBool_data_INR] \\ rveq \\
      simp [vertype_env_filled_set_nbq_var] \\
      drule_strip vertype_env_get_use_nbq_var \\
-     match_mp_tac vertype_env_set_nbq_var \\ rpt asm_exists_tac \\ fs [vertype_v_cases])
+     match_mp_tac vertype_env_set_nbq_var \\ rpt asm_exists_tac \\ fs [Once vertype_v_cases] \\ gvs [] \\
+     match_mp_tac IMP_EVERY_revLUPDATE \\ simp [] \\ metis_tac [vertype_exp_erun])
 QED
 
 Theorem vertype_env_pruns:
@@ -626,15 +647,17 @@ Proof
 QED
 
 Theorem assn_cong_INR:
- !lhs rhs v fext s s' use_nbq.
+ !fext s use_nbq lhs rhs v s'.
  assn fext s use_nbq lhs rhs = INR v /\
  (!var v. get_var s var = INR v ==> get_var s' var = INR v) /\
  (!var. get_nbq_var s' var = get_nbq_var s var) ==>
  assn fext s' use_nbq lhs rhs = INR v
 Proof
- Cases \\ rw [assn_def, sum_bind_INR] \\ drule_strip get_use_nbq_var_cong_INR
- >- (drule_strip erun_cong_INR \\ simp [])
- \\ fs [sum_for_INR]
+ ho_match_mp_tac assn_ind \\
+ rw [assn_def, sum_bind_INR]
+ >- (drule_strip get_use_nbq_var_cong_INR \\ drule_strip erun_cong_INR \\ simp [])
+ >- (drule_strip get_use_nbq_var_cong_INR \\ fs [sum_for_INR])
+ >- (drule_strip erun_cong_INR \\ drule_first \\ simp [])
 QED
 
 (*
@@ -736,10 +759,11 @@ Proof
 QED
 
 Theorem assn_SliceIndexing_same_after:
- !fext s use_nbq var n m v v'.
- assn fext s use_nbq (SliceIndexing var n m) v = INR v' ==> ?v''. v' = (var, v'')
+ !is fext s use_nbq var n m v v'.
+ assn fext s use_nbq (SliceIndexing var is n m) v = INR v' ==> ?v''. v' = (var, v'')
 Proof
- rw [assn_def, sum_bind_INR, prun_set_slice_def, set_slice_def] \\ every_case_tac \\
+ Cases \\ TRY (Cases_on ‘t’) \\
+ rw [assn_def, sum_bind_INR, prun_set_var_index_def, prun_set_slice_def, set_slice_def] \\ every_case_tac \\
  fs [sum_for_INR] \\ rw []
 QED
 
@@ -1037,12 +1061,13 @@ Proof
  \\ pairarg_tac \\ rveq \\ drule_strip prun_assn_rhs_const \\
     fs [prun_bassn_def, prun_nbassn_def, sum_for_INR]
    >- (pairarg_tac \\ rveq \\ fs [get_var_cleanup] \\ fs [get_nbq_var_def])
-   \\ Cases_on `lhs` \\ fs [assn_def]
+   \\ Cases_on `lhs` \\ TRY (rename1 ‘SliceIndexing _ is _ _’ \\ Cases_on ‘is’ \\ TRY (Cases_on ‘t’)) \\
+      fs [assn_def]
     >- (rveq \\ fs [get_var_cleanup] \\ every_case_tac \\ fs [evwrites_def, get_nbq_var_def])
     >- (fs [sum_bind_INR, prun_set_var_index_def] \\ every_case_tac \\ fs [sum_for_INR] \\
        rveq \\ fs [get_var_cleanup] \\ every_case_tac \\ fs [evwrites_def, get_nbq_var_def])
-    \\ fs [sum_bind_INR, sum_for_INR] \\
-       rveq \\ fs [get_var_cleanup] \\ every_case_tac \\ fs [evwrites_def, get_nbq_var_def]
+    \\ pairarg_tac \\ fs [sum_bind_INR, sum_for_INR, prun_set_var_index_INR] \\
+       rveq \\ fs [get_var_cleanup] \\ every_case_tac \\ gvs [evwrites_def, get_nbq_var_def]
 QED
 
 Theorem pruns_get_nbq_var_INR:

@@ -1,6 +1,6 @@
 open hardwarePreamble;
 
-open alistTheory wordsTheory stringTheory bitstringTheory sptreeTheory;
+open alistTheory bitstringTheory wordsTheory stringTheory bitstringTheory sptreeTheory;
 open wordsLib bitstringLib;
 
 open oracleTheory sumExtraTheory verilogTheory verilogMetaTheory verilogTypeTheory;
@@ -74,11 +74,6 @@ Theorem procs_sing:
 Proof
  rw [procs_def, FUN_EQ_THM]
 QED
-
-(* "Generalized" GENLIST *)
-Definition ggenlist_def:
- ggenlist f start len = GENLIST (λi. f (i + start)) len
-End
 
 (** Translator stuff **)
 
@@ -194,6 +189,180 @@ Proof
  fs [erun_def, BOOL_def, sum_bind_def, erun_bbop_def]
 QED
 
+Theorem Eval_exp_BOOL_And:
+ !fext_rel rel s s' b1 v1 b2 v2.
+  Eval_exp fext_rel rel fext s s' env (BOOL b1) v1 /\
+  Eval_exp fext_rel rel fext s s' env (BOOL b2) v2 ==>
+  Eval_exp fext_rel rel fext s s' env (BOOL (b1 ∧ b2)) (BBOp v1 And v2)
+Proof
+ rw [Eval_exp_bbop]
+QED
+
+Theorem Eval_exp_BOOL_Or:
+ !fext_rel rel s s' b1 v1 b2 v2.
+  Eval_exp fext_rel rel fext s s' env (BOOL b1) v1 /\
+  Eval_exp fext_rel rel fext s s' env (BOOL b2) v2 ==>
+  Eval_exp fext_rel rel fext s s' env (BOOL (b1 ∨ b2)) (BBOp v1 Or v2)
+Proof
+ rw [Eval_exp_bbop]
+QED
+
+Theorem Eval_exp_BOOL_Equal:
+ !fext_rel rel s s' b1 v1 b2 v2.
+  Eval_exp fext_rel rel fext s s' env (BOOL b1) v1 /\
+  Eval_exp fext_rel rel fext s s' env (BOOL b2) v2 ==>
+  Eval_exp fext_rel rel fext s s' env (BOOL (b1 = b2)) (BBOp v1 Equal v2)
+Proof
+ rw [Eval_exp_bbop]
+QED
+
+Triviality band_w2v:
+ !w1 w2. band (w2v w1) (w2v w2) = w2v (w1 && w2)
+Proof
+ rpt gen_tac \\ bitstringLib.Cases_on_v2w `w1` \\  bitstringLib.Cases_on_v2w `w2` \\
+ fs [w2v_v2w, w2v_v2w, bitwise_def, (* spec: *) word_and_v2w, band_def]
+QED
+
+Triviality bor_w2v:
+ !w1 w2. bor (w2v w1) (w2v w2) = w2v (w1 || w2)
+Proof
+ rpt gen_tac \\ bitstringLib.Cases_on_v2w `w1` \\  bitstringLib.Cases_on_v2w `w2` \\
+ fs [w2v_v2w, w2v_v2w, bitwise_def, (* spec: *) word_or_v2w, bor_def]
+QED
+
+Triviality bxor_w2v:
+ !w1 w2. bxor (w2v w1) (w2v w2) = w2v (w1 ⊕ w2)
+Proof
+ rpt gen_tac \\ bitstringLib.Cases_on_v2w `w1` \\  bitstringLib.Cases_on_v2w `w2` \\
+ fs [w2v_v2w, w2v_v2w, bitwise_def, (* spec: *) word_xor_v2w, bxor_def]
+QED
+
+Triviality Eval_exp_WORD_abop:
+ !fext_rel rel s s' w1 v1 w2 v2.
+  Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+  Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+  Eval_exp fext_rel rel fext s s' env (WORD (w1 && w2)) (ABOp v1 BitwiseAnd v2) /\
+  Eval_exp fext_rel rel fext s s' env (WORD (w1 || w2)) (ABOp v1 BitwiseOr v2) /\
+  Eval_exp fext_rel rel fext s s' env (WORD (w1 ⊕ w2)) (ABOp v1 BitwiseXor v2)
+Proof
+ rw [Eval_exp_def, erun_def, WORD_def] \\ rpt drule_first \\
+ fs [sum_bind_def, sum_for_def, sum_map_def,
+     ver2v_w2ver, v2ver_def, w2ver_def,
+     erun_abop_def, band_w2v, bor_w2v, bxor_w2v]
+QED
+
+Theorem Eval_exp_WORD_And:
+ !fext_rel rel s s' w1 v1 w2 v2.
+  Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+  Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+  Eval_exp fext_rel rel fext s s' env (WORD (w1 && w2)) (ABOp v1 BitwiseAnd v2)
+Proof
+ rw [Eval_exp_WORD_abop]
+QED
+
+Theorem Eval_exp_WORD_Or:
+ !fext_rel rel s s' w1 v1 w2 v2.
+  Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+  Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+  Eval_exp fext_rel rel fext s s' env (WORD (w1 || w2)) (ABOp v1 BitwiseOr v2)
+Proof
+ rw [Eval_exp_WORD_abop]
+QED
+
+Theorem Eval_exp_WORD_Xor:
+ !fext_rel rel s s' w1 v1 w2 v2.
+  Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+  Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+  Eval_exp fext_rel rel fext s s' env (WORD (w1 ⊕ w2)) (ABOp v1 BitwiseXor v2)
+Proof
+ rw [Eval_exp_WORD_abop]
+QED
+
+(* Cleanup needed for shifts... *)
+val lem1 = Q.prove(
+ `!w. K (HD (MAP VBool (w2v w))) = VBool o K (HD (w2v w))`,
+ rw [w2v_not_empty, HD_MAP]);
+
+val lem2 = Q.prove(
+ `!w. HD (w2v w) <=> word_msb w`,
+ rw [word_msb_def, w2v_def] \\ Cases_on `dimindex(:'a)` >- fs [] \\ simp [HD_GENLIST]);
+
+val lem3 = Q.prove(
+ `K (VBool F) = VBool o K F`,
+ rw []);
+
+Triviality erun_shift_ShiftArithR_ShiftLogicalR_lift:
+ !w1 w2.
+ erun_shift ShiftArithR (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 >>~ w2)) /\
+ erun_shift ShiftLogicalR (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 >>>~ w2))
+Proof
+ rw [erun_shift_def, word_asr_bv_def, word_asr_def, word_lsr_bv_def, word_lsr_def] \\
+ rewrite_tac [lem1, lem3, GSYM MAP_GENLIST, GSYM MAP_TAKE, GSYM MAP_APPEND] \\
+
+ match_mp_tac MAP_CONG \\ rw [] \\
+
+ match_mp_tac LIST_EQ \\ rw [el_w2v, fcpTheory.FCP_BETA] \\
+
+ rw [EL_APPEND_EQN, rich_listTheory.EL_TAKE, lem2] \\
+ Cases_on `w2n w2 < x + 1` \\ rw [el_w2v]
+QED
+
+Triviality erun_shift_ShiftLogicalL_lift:
+ !w1 w2. erun_shift ShiftLogicalL (MAP VBool (w2v w1)) (w2n w2) = MAP VBool (w2v (w1 <<~ w2))
+Proof
+ rw [erun_shift_def, word_lsl_bv_def, word_lsl_def] \\
+ rw [ver_fixwidth_def, PAD_LEFT, PAD_RIGHT] \\
+
+ rewrite_tac [lem3, GSYM MAP_GENLIST, GSYM MAP_DROP, GSYM MAP_APPEND] \\
+ match_mp_tac MAP_CONG \\ rw [] \\
+
+ match_mp_tac LIST_EQ \\
+ rw [rich_listTheory.DROP_APPEND, el_w2v, fcpTheory.FCP_BETA, EL_APPEND_EQN] \\
+ fs [rich_listTheory.EL_DROP, el_w2v]
+QED
+
+Triviality Eval_exp_WORD_shift:
+ !fext_rel rel s s' w1 v1 w2 v2.
+ Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+ Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+ Eval_exp fext_rel rel fext s s' env (WORD (w1 >>~ w2)) (Shift v1 ShiftArithR v2) /\
+ Eval_exp fext_rel rel fext s s' env (WORD (w1 <<~ w2)) (Shift v1 ShiftLogicalL v2) /\
+ Eval_exp fext_rel rel fext s s' env (WORD (w1 >>>~ w2)) (Shift v1 ShiftLogicalR v2)
+Proof
+ rw [Eval_exp_def, erun_def] \\ drule_first \\ drule_first \\
+ fs [sum_bind_def, sum_for_def, sum_map_def,
+     WORD_def,
+     w2ver_def, v2ver_def, ver2n_def, ver2v_def, v2n_w2v, sum_mapM_ver2bool_VBool,
+     get_VArray_data_def, erun_shift_ShiftArithR_ShiftLogicalR_lift, erun_shift_ShiftLogicalL_lift]
+QED
+
+Theorem Eval_exp_WORD_ShiftArithR:
+ !fext_rel rel s s' w1 v1 w2 v2.
+ Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+ Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+ Eval_exp fext_rel rel fext s s' env (WORD (w1 >>~ w2)) (Shift v1 ShiftArithR v2)
+Proof
+ rw [Eval_exp_WORD_shift]
+QED
+
+Theorem Eval_exp_WORD_ShiftLogicalL:
+ !fext_rel rel s s' w1 v1 w2 v2.
+ Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+ Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+ Eval_exp fext_rel rel fext s s' env (WORD (w1 <<~ w2)) (Shift v1 ShiftLogicalL v2)
+Proof
+ rw [Eval_exp_WORD_shift]
+QED
+
+Theorem Eval_exp_WORD_ShiftLogicalR:
+ !fext_rel rel s s' w1 v1 w2 v2.
+ Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
+ Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
+ Eval_exp fext_rel rel fext s s' env (WORD (w1 >>>~ w2)) (Shift v1 ShiftLogicalR v2)
+Proof
+ rw [Eval_exp_WORD_shift]
+QED
+
 Triviality Eval_exp_arith:
  !fext_rel rel s s' w1 v1 w2 v2.
   Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
@@ -238,15 +407,15 @@ Proof
 QED
 
 (* UGLY: Everything with this proof is ugly *)
-Theorem ver_msb_w2ver:
+Triviality ver_msb_w2ver:
  !w. ver_msb (w2ver w) = INR (word_msb w)
 Proof
  rw [w2ver_def] \\ bitstringLib.Cases_on_v2w `w` \\
  fs [w2v_v2w, word_msb_v2w, markerTheory.Abbrev_def] \\
- Cases_on `v` \\ fs [testbit_el, ver_msb_def]
+ Cases_on `v` \\ fs [testbit_el, v2ver_def, ver_msb_def]
 QED
 
-Theorem Eval_exp_WORD_cmp:
+Triviality Eval_exp_WORD_cmp:
  !fext_rel rel s s' w1 v1 w2 v2.
   Eval_exp fext_rel rel fext s s' env (WORD w1) v1 /\
   Eval_exp fext_rel rel fext s s' env (WORD w2) v2 ==>
@@ -260,7 +429,7 @@ Proof
  rw [Eval_exp_def, erun_def, erun_cmp_def,
      WORD_def, BOOL_def, w2ver_bij, ver2n_w2ver,
      sum_bind_def, sum_for_def, sum_map_def]
- >- simp [get_VArray_data_def, w2ver_def, sum_bind_def, w2v_bij]
+ >- (simp [get_VArray_data_def, w2ver_def, v2ver_def, sum_bind_def] \\ simp [MAP_inj, w2v_bij])
  \\ TRY (simp [ver_msb_w2ver, WORD_LT, WORD_LE, sum_bind_def, sum_map_def] \\ NO_TAC)
  \\ Cases_on_word `w1` \\ Cases_on_word `w2` \\ simp [w2n_n2w, word_lo_n2w, word_ls_n2w]
 QED
@@ -332,10 +501,106 @@ Theorem Eval_exp_word_bit:
   Eval_exp fext_rel rel fext s s' env (BOOL (word_bit n w)) (ArrayIndex varexp 0 (Const (n2ver n)))
 Proof
  rw [is_vervar_cases, Eval_exp_def, erun_def, WORD_def] \\ drule_first \\
- fs [erun_get_var_def, sum_bind_def, sum_mapM_def, erun_def, sum_map_def, ver2n_n2ver, w2ver_def,
+ fs [erun_get_var_def, sum_bind_def, sum_mapM_def, erun_def, sum_map_def, w2ver_def, v2ver_def, ver2n_n2ver,
      get_array_index_def, sum_revEL_def] \\
  Cases_on_v2w `w` \\
  fs [w2v_v2w, BOOL_def, sum_bind_def, sum_map_def, EL_MAP, bit_v2w, testbit, sum_EL_EL]
+QED
+
+Triviality Eval_exp_word_extract_help:
+ !v h l. h >= l /\ h < LENGTH v ==> TAKE (h − l + 1) (DROP (LENGTH v − (h + 1)) v) = DROP (LENGTH v − SUC h) (TAKE (LENGTH v − l) v)
+Proof
+ Induct \\ rw [] \\ Cases_on `LENGTH v = h'` \\ fs [arithmeticTheory.ADD1, DROP_def, TAKE_def]
+QED
+
+Theorem Eval_exp_word_extract:
+ !fext_rel rel s s' (w:'a word) varexp h l.
+ Eval_exp fext_rel rel fext s s' env (WORD w) varexp ==>
+ is_vervar varexp /\ h >= l /\ h < dimindex (:'a) /\ h - l + 1 = dimindex (:'b) /\
+ dimindex (:'a) >= dimindex (:'b) ==>
+ Eval_exp fext_rel rel fext s s' env (WORD (((h >< l) w):'b word)) (ArraySlice varexp (*[]*) h l)
+Proof
+ Cases_on `varexp` \\ rw [is_vervar_def, Eval_exp_def, erun_def, WORD_def, sum_bind_def] \\
+ (*ntac 2 (pop_assum kall_tac) (* <-- just cleanup *) \\*)
+
+ rw [w2ver_def, v2ver_def, get_array_slice_def] \\ rewrite_tac [GSYM MAP_DROP, GSYM MAP_TAKE] \\
+ match_mp_tac MAP_CONG \\
+ Cases_on_v2w `w` \\
+ fs [word_extract_v2w, word_bits_v2w, w2v_v2w, w2w_v2w, field_def, shiftr_def] \\
+ fs [fixwidth_def, zero_extend_def, PAD_LEFT] \\ metis_tac [Eval_exp_word_extract_help]
+QED
+
+Theorem Eval_exp_word_concat:
+ !fext_rel rel s s' (lw:'a word) (rw:'b word) lexp rexp.
+ Eval_exp fext_rel rel fext s s' env (WORD lw) lexp /\
+ Eval_exp fext_rel rel fext s s' env (WORD rw) rexp ==>
+ FINITE (UNIV:'a set) /\
+ FINITE (UNIV:'b set) /\
+ dimindex (:'c) = dimindex (:'a) + dimindex (:'b) ==>
+ Eval_exp fext_rel rel fext s s' env (WORD ((lw @@ rw):'c word)) (ArrayConcat lexp rexp)
+Proof
+ rw [Eval_exp_def] \\ rpt drule_first \\ simp [erun_def, sum_bind_def] \\
+ Cases_on `res` >- fs [WORD_def, w2ver_def, v2ver_def] \\
+ Cases_on `res'` >- fs [WORD_def, w2ver_def, v2ver_def] \\
+ simp [sum_bind_def, sum_for_def, sum_map_def, word_concat_def] \\
+
+ Cases_on_v2w `lw` \\ Cases_on_v2w `rw` \\
+ simp [word_join_v2w, w2w_v2w, fcpTheory.index_sum] \\
+ fs [WORD_def, w2ver_def, w2v_v2w, v2ver_def]
+QED
+
+val Eval_resize_tac =
+ rw [BOOL_def, WORD_def, Eval_exp_def, erun_def, erun_resize_def] \\
+ first_x_assum drule \\ strip_tac \\
+ rw [sum_bind_def, sum_map_def, get_VArray_data_def, ver_to_VArray_def, isVBool_def,
+     w2ver_def, v2ver_def,
+     w2v_not_empty, w2v_w2w, w2v_v2w,
+     fixwidth_def, zero_extend_def, MAP_PAD_LEFT, MAP_DROP];
+
+Theorem Eval_exp_w2w:
+ !fext_rel fel s s' (w:'a word) e.
+ Eval_exp fext_rel rel fext s s' env (WORD w) e ==>
+ Eval_exp fext_rel rel fext s s' env (WORD ((w2w w):'b word)) (Resize e ZeroExtend (dimindex (:'b)))
+Proof
+ Eval_resize_tac
+QED
+
+val HD_GENLIST_alt = Q.prove(
+ `!n f. 0 < n ==> HD (GENLIST f n) = f 0`,
+ Cases \\ rw [HD_GENLIST]);
+
+val GENLIST_APPEND_alt = Q.prove(
+ `!m n f g.
+   m <= n ==> GENLIST f (n - m) ++ GENLIST g m =
+              GENLIST (\i. if i < (n - m) then f i else g (i - (n - m))) n`,
+ rpt strip_tac \\ `n = m + (n - m)` by DECIDE_TAC \\
+ pop_assum (fn th => CONV_TAC (RHS_CONV (ONCE_REWRITE_CONV [th]))) \\
+ rewrite_tac [GENLIST_APPEND] \\ match_mp_tac f_equals2 \\ rw [GENLIST_CONG]);
+
+Theorem Eval_exp_sw2sw:
+ !fext_rel rel s s' (w:'a word) e.
+ dimindex(:'a) <= dimindex (:'b) /\
+ Eval_exp fext_rel rel fext s s' env (WORD w) e ==>
+ Eval_exp fext_rel rel fext s s' env (WORD ((sw2sw w):'b word)) (Resize e SignExtend (dimindex (:'b)))
+Proof
+ (* TODO: Generalize tactic *)
+ Eval_resize_tac \\
+ simp [w2v_def, sw2sw] \\
+ dep_rewrite.DEP_REWRITE_TAC [HD_MAP] \\ conj_tac >- rw [GENLIST_NIL] \\
+ simp [GSYM MAP_PAD_LEFT] \\ match_mp_tac MAP_CONG \\ simp [PAD_LEFT] \\
+ dep_rewrite.DEP_REWRITE_TAC [HD_GENLIST_alt] \\ simp [] \\
+ `!i. 0 < i + dimindex (:'a)` by (gen_tac \\ assume_tac DIMINDEX_GT_0 \\ DECIDE_TAC) \\ simp [] \\
+ pop_assum (fn _ => ALL_TAC) \\
+ simp [GENLIST_APPEND_alt, word_msb_def] \\ match_mp_tac GENLIST_CONG \\ rw [f_equals2]
+QED
+
+Theorem Eval_exp_v2w:
+ !fext_rel rel s s' b e.
+ 1 < dimindex (:'b) /\
+ Eval_exp fext_rel rel fext s s' env (BOOL b) e ==>
+ Eval_exp fext_rel rel fext s s' env (WORD ((v2w [b]):'b word)) (Resize e ZeroExtend (dimindex (:'b)))
+Proof
+ Eval_resize_tac
 QED
 
 (** Statements **)

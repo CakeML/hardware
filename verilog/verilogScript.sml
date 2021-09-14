@@ -183,7 +183,7 @@ End
 Definition build_zero_def:
  (build_zero VBool_t = VBool F) /\
  (build_zero (VArray_t l) = VArray $ REPLICATE l (VBool F)) ∧
- (build_zero (VArray2_t w d) = VArray $ REPLICATE d (VArray $ REPLICATE w (VBool F)))
+ (build_zero (VArray2_t w d) = VArray $ REPLICATE w (VArray $ REPLICATE d (VBool F)))
 End
 
 (* Verilog ASTs *)
@@ -298,7 +298,7 @@ QED
 val _ = Datatype ‘
  write_spec = NoIndexing string
             | Indexing string num exp (* var -> index length (number of bits) -> index exp *)
-            | SliceIndexing string num num’;
+            | SliceIndexing string (exp list) num num’;
 
 (** Process code, should maybe be renamed to "stmt" or similar **)
 val _ = Datatype `
@@ -520,17 +520,26 @@ val ver_msb_def = Define `
 
 (** Oracle misc for non-deterministic values **)
 
-val nd_value_def = Define `
+Definition nd_value_def:
  (nd_value oracle VBool_t <=>
-  let (b, oracle') = oracle_bit oracle in (VBool b, oracle')) /\
+  let (b, oracle') = oracle_bit oracle in (VBool b, oracle')) ∧
  (nd_value oracle (VArray_t len) <=>
-  let (bs, oracle') = oracle_bits oracle len in (v2ver bs, oracle'))`;
+  let (bs, oracle') = oracle_bits oracle len in (v2ver bs, oracle')) ∧
+ (nd_value oracle (VArray2_t w d) <=>
+  (VArray $ GENLIST (λwi. VArray $ GENLIST (λdi. VBool $ oracle $ d*wi + di) d) w, shift_seq (w*d) oracle))
+End
 
-val nd_reset_def = Define `
+Definition nd_reset_def:
  (nd_reset s (VBool _) = let (b, fbits) = oracle_bit s.fbits in
                           (s with fbits := fbits, VBool b)) /\
- (nd_reset s (VArray bs) = let (bs, fbits) = oracle_bits s.fbits (LENGTH bs) in
-                            (s with fbits := fbits, v2ver bs))`
+ (nd_reset s (VArray bs) = let (s, bs) = nd_reset_list s bs in
+                            (s, VArray bs)) ∧
+
+ (nd_reset_list s [] = (s, [])) ∧
+ (nd_reset_list s (b::bs) = let (s, b') = nd_reset s b;
+                                (s, bs') = nd_reset_list s bs in
+                                (s, b'::bs'))
+End
 
 (** Expressions **)
 
@@ -540,11 +549,11 @@ val ver_fixwidth_def = Define `
     let l = LENGTH v in
       if l < n then (PAD_LEFT (VBool F) n v) else DROP (l − n) v`;
 
-(*Theorem ver_fixwidth_fixwidth:
- ∀n v. ver_fixwidth n v = fixwidth n v
+Theorem ver_fixwidth_fixwidth:
+ ∀n v. ver_fixwidth n (MAP VBool v) = MAP VBool (fixwidth n v)
 Proof
- simp [ver_fixwidth_def, fixwidth_def, zero_extend_def]
-QED*)
+ rw [ver_fixwidth_def, fixwidth_def, zero_extend_def, PAD_LEFT, MAP_GENLIST, MAP_DROP]
+QED
 
 val erun_bbop_def = Define `
  (erun_bbop And l r = (l /\ r)) /\
@@ -778,12 +787,26 @@ val assn_def = Define ‘
   (*sum_bind (get_VBool_data rhse) (\rhse.*)
   prun_set_var_index vname inum vd rhse))))) /\
 
- (assn fext s use_nbq (SliceIndexing vname ih il) rhs =
+ (assn fext s use_nbq (SliceIndexing vname [] ih il) rhs =
   sum_bind (get_use_nbq_var s use_nbq vname) (\v.
   sum_bind (get_VArray_data v) (\olddata.
   sum_bind (get_VArray_data rhs) (\rhsdata.
   sum_for  (prun_set_slice ih il olddata rhsdata) (\newdata.
-   (vname, VArray newdata))))))’;
+   (vname, VArray newdata)))))) ∧
+
+ (* Hard-coded support for 2d-array writes for now... *)
+ (assn fext s use_nbq (SliceIndexing vname [i] ih il) rhs =
+  sum_bind (erun fext s i) (\i.
+  sum_bind (ver2n i) (\i.
+  sum_bind (get_var s vname) (\v.
+  sum_bind (get_VArray_data v) (\olddata.
+  sum_bind (sum_revEL i olddata) (\oldinner.
+  sum_bind (get_VArray_data oldinner) (\olddatainner.
+  sum_bind (get_VArray_data rhs) (\rhsdata.
+  sum_bind (prun_set_slice ih il olddatainner rhsdata) (\newdata.
+   prun_set_var_index vname i olddata (VArray newdata)))))))))) ∧
+
+ (assn _ _ _ _ _ = INL NotImplemented)’;
 
 val prun_bassn_def = Define `
   prun_bassn fext s lhs rhse = sum_for (assn fext s F lhs rhse) (\(name, v). set_var s name v)`;
@@ -962,6 +985,7 @@ val evreads_def = Define `
 
 val evreads_index_def = Define `
  (evreads_index (Indexing _ _ i) = evreads i) /\
+ (evreads_index (SliceIndexing _ is _ _) = FLAT (MAP evreads is)) ∧
  (evreads_index _ = [])`;
 
 val vreads_def = tDefine "vreads" `
@@ -984,7 +1008,7 @@ val vreads_def = tDefine "vreads" `
 val evwrites_def = Define ‘
  (evwrites (NoIndexing vname) = vname) /\
  (evwrites (Indexing vname _ _) = vname) /\
- (evwrites (SliceIndexing vname _ _) = vname)’;
+ (evwrites (SliceIndexing vname _ _ _) = vname)’;
 
 (* Blocking writes *)
 val vwrites_def = tDefine "vwrites" `

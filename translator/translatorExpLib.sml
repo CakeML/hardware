@@ -3,7 +3,7 @@ struct
 
 open hardwarePreamble;
 
-open stringSyntax;
+open stringSyntax bitstringSyntax;
 
 open verilogTheory verilogTypeTheory;
 
@@ -16,11 +16,11 @@ open sumExtraTheory verilogMetaTheory;
 val Eval_exp_exp = rand o rator;
 
 val builtin_binops = [
-  (*Eval_exp_BOOL_And, Eval_BOOL_Equal, Eval_BOOL_Or,
+  Eval_exp_BOOL_And, Eval_exp_BOOL_Or, Eval_exp_BOOL_Equal,
 
-  Eval_WORD_And, Eval_WORD_Or, Eval_WORD_Xor,
+  Eval_exp_WORD_And, Eval_exp_WORD_Or, Eval_exp_WORD_Xor,
 
-  Eval_WORD_ShiftArithR, Eval_WORD_ShiftLogicalL, Eval_WORD_ShiftLogicalR,*)
+  Eval_exp_WORD_ShiftArithR, Eval_exp_WORD_ShiftLogicalL, Eval_exp_WORD_ShiftLogicalR,
 
   Eval_exp_WORD_Minus, Eval_exp_WORD_Plus, Eval_exp_WORD_Times,
 
@@ -47,6 +47,7 @@ type tstate = { fext_ty : hol_type,
                 comms : string list,
                 read_thms : (term * thm) list,
                 write_thms : (string * (thm * thm option * thm)) list,
+                write_2d_thms : (string * (thm * thm)) list,
                 fext_read_thms : (term * thm) list,
                 module_rel_rel : thm,
                 rel_module_rel : thm };
@@ -107,10 +108,10 @@ fun update_base_bit_tac rel =
  fs [rel, state_rel_var_def, state_rel_cvar_def, WORD_def, BOOL_def] \\ rveq \\
  simp [sum_bind_def, sum_map_def, sum_for_def, prun_assn_rhs_def, prun_bassn_def, prun_nbassn_def, assn_def,
        erun_def, ver2n_n2ver, GSYM get_cvar_rel_get_use_nbq_var, get_use_nbq_var_F,
-       w2ver_def, get_VArray_data_def, get_VBool_data_def] \\
+       w2ver_def, v2ver_def, get_VArray_data_def, get_VBool_data_def] \\
  dep_rewrite.DEP_REWRITE_TAC [prun_set_var_index_ok_idx] \\ simp [bitstringTheory.length_w2v, sum_map_def] \\
- simp [get_var_cleanup, get_cvar_rel_set_var_neq, get_cvar_rel_set_nbq_var, w2ver_def] \\
- simp [revLUPDATE_fcp_update];
+ simp [get_var_cleanup, get_cvar_rel_set_var_neq, get_cvar_rel_set_nbq_var, w2ver_def, v2ver_def] \\
+ simp [GSYM revLUPDATE_MAP, revLUPDATE_fcp_update];
 
 fun prove_update_thms fext_rel_const rel rel_const comms (field, field_data:TypeBase.rcd_fieldinfo) = let
  val fupd = #fupd field_data
@@ -122,6 +123,76 @@ fun prove_update_thms fext_rel_const rel rel_const comms (field, field_data:Type
  val base_bit_thm = Option.map (fn tm => prove (tm, update_base_bit_tac rel)) base_bit_stmt
 in
  (key, (base_thm, base_bit_thm, step_thm))
+end;
+
+fun build_update_stmts_2d comms fext_rel_const rel_const field fupd facc = let
+ val fieldHOL = fromMLstring field
+ val ty = fupd |> type_of |> dom_rng |> fst |> dom_rng |> fst
+ val state_ty = fupd |> type_of |> dom_rng |> snd |> dom_rng |> fst
+ val pred = predicate_for_type ty
+ val (prev_s, assn) = if mem field comms then
+                       (mk_var ("s", state_ty), NonBlockingAssign_tm)
+                      else
+                       (mk_var ("s'", state_ty), BlockingAssign_tm)
+
+ val el_size = facc |> type_of |> dom_rng |> snd |> dom_rng |> snd |> dest_word_type
+in
+ (``!s s' i ie v ve.
+    T /\
+    (Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD i) ie /\
+    Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD v) ve) ==>
+    Eval ^fext_rel_const ^rel_const fext s s' env (^fupd (K ((i =+ v) (^facc ^prev_s))) s')
+                                                  (^assn (Indexing ^fieldHOL 0 ie) (SOME ve))``,
+  ``!s s' i ie (v:'a word) ve hb lb.
+     (dimindex(:'a) = hb + 1 − lb /\ lb <= hb /\ hb < dimindex(:'b)) /\
+     (Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD i) ie /\
+      Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD v) ve) ==>
+     Eval ^fext_rel_const ^rel_const fext s s' env
+          (^fupd (K ((i =+ bit_field_insert hb lb v (^facc ^prev_s i)) (^facc ^prev_s))) s')
+          (^assn (SliceIndexing ^fieldHOL [ie] hb lb) (SOME ve))``
+ |> inst [ beta |-> el_size ])
+end;
+
+fun state_rel_field rel field = let
+ fun subterm tm1 tm2 = can (find_term (can (match_term tm1))) tm2
+    
+ val fieldHOL = fromMLstring field
+ val (imp_lhs, conjs) = rel |> concl |> strip_forall |> snd |> dest_eq
+ val conjs = strip_conj conjs
+ val i = index (subterm fieldHOL) conjs
+ val thm = mk_imp (imp_lhs, el (i+1) conjs)
+in
+ thm |> simpLib.SIMP_PROVE (srw_ss()) [rel] |> GEN_ALL
+end;
+
+(* Inefficient! *)
+fun update_base_2d_tac rel field =
+ rw [Eval_def, Eval_exp_def, prun_def] \\
+ drule_first \\ drule_first \\ drule_strip (state_rel_field rel field) \\
+ fs [state_rel_var_def, WORD_def, WORD_ARRAY_cases] \\ fs [sum_revEL_INR] \\
+ simp [prun_assn_rhs_def, prun_bassn_def, assn_def, prun_set_var_index_ok_idx,
+       ver2n_w2ver, get_use_nbq_var_def, get_VArray_data_def,
+       sum_for_def, sum_map_def, sum_bind_def] \\
+ fs [rel, state_rel_var_def, state_rel_cvar_def, get_cvar_rel_set_var_neq, get_var_cleanup] \\
+ fs [WORD_ARRAY_def, WORD_def, combinTheory.UPDATE_def] \\ gen_tac \\
+ dep_rewrite.DEP_REWRITE_TAC [sum_revEL_revEL] \\
+ dep_rewrite.DEP_REWRITE_TAC [revEL_revLUPDATE_valid_idxes] \\
+ rw [] \\ gs [w2n_lt];
+
+(* Also inefficient! *)
+fun update_base_slice_2d_tac rel field =
+ cheat; (* Fix later... *)
+
+(* TODO: Step thms missing for now *)
+fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:TypeBase.rcd_fieldinfo) = let
+ val fupd = #fupd field_data
+ val facc = #accessor field_data
+ val key = fupd |> dest_const |> fst
+ val (base_stmt, base_slice_stmt) = build_update_stmts_2d comms fext_rel_const rel_const field fupd facc
+ val base_thm = prove (base_stmt, update_base_2d_tac rel field)
+ val base_slice_thm = prove (base_slice_stmt, update_base_slice_2d_tac rel field)
+in
+ (key, (base_thm, base_slice_thm))
 end;
 
 fun build_fext_read_thms fext_rel_const rel fext_rel (name, accessf) = let
@@ -146,8 +217,14 @@ fun build_rel_module_rel rel rel_const module_rel module_rel_const =
        FIRST [match_mp_tac state_rel_var_module_state_rel_var \\ first_assum ACCEPT_TAC,
        match_mp_tac state_rel_cvar_module_state_rel_var \\ first_assum ACCEPT_TAC]);
 
-(* rel and rel_comb should be full defs *)
-fun build_tstate fext_rel rel module_rel comms fext_ty state_ty = let
+(* rel and rel_comb should be full defs
+
+Debugging:
+val fext_rel = fextv_rel_def;
+val rel = state_rel_def;
+val module_rel = module_state_rel_def;
+*)
+fun build_tstate fext_rel rel module_rel abstract_fields comms fext_ty state_ty = let
  val fext_rel_const = fext_rel |> concl |> strip_forall |> snd |> lhs |> strip_comb |> fst;
  val rel_const = rel |> concl |> strip_forall |> snd |> lhs |> strip_comb |> fst;
  val module_rel_const = module_rel |> concl |> strip_forall |> snd |> lhs |> strip_comb |> fst;
@@ -160,9 +237,19 @@ fun build_tstate fext_rel rel module_rel comms fext_ty state_ty = let
  val update_thms =
  TypeBase.fields_of state_ty
  |> filter (fn (_, field_data : TypeBase.rcd_fieldinfo) => (field_data |> #ty |> dest_type |> fst) <> "fun")
+
+ val (update_thms_2d, update_thms) =
+ TypeBase.fields_of state_ty
+ |> partition (fn (_, field_data : TypeBase.rcd_fieldinfo) => (field_data |> #ty |> dest_type |> fst) = "fun");
+ val update_thms =
+ update_thms
  |> map (prove_update_thms fext_rel_const rel rel_const comms);
+ val update_thms_2d =
+ update_thms_2d
+ |> map (prove_update_thms_2d fext_rel_const rel rel_const comms);
  val fext_read_thms =
  TypeBase.fields_of fext_ty
+ |> filter (fn (f, _) => not (mem f abstract_fields))
  |> map (fn (field, field_data : TypeBase.rcd_fieldinfo) =>
             (#accessor field_data,
              build_fext_read_thms fext_rel_const rel_const fext_rel (field, #accessor field_data)))
@@ -173,7 +260,7 @@ in
    state_ty = state_ty, rel = rel_const,
    module_rel = module_rel_const,
    comms = comms,
-   read_thms = var_thms, write_thms = update_thms,
+   read_thms = var_thms, write_thms = update_thms, write_2d_thms = update_thms_2d,
    fext_read_thms = fext_read_thms,
    module_rel_rel = module_rel_rel,
    rel_module_rel = rel_module_rel } : tstate
@@ -255,6 +342,62 @@ fun hol2hardware_exp (tstate:tstate) s s' tm =
   MATCH_MP ret precond
  end
 
+ (* CASE: word_extract *)
+ else if is_word_extract tm then let
+  val (high, low, arg, size) = dest_word_extract tm
+  val precond = hol2hardware_exp tstate s s' arg
+  val ret = MATCH_MP Eval_exp_word_extract precond
+  val ret = ret |> ISPECL [high, low] |> INST_TYPE [ beta |-> size ]
+  val precond = ret |> concl |> dest_imp |> fst |> EVAL_PROVE
+  val ret = MP ret precond
+ in
+  ret
+ end
+
+ (* CASE: zero extend? *)
+ else if is_w2w tm then let
+  val (arg, out_dim) = dest_w2w tm
+  val arg' = hol2hardware_exp tstate s s' arg
+  val result = MATCH_MP Eval_exp_w2w arg'
+  val result = INST_TYPE [ beta |-> out_dim ] result
+ in
+  ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
+ end
+
+ (* CASE: sign extend? (Almost identical to w2w.) *)
+ else if is_sw2sw tm then let
+  val (arg, out_dim) = dest_sw2sw tm
+  val in_dim = dim_of arg
+  val precond = mk_leq (mk_dimindex in_dim, mk_dimindex out_dim) |> EVAL_PROVE
+  val arg' = hol2hardware_exp tstate s s' arg
+  val result = MATCH_MP Eval_exp_sw2sw (CONJ precond arg')
+ in
+  ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
+ end
+
+ else if is_v2w tm then let
+  val (arg, out_dim) = dest_v2w tm
+  val precond = mk_less (term_of_int 1, mk_dimindex out_dim) |> EVAL_PROVE
+  val (arg, _) = listSyntax.dest_cons arg
+  val arg' = hol2hardware_exp tstate s s' arg
+  val result = MATCH_MP Eval_exp_v2w (CONJ precond arg')
+ in
+  (*check_inv_Eval "v2w" tm*) result
+ end
+
+ else if is_word_concat tm then let
+  val (tml, tmr) = dest_word_concat tm
+  val evall = hol2hardware_exp tstate s s' tml
+  val evalr = hol2hardware_exp tstate s s' tmr
+  val result = MATCH_MP Eval_exp_word_concat (CONJ evall evalr)
+  (* TODO: Could add length check here ... *)
+  val gammasum = Arbnum.+ (tml |> size_of, tmr |> size_of) |> mk_numeric_type
+  val result = INST_TYPE [ gamma |-> gammasum ] result
+  val result = EVAL_MP result
+ in
+  (*check_inv_Eval "word_concat" tm*) result
+ end
+
  (* Negation *)
  else if is_neg tm then let
   val arg = dest_neg tm
@@ -291,64 +434,6 @@ fun hol2hardware_exp (tstate:tstate) s s' tm =
     val preconds = map (hol2hardware_exp s) [cond, lbranch, rbranch]
   in
     MATCH_MP Eval_InlineIf (LIST_CONJ preconds)
-  end
-
-  (* CASE: word_extract *)
-  else if is_word_extract tm then let
-    val (high, low, arg, size) = dest_word_extract tm
-    val precond = hol2hardware_exp s arg
-    val ret = MATCH_MP Eval_word_extract precond
-    val ret = ret |> ISPECL [high, low] |> INST_TYPE [ beta |-> size ]
-    val precond = ret |> concl |> dest_imp |> fst |> EVAL_PROVE
-    val ret = MP ret precond
-  in
-    ret
-  end
-
-  (* CASE: zero extend? *)
-  else if is_w2w tm then let
-    val (arg, out_dim) = dest_w2w tm
-    (*val in_dim = dim_of arg
-    val precond = mk_less (mk_dimindex in_dim, mk_dimindex out_dim) |> EVAL_PROVE*)
-    val arg' = hol2hardware_exp s arg
-    val result = MATCH_MP Eval_w2w arg'
-    val result = INST_TYPE [ beta |-> out_dim ] result
-  in
-    ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
-  end
-
-  (* CASE: sign extend? (Almost identical to w2w.) *)
-  else if is_sw2sw tm then let
-    val (arg, out_dim) = dest_sw2sw tm
-    val in_dim = dim_of arg
-    val precond = mk_leq (mk_dimindex in_dim, mk_dimindex out_dim) |> EVAL_PROVE
-    val arg' = hol2hardware_exp s arg
-    val result = MATCH_MP Eval_sw2sw (CONJ precond arg')
-  in
-    ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
-  end
-
-  else if is_v2w tm then let
-    val (arg, out_dim) = dest_v2w tm
-    val precond = mk_less (term_of_int 1, mk_dimindex out_dim) |> EVAL_PROVE
-    val (arg, _) = listSyntax.dest_cons arg
-    val arg' = hol2hardware_exp s arg
-    val result = MATCH_MP Eval_v2w (CONJ precond arg')
-  in
-    check_inv_Eval "v2w" tm result
-  end
-
-  else if is_word_concat tm then let
-    val (tml, tmr) = dest_word_concat tm
-    val evall = hol2hardware_exp s tml
-    val evalr = hol2hardware_exp s tmr
-    val result = MATCH_MP Eval_word_concat (CONJ evall evalr)
-    (* TODO: Could add length check here ... *)
-    val gammasum = Arbnum.+ (tml |> size_of, tmr |> size_of) |> mk_numeric_type
-    val result = INST_TYPE [ gamma |-> gammasum ] result
-    val result = EVAL_MP result
-  in
-    check_inv_Eval "word_concat" tm result
   end
 
   (* CASE: Other compound expression, e.g. state projection ("state var")? *)

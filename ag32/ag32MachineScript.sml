@@ -1,9 +1,11 @@
 open hardwarePreamble;
 
+open translatorTheory translatorCoreLib;
+
 val _ = new_theory "ag32Machine";
 
-prefer_num ();
-guess_lengths ();
+val _ = prefer_num ();
+val _ = guess_lengths ();
 
 val _ = Datatype `
  state_circuit = <| (** Cpu **)
@@ -279,79 +281,79 @@ val shift_def = Define `
             s with R := (w =+ (a >>>~ shift_sh || a <<~ (32w - shift_sh))) s.R`;
 
 val execute_instruction_def = Define `
- execute_instruction wV aV bV PC_next fext s =
-  case s.instruction of
+ execute_instruction wV aV bV PC_next fext s' =
+  case s'.instruction of
     (* Normal *)
-    0w => s with <|state := 1w; command := 1w; PC := PC_next;
-                   R := ((30 >< 25) s.i =+ s.ALU_res) s.R|>
+    0w => s' with <|state := 1w; command := 1w; PC := PC_next;
+                   R := ((30 >< 25) s'.i =+ s'.ALU_res) s'.R|>
 
     (* Shift *)
-  | 1w => let s = shift ((7 >< 6) s.i) ((30 >< 25) s.i) aV bV s in
-          s with <|state := 1w; command := 1w; PC := PC_next|>
+  | 1w => let s' = shift ((7 >< 6) s'.i) ((30 >< 25) s'.i) aV bV s' in
+          s' with <|state := 1w; command := 1w; PC := PC_next|>
 
     (* StoreMEM *)
-  | 2w => s with <|state := 1w; command := 3w; PC := PC_next;
+  | 2w => s' with <|state := 1w; command := 3w; PC := PC_next;
                    data_addr := bV; data_wdata := aV; data_wstrb := 15w|>
 
     (* StoreMEMByte *)
     (* TODO: Can reuse shifter here? *)
-  | 3w => (let s = s with <|state := 1w; command := 3w; PC := PC_next;
+  | 3w => (let s' = s' with <|state := 1w; command := 3w; PC := PC_next;
                             data_addr := bV; data_wstrb := 1w <<~ w2w ((1 >< 0) bV)|> in
              (case (1 >< 0) bV of
-               0w => s with data_wdata := bit_field_insert 7 0 ((7 >< 0) aV) s.data_wdata
-             | 1w => s with data_wdata := bit_field_insert 15 8 ((7 >< 0) aV) s.data_wdata
-             | 2w => s with data_wdata := bit_field_insert 23 16 ((7 >< 0) aV) s.data_wdata
-             | 3w => s with data_wdata := bit_field_insert 31 24 ((7 >< 0) aV) s.data_wdata))
+               0w => s' with data_wdata := bit_field_insert 7 0 ((7 >< 0) aV) s'.data_wdata
+             | 1w => s' with data_wdata := bit_field_insert 15 8 ((7 >< 0) aV) s'.data_wdata
+             | 2w => s' with data_wdata := bit_field_insert 23 16 ((7 >< 0) aV) s'.data_wdata
+             | 3w => s' with data_wdata := bit_field_insert 31 24 ((7 >< 0) aV) s'.data_wdata))
 
     (* LoadMEM *)
-  | 4w => s with <|state := 1w; command := 2w; PC := PC_next;
-                   data_addr := aV; do_delay_write := 4w; delay_write := (30 >< 25) s.i|>
+  | 4w => s' with <|state := 1w; command := 2w; PC := PC_next;
+                   data_addr := aV; do_delay_write := 4w; delay_write := (30 >< 25) s'.i|>
 
     (* LoadMEMByte *)
-  | 5w => s with <|state := 1w; command := 2w; PC := PC_next;
+  | 5w => s' with <|state := 1w; command := 2w; PC := PC_next;
                    data_addr := aV; do_delay_write := w2w ((1 >< 0) aV);
-                   delay_write := (30 >< 25) s.i|>
+                   delay_write := (30 >< 25) s'.i|>
 
     (* Out *)
-  | 6w => s with <|state := 1w; command := 1w; PC := PC_next;
-                   data_out := (9 >< 0) s.ALU_res; R := ((30 >< 25) s.i =+ s.ALU_res) s.R|>
+  | 6w => s' with <|state := 1w; command := 1w; PC := PC_next;
+                   data_out := (9 >< 0) s'.ALU_res; R := ((30 >< 25) s'.i =+ s'.ALU_res) s'.R|>
 
     (* In *)
-  | 7w => s with <|state := 1w; command := 1w; PC := PC_next;
-                   R := ((30 >< 25) s.i =+ w2w s.data_in) s.R|>
+  | 7w => s' with <|state := 1w; command := 1w; PC := PC_next;
+                   R := ((30 >< 25) s'.i =+ w2w s'.data_in) s'.R|>
 
     (* Accelerator *)
-  | 8w => s with <|state := 2w; PC := PC_next;
-                   acc_arg_ready := T; acc_arg := aV; delay_write := (30 >< 25) s.i|>
+  | 8w => s' with <|state := 2w; PC := PC_next;
+                   acc_arg_ready := T; acc_arg := aV; delay_write := (30 >< 25) s'.i|>
 
     (* Jump *)
-  | 9w => s with <|state := 1w; command := 1w; PC := s.ALU_res;
-                   R := ((30 >< 25) s.i =+ PC_next) s.R|>
+  | 9w => s' with <|state := 1w; command := 1w; PC := s'.ALU_res;
+                   R := ((30 >< 25) s'.i =+ PC_next) s'.R|>
 
     (* JumpIfZero *)
-  | 10w => (if s.ALU_res = 0w then s with PC := s.PC + wV else s with PC := PC_next)
+  | 10w => (if s'.ALU_res = 0w then s' with PC := s'.PC + wV else s' with PC := PC_next)
            with <|state := 1w; command := 1w|>
 
     (* JumpIfNotZero *)
-  | 11w => (if s.ALU_res <> 0w then s with PC := s.PC + wV else s with PC := PC_next)
+  | 11w => (if s'.ALU_res <> 0w then s' with PC := s'.PC + wV else s' with PC := PC_next)
            with <|state := 1w; command := 1w|>
 
     (* Interrupt *)
-  | 12w => s with <|state := 1w; command := 4w; data_addr := 0w; do_interrupt := T; PC := PC_next|>
+  | 12w => s' with <|state := 1w; command := 4w; data_addr := 0w; do_interrupt := T; PC := PC_next|>
 
     (* LoadConstant, TODO: can reuse ALU here *)
-  | 13w => (if word_bit 23 s.i then
-              s with R := ((30 >< 25) s.i =+ 0w − w2w ((22 >< 0) s.i)) s.R
+  | 13w => (if word_bit 23 s'.i then
+              s' with R := ((30 >< 25) s'.i =+ 0w − w2w ((22 >< 0) s'.i)) s'.R
             else
-              s with R := ((30 >< 25) s.i =+ w2w ((22 >< 0) s.i)) s.R)
+              s' with R := ((30 >< 25) s'.i =+ w2w ((22 >< 0) s'.i)) s'.R)
             with <|state := 1w; command := 1w; PC := PC_next|>
 
     (* LoadUpperConstant *)
-  | 14w => let x = (30 >< 25) s.i in
-            s with <|state := 1w; command := 1w; PC := PC_next;
-                     R := (x =+ bit_field_insert 31 23 ((8 >< 0) s.i) (s.R x)) s.R|>
+  | 14w => let x = (30 >< 25) s'.i in
+            s' with <|state := 1w; command := 1w; PC := PC_next;
+                     R := (x =+ bit_field_insert 31 23 ((8 >< 0) s'.i) (s'.R x)) s'.R|>
 
-  | _ => s`;
+  | _ => s'`;
 
 (* TODO: Can be replaced by multiplication (edit: no, need support for +: (:+?) syntax in Verilog for that)...
    TODO: do_delay_write should never be 5w here...? *)
@@ -366,41 +368,41 @@ val delay_write_Next_def = Define `
  | _ => s`;
 
 val cpu_Next_0w_def = Define `
- cpu_Next_0w fext s =
-  let s = decode_instruction s;
-      wV = DecodeReg_imm (word_bit 31 s.i, (30 >< 25) s.i) s;
-      aV = DecodeReg_imm (word_bit 23 s.i, (22 >< 17) s.i) s;
-      bV = DecodeReg_imm (word_bit 16 s.i, (15 >< 10) s.i) s;
-      func = if s.instruction = 0w ∨ s.instruction = 6w ∨
-                s.instruction = 9w ∨ s.instruction = 10w ∨
-                s.instruction = 11w then
-               (9 >< 6) s.i
+ cpu_Next_0w fext s' =
+  let s' = decode_instruction s';
+      wV = DecodeReg_imm (word_bit 31 s'.i, (30 >< 25) s'.i) s';
+      aV = DecodeReg_imm (word_bit 23 s'.i, (22 >< 17) s'.i) s';
+      bV = DecodeReg_imm (word_bit 16 s'.i, (15 >< 10) s'.i) s';
+      func = if s'.instruction = 0w ∨ s'.instruction = 6w ∨
+                s'.instruction = 9w ∨ s'.instruction = 10w ∨
+                s'.instruction = 11w then
+               (9 >< 6) s'.i
              else
                9w;
-      ALU_fst = if s.instruction = 9w then s.PC else aV;
-      ALU_snd = if s.instruction = 9w then aV else bV;
-      s = ALU (func, ALU_fst, ALU_snd) s;
-      PC_next = s.PC + 4w in
-      execute_instruction wV aV bV PC_next fext s`;
+      ALU_fst = if s'.instruction = 9w then s'.PC else aV;
+      ALU_snd = if s'.instruction = 9w then aV else bV;
+      s' = ALU (func, ALU_fst, ALU_snd) s';
+      PC_next = s'.PC + 4w in
+      execute_instruction wV aV bV PC_next fext s'`;
 
 val cpu_Next_1w_def = Define `
- cpu_Next_1w fext s =
-  let s =
-   (if fext.ready /\ s.command = 0w then
-    let s = delay_write_Next fext s;
-        s = s with <| i := fext.inst_rdata; do_delay_write := 5w |> in
-     if s.do_interrupt then s with <| interrupt_req := T; do_interrupt := F; state := 4w |> else s with state := 0w
+ cpu_Next_1w fext s' =
+  let s' =
+   (if fext.ready /\ s'.command = 0w then
+    let s' = delay_write_Next fext s';
+        s' = s' with <| i := fext.inst_rdata; do_delay_write := 5w |> in
+     if s'.do_interrupt then s' with <| interrupt_req := T; do_interrupt := F; state := 4w |> else s' with state := 0w
    else
-    s) in
-   s with command := 0w`;
+    s') in
+   s' with command := 0w`;
 
 val cpu_Next_2w_def = Define `
- cpu_Next_2w fext s =
-  let s = if s.acc_res_ready /\ ~s.acc_arg_ready then
-           s with <| state := 1w; command := 1w; R := (s.delay_write =+ s.acc_res) s.R |>
-          else
-           s in
-   s with acc_arg_ready := F`;
+ cpu_Next_2w fext s s' =
+  let s' = if s.acc_res_ready /\ ~s.acc_arg_ready then
+            s' with <| state := 1w; command := 1w; R := (s'.delay_write =+ s.acc_res) s'.R |>
+           else
+            s' in
+   s' with acc_arg_ready := F`;
 
 val cpu_Next_3w_def = Define `
  cpu_Next_3w fext s =
@@ -418,31 +420,54 @@ val cpu_Next_4w_def = Define `
     s`;
 
 val cpu_Next_def = Define `
- cpu_Next fext (s:state_circuit) =
+ cpu_Next fext (s:state_circuit) (s':state_circuit) =
   if fext.error = 0w then
-   case s.state of
+   case s'.state of
     0w (* execute *) =>
-     cpu_Next_0w fext s
+     cpu_Next_0w fext s'
   | 1w (* wait for mem *) =>
-     cpu_Next_1w fext s
+     cpu_Next_1w fext s'
   | 2w (* wait for acc *) =>
-     cpu_Next_2w fext s
+     cpu_Next_2w fext s s'
   | 3w (* wait for start of mem *) =>
-     cpu_Next_3w fext s
+     cpu_Next_3w fext s'
   | 4w (* wait for interrupt *) =>
-     cpu_Next_4w fext s
+     cpu_Next_4w fext s'
   | _ (* error states, do nothing forever *) =>
-     s
+     s'
   else
-   s with state := 5w`;
+   s' with state := 5w`;
 
-val circuit_def = Define `
- (circuit _ init _ 0 = init) /\
- (circuit facc init fext (SUC n) = let s = circuit facc init fext n;
-                                       sCpu = cpu_Next (fext n) s;
-                                       sAcc = facc s in
-                                      sCpu with <| acc_res_ready := sAcc.acc_res_ready;
-                                                   acc_res := sAcc.acc_res;
-                                                   acc_state := sAcc.acc_state |>)`;
+Theorem cpu_Next_trans = cpu_Next_def
+ |> REWRITE_RULE [cpu_Next_0w_def, cpu_Next_1w_def, cpu_Next_2w_def, cpu_Next_3w_def, cpu_Next_4w_def,
+                  (* 0w: *) align_addr_def, decode_instruction_def, DecodeReg_imm_def, ALU_def, shift_def, execute_instruction_def,
+                  (* 1w: *) delay_write_Next_def];
+                      
+(*  WORD (0w:word32) (THE (ALOOKUP env "PC")) /\
+  WORD (3w:word3) (THE (ALOOKUP env "state")) /\
+  BOOL F (THE (ALOOKUP env "acc_arg_ready")) /\
+  WORD (0w:word3) (THE (ALOOKUP env "command")) /\
+  WORD (5w:word3) (THE (ALOOKUP env "do_delay_write")) /\
+  BOOL F (THE (ALOOKUP env "do_interrupt")) /\
+  BOOL F (THE (ALOOKUP env "interrupt_req")) /\
+
+  WORD_ARRAY WORD (\(i:word6). (0w:word32)) (THE (ALOOKUP env "R"))`;*)
+
+val init_tm = add_x_inits “<| PC := 0w;
+                              state := 3w;
+                              acc_arg_ready := F;
+                              command := 0w;
+                              do_delay_write := 5w;
+                              do_interrupt := F;
+                              interrupt_req := F;
+                              R := K 0w |>”;
+
+Definition ag32_init_def:
+ ag32_init fbits = ^init_tm
+End
+
+Definition ag32_def:
+ ag32 = mk_module (procs [cpu_Next]) (procs []) ag32_init
+End
 
 val _ = export_theory ();
