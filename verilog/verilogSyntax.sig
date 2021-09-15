@@ -124,6 +124,11 @@ sig
 
   val mk_Var_ : string -> term
 
+  val build_zero_tm : term
+  val dest_build_zero : term -> term
+  val is_build_zero : term -> bool
+  val mk_build_zero : term -> term
+
   (* Types *)
 
   val BOOL_tm : term
@@ -149,4 +154,10 @@ sig
   val is_VArray_t : term -> bool
   val dest_VArray_t : term -> term
   val mk_VArray_t : Arbnum.num -> term
+
+  val is_VArray2_t : term -> bool
+  val dest_VArray2_t : term -> term * term
+  val mk_VArray2_t : num -> num -> term
+
+  val mk_var_has_value : term * term * term -> term
 end

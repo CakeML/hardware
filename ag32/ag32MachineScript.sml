@@ -280,8 +280,17 @@ val shift_def = Define `
    | 3w => let shift_sh = word_mod b 32w in
             s with R := (w =+ (a >>>~ shift_sh || a <<~ (32w - shift_sh))) s.R`;
 
+Triviality word_mod_32:
+ ∀w. word_mod w (32w : word32) = w2w (((4 >< 0) w):word5)
+Proof
+ gen_tac \\ CONV_TAC (LHS_CONV wordsLib.WORD_MOD_BITS_CONV) \\ blastLib.BBLAST_TAC
+QED
+
+(* TODO: Use this as definition, but with more sane bitwidths *)
+Theorem shift_trans = shift_def |> REWRITE_RULE [word_mod_32];
+
 val execute_instruction_def = Define `
- execute_instruction wV aV bV PC_next fext s' =
+ execute_instruction wV aV bV PC_next fext s s' =
   case s'.instruction of
     (* Normal *)
     0w => s' with <|state := 1w; command := 1w; PC := PC_next;
@@ -331,11 +340,11 @@ val execute_instruction_def = Define `
                    R := ((30 >< 25) s'.i =+ PC_next) s'.R|>
 
     (* JumpIfZero *)
-  | 10w => (if s'.ALU_res = 0w then s' with PC := s'.PC + wV else s' with PC := PC_next)
+  | 10w => (if s'.ALU_res = 0w then s' with PC := s.PC + wV else s' with PC := PC_next)
            with <|state := 1w; command := 1w|>
 
     (* JumpIfNotZero *)
-  | 11w => (if s'.ALU_res <> 0w then s' with PC := s'.PC + wV else s' with PC := PC_next)
+  | 11w => (if s'.ALU_res <> 0w then s' with PC := s.PC + wV else s' with PC := PC_next)
            with <|state := 1w; command := 1w|>
 
     (* Interrupt *)
@@ -368,7 +377,7 @@ val delay_write_Next_def = Define `
  | _ => s`;
 
 val cpu_Next_0w_def = Define `
- cpu_Next_0w fext s' =
+ cpu_Next_0w fext s s' =
   let s' = decode_instruction s';
       wV = DecodeReg_imm (word_bit 31 s'.i, (30 >< 25) s'.i) s';
       aV = DecodeReg_imm (word_bit 23 s'.i, (22 >< 17) s'.i) s';
@@ -379,11 +388,11 @@ val cpu_Next_0w_def = Define `
                (9 >< 6) s'.i
              else
                9w;
-      ALU_fst = if s'.instruction = 9w then s'.PC else aV;
+      ALU_fst = if s'.instruction = 9w then s.PC else aV;
       ALU_snd = if s'.instruction = 9w then aV else bV;
       s' = ALU (func, ALU_fst, ALU_snd) s';
-      PC_next = s'.PC + 4w in
-      execute_instruction wV aV bV PC_next fext s'`;
+      PC_next = s.PC + 4w in
+      execute_instruction wV aV bV PC_next fext s s'`;
 
 val cpu_Next_1w_def = Define `
  cpu_Next_1w fext s' =
@@ -424,7 +433,7 @@ val cpu_Next_def = Define `
   if fext.error = 0w then
    case s'.state of
     0w (* execute *) =>
-     cpu_Next_0w fext s'
+     cpu_Next_0w fext s s'
   | 1w (* wait for mem *) =>
      cpu_Next_1w fext s'
   | 2w (* wait for acc *) =>
@@ -440,7 +449,7 @@ val cpu_Next_def = Define `
 
 Theorem cpu_Next_trans = cpu_Next_def
  |> REWRITE_RULE [cpu_Next_0w_def, cpu_Next_1w_def, cpu_Next_2w_def, cpu_Next_3w_def, cpu_Next_4w_def,
-                  (* 0w: *) align_addr_def, decode_instruction_def, DecodeReg_imm_def, ALU_def, shift_def, execute_instruction_def,
+                  (* 0w: *) align_addr_def, decode_instruction_def, DecodeReg_imm_def, ALU_def, shift_trans, execute_instruction_def,
                   (* 1w: *) delay_write_Next_def];
                       
 (*  WORD (0w:word32) (THE (ALOOKUP env "PC")) /\

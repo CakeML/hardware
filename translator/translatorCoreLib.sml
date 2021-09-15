@@ -29,8 +29,8 @@ fun predicate_for_type ty =
       inst [ alpha |-> dest_word_type ty ] WORD_tm
     else
       raise UnableToTranslateTy (ty, "no predicate for type")
-  end
-  else raise UnableToTranslateTy (ty, "just a type variable");
+  end else
+   raise UnableToTranslateTy (ty, "just a type variable");
 
 val predicate_for_value = predicate_for_type o type_of;
 
@@ -50,7 +50,7 @@ fun verty_for_type ty =
   in
     if tname = "bool" then
       VBool_t_tm
-    (*else if tname = "fun" then let
+    else if tname = "fun" then let
       val (args, res) = strip_fun ty
       val args = map (curry Arbnumcore.pow Arbnumcore.two o dest_numeric_type o dest_word_type) args
       val res = if res = bool then
@@ -58,15 +58,18 @@ fun verty_for_type ty =
                 else (* otherwise assume we have word ... *)
                   [res |> dest_word_type |> dest_numeric_type]
     in
-      mk_VArray_t (args @ res)
-    end*) else if is_word_type ty then let
+      case (args @ res) of
+         [i1] => mk_VArray_t i1
+       | [i1, i2] => mk_VArray2_t i1 i2
+       | _ => raise UnableToTranslateTy (ty, "unknown type")
+    end else if is_word_type ty then let
       val n = ty |> dest_word_type |> dest_numeric_type
     in
       mk_VArray_t n
     end else
     raise UnableToTranslateTy (ty, "unknown type")
-  end
-  else raise UnableToTranslateTy (ty, "just a type variable");
+  end else
+   raise UnableToTranslateTy (ty, "just a type variable");
 
 (*
 fun build_fextv_others include_time vars = let

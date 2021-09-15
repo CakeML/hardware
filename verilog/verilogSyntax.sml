@@ -101,13 +101,7 @@ val (_, _, dest_n2ver, is_n2ver) = op1 "n2ver"
 
 fun mk_Var_ var = mk_Var (fromMLstring var);
 
-(** Syntax for verilogMetaTheory, TODO: moved? **)
-
-(*
-local val s = HolKernel.syntax_fns1 "verilog" in
-  val (vwrites_tm, mk_vwrites, dest_vwrites, is_vwrites) = s "vwrites"
-end;
-*)
+val (build_zero_tm, mk_build_zero, dest_build_zero, is_build_zero) = op1 "build_zero";
 
 (** Syntax for verilogTypeTheory **)
 
@@ -125,5 +119,12 @@ val VArray_t_tm = ``VArray_t``;
 fun is_VArray_t tm = is_comb tm andalso identical (rator tm) VArray_t_tm;
 val dest_VArray_t = rand;
 fun mk_VArray_t i = mk_comb (VArray_t_tm, numSyntax.mk_numeral i);
+
+val VArray2_t_tm = ``VArray2_t``;
+fun is_VArray2_t tm = is_comb tm andalso identical (rator tm) VArray2_t_tm;
+val dest_VArray2_t = pair_of_list o snd o strip_comb;
+fun mk_VArray2_t i1 i2 = list_mk_comb (VArray2_t_tm, map numSyntax.mk_numeral [i1, i2]);
+
+val (var_has_value_tm, mk_var_has_value, dest_var_has_value, is_var_has_value) = op3 "var_has_value";
 
 end

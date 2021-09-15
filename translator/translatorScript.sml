@@ -101,6 +101,16 @@ Definition state_rel_var_def:
   (get_nbq_var ver_s var = INL UnknownVariable)
 End
 
+Theorem state_rel_var_set_var:
+ state_rel_var hol_s (ver_s with vars := (var', v)::env) var a accessf =
+ if var = var' then
+  a (accessf hol_s) v ∧ get_nbq_var ver_s var = INL UnknownVariable
+ else
+  state_rel_var hol_s (ver_s with vars := env) var a accessf
+Proof
+ rw [state_rel_var_def] \\ simp [get_var_def, get_nbq_var_def]
+QED
+
 Definition get_cvar_rel_def:
  get_cvar_rel s name =
   case ALOOKUP (s.nbq ++ s.vars) name of
@@ -127,6 +137,14 @@ Definition state_rel_cvar_def:
   (∃v. get_var ver_s var = INR v ∧ a (accessf hol_s) v) ∧
   (∃v. get_cvar_rel ver_s var = INR v ∧ a (accessf hol_s') v)
 End
+
+Theorem state_rel_cvar_set_var:
+ var ≠ var' ⇒
+ state_rel_cvar hol_s hol_s' (ver_s with vars := (var', v)::env) var a accessf =
+ state_rel_cvar hol_s hol_s' (ver_s with vars := env) var a accessf
+Proof
+ rw [state_rel_cvar_def] \\ simp [get_var_def, get_cvar_rel_def, ALOOKUP_APPEND]
+QED
 
 (** State relation for modules **)
 
@@ -489,9 +507,19 @@ QED
 (* Need to go through n -> w -> ver because we need to truncate the word in the same way as LHS *)
 Theorem Eval_exp_word_const:
  !fext_rel rel s s' n.
-  Eval_exp fext_rel rel fext s s' env (WORD ((n2w n) : 'a word)) (Const (w2ver ((n2w n) : 'a word)))
+ Eval_exp fext_rel rel fext s s' env (WORD ((n2w n) : 'a word)) (Const (w2ver ((n2w n) : 'a word)))
 Proof
  rw [Eval_exp_def, WORD_def, erun_def, w2ver_def]
+QED
+
+Theorem Eval_exp_InlineIf:
+ !fext_rel rel s s' a c cexp l lexp r rexp.
+ Eval_exp fext_rel rel fext s s' env (BOOL c) cexp /\
+ Eval_exp fext_rel rel fext s s' env (a l) lexp /\
+ Eval_exp fext_rel rel fext s s' env (a r) rexp ==>
+ Eval_exp fext_rel rel fext s s' env (a (if c then l else r)) (InlineIf cexp lexp rexp)
+Proof
+ rw [BOOL_def, Eval_exp_def, erun_def, sum_bind_def, get_VBool_data_def]
 QED
 
 Theorem Eval_exp_word_bit:
@@ -603,6 +631,39 @@ Proof
  Eval_resize_tac
 QED
 
+Theorem Eval_exp_WORD_ARRAY_indexing:
+ !fext_rel rel s s' a wa var i iexp.
+ Eval_exp fext_rel rel fext s s' env (WORD_ARRAY a wa) (Var var) /\
+ Eval_exp fext_rel rel fext s s' env (WORD i) iexp ==>
+ Eval_exp fext_rel rel fext s s' env (a (wa i)) (ArrayIndex (Var var) 0 iexp)
+Proof
+ rw [WORD_def, WORD_ARRAY_def, Eval_exp_def, erun_def] \\ res_tac \\
+ every_case_tac \\ fs [] \\ rveq \\
+ simp [sum_bind_def, sum_mapM_def, sum_map_def, ver2n_w2ver] \\
+ 
+ simp [get_array_index_def] \\
+ first_x_assum (qspec_then `i` assume_tac) \\
+ fs [sum_bind_def]
+QED
+
+(*val Eval_WORD_ARRAY_indexing2 = Q.store_thm("Eval_WORD_ARRAY_indexing2",
+ `!s a wa var i iexp j jexp.
+   Eval fext s env (WORD_ARRAY (WORD_ARRAY a) wa) (Var var) /\
+   Eval fext s env (WORD i) iexp /\
+   Eval fext s env (WORD j) jexp ==>
+   Eval fext s env (a (wa i j)) (ArrayIndex (Var var) [iexp; jexp])`,
+ rw [WORD_def, WORD_ARRAY_def, Eval_def, erun_def] \\ res_tac \\
+ every_case_tac \\ fs [] \\ rveq \\
+ simp [sum_bind_def, sum_mapM_def, sum_map_def, ver2n_w2ver] \\
+
+ simp [get_array_index_def] \\
+ first_x_assum (qspec_then `i` assume_tac) \\
+ fs [sum_bind_def] \\
+
+ every_case_tac \\ fs [] \\
+ first_x_assum (qspec_then `j` assume_tac) \\
+ fs [get_array_index_def, sum_bind_def]);*)
+
 (** Statements **)
 
 Definition Eval_def:
@@ -661,16 +722,46 @@ Proof
  fs [sum_bind_def, BOOL_def, get_VBool_data_def] \\ rw []
 QED
 
+(* Used when translating using Eval_Eval *)
+Theorem bubble_var_has_value:
+ !rel_fextv env fext fextv name p ver_s ver_s' a y P.
+   ((rel_fextv fextv fext /\ prun fextv (ver_s with vars := env) p = INR ver_s') ==>
+   var_has_value ver_s'.vars name (a y) ==>
+   P)
+   ==>
+   ~MEM name (vwrites p)
+   ==>
+   (var_has_value env name (a y) ==>
+    (rel_fextv fextv fext /\ prun fextv (ver_s with vars := env) p = INR ver_s') ==>
+    P)
+Proof
+ rw [AND_IMP_INTRO] \\ first_x_assum match_mp_tac \\ simp [] \\
+ drule_strip prun_same_after \\
+ fs [var_has_value_def, GSYM get_var_ALOOKUP, get_var_def]
+QED
+
 Triviality pstate_vars_cleanup:
  !(s:pstate). (s with vars := s.vars) = s
 Proof
  rw [pstate_component_equality]
 QED
 
-Theorem Eval_Eval:
+(*Theorem Eval_Eval:
  !fext_rel rel s s' f fv g gv.
  Eval fext_rel rel fext s s' env f fv ∧
  (∀s s' env. Eval fext_rel rel fext s s' env ((λs'. g s s') s') gv) ⇒
+ Eval fext_rel rel fext s s' env (let s' = f in g s s') (Seq fv gv)
+Proof
+ rw [Eval_def, prun_def, sum_bind_INR] \\ last_x_assum drule \\ rpt (disch_then drule) \\ strip_tac \\ simp [] \\
+ metis_tac [pstate_vars_cleanup]
+QED*)
+
+Theorem Eval_Eval:
+ !fext_rel rel s s' f fv g gv.
+ Eval fext_rel rel fext s s' env f fv ∧
+ (∀s s' vs vs' fextv.
+  fext_rel fextv fext ∧ prun fextv (vs with vars := env) fv = INR vs' ⇒
+  Eval fext_rel rel fext s s' vs'.vars ((λs'. g s s') s') gv) ⇒
  Eval fext_rel rel fext s s' env (let s' = f in g s s') (Seq fv gv)
 Proof
  rw [Eval_def, prun_def, sum_bind_INR] \\ last_x_assum drule \\ rpt (disch_then drule) \\ strip_tac \\ simp [] \\
@@ -684,6 +775,39 @@ Proof
  rewrite_tac [fcpTheory.FCP_APPLY_UPDATE_THM, combinTheory.APPLY_UPDATE_THM] \\ simp [] \\
  qmatch_goalsub_abbrev_tac ‘COND c1 _ _ = _’ \\ qmatch_goalsub_abbrev_tac ‘_ = COND c2 _ _’ \\
  qsuff_tac ‘c1 = c2’ >- simp [] \\ unabbrev_all_tac \\ decide_tac
+QED
+
+(* Let handling *)
+
+Theorem Eval_Let:
+ !is_state_rel_var fext_rel rel s s' name a arg arg_exp f f_exp.
+ (∀var v s s' ver_s.
+  ~is_state_rel_var var ⇒
+  (rel s s' (ver_s with vars := (var, v) :: env) ⇔ rel s s' (ver_s with vars := env))) ∧
+ Eval_exp fext_rel rel fext s s' env (a arg) arg_exp /\
+ (!v. a arg v ==> Eval fext_rel rel fext s s' ((name, v) :: env) (f arg) f_exp) ==>
+ ~is_state_rel_var name ⇒
+ Eval fext_rel rel fext s s' env (LET f arg) (Seq (BlockingAssign (NoIndexing name) (SOME arg_exp)) f_exp)
+Proof
+ rw [Eval_def, Eval_exp_def, prun_Seq] \\ rw [prun_def] \\
+ drule_first \\ simp [prun_assn_rhs_def, prun_bassn_def, assn_def, sum_for_def, sum_map_def, sum_bind_def] \\
+ drule_first \\ drule_first \\ simp [] \\ disch_then drule_strip \\ simp [set_var_def]
+QED
+
+Theorem var_has_value_env_new_var:
+ !var var' v a exp env.
+ var_has_value ((var', v)::env) var (a exp) =
+ if var' = var then a exp v else var_has_value env var (a exp)
+Proof
+ rw [var_has_value_def]
+QED
+
+Theorem var_has_type_env_new_var:
+ !var var' v a exp env.
+ var_has_type_old ((var', v)::env) var a =
+ if var' = var then (?hrep. a hrep v) else var_has_type_old env var a
+Proof
+ rw [var_has_type_old_def, var_has_value_def]
 QED
 
 (* Case handling *)
@@ -874,6 +998,31 @@ Proof
 QED
 
 (** Modules **)
+
+(*Triviality foo:
+ ∀decls fbits vs var.
+ ALL_DISTINCT (MAP FST decls) ⇒
+ ALOOKUP (SND (run_decls fbits decls vs)) var =
+ case OPTION_MAP SND (OPTION_BIND (OPTION_MAP (λdata. (SND (run_decls fbits [(var, data)] vs))) (ALOOKUP decls var)) oHD) of
+  | NONE => ALOOKUP vs var
+  | SOME x => SOME x
+Proof
+ Induct \\ TRY PairCases \\ rw [run_decls_def]
+ >- (CASE_TAC
+     >- (pairarg_tac \\ fs [run_decls_def, GSYM ALOOKUP_NONE])
+     >- fs [GSYM ALOOKUP_NONE])
+ \\ (drule_first \\ Cases_on ‘ALOOKUP decls var’
+     >- (simp [] \\ CASE_TAC \\ TRY pairarg_tac \\ simp [])
+     >- (pairarg_tac \\ simp [] \\ pairarg_tac \\ simp [] \\
+         CASE_TAC
+         >- (simp [run_decls_def] \\ CASE_TAC \\ TRY pairarg_tac \\ simp []
+QED*)
+
+(*Theorem foo:
+ module_state_rel_var hol_s (SND (run_decls fbits decls [])) var a facc
+Proof
+ rw [module_state_rel_var_def]
+QED*)
 
 Theorem mk_circuit_to_mk_module:
  ∀m.

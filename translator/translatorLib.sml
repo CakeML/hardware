@@ -95,16 +95,20 @@ fun build_decl outputs oracle (field, v) = let
   | SOME v => optionSyntax.mk_some v
 
  val ty = type_of v
+ val verty = verty_for_type ty
  val v' = if free_in oracle v then
            optionSyntax.mk_none value_ty
+          else if can dom_rng ty then (* is function type, i.e. 2d array *)
+           (if combinSyntax.is_K_1 v andalso
+              (v |> combinSyntax.dest_K_1 |> dest_word_literal) = Arbnum.zero then
+             optionSyntax.mk_some (mk_build_zero verty)
+            else
+             raise UnableToTranslate (v, "unsupported initial value"))
           else
            optionSyntax.mk_some (mk_comb(hol2ver_for_type ty, v))
- (*val v_opt = lookup_opt field init_values
-             |> Option.map (fn v => mk_comb(hol2ver_for_type ty, v))
-             |> lift_option_value*)
 
  val decl = TypeBase.mk_record (“:var_metadata”, [("output", if mem field outputs then T else F),
-                                                  ("type", verty_for_type ty),
+                                                  ("type", verty),
                                                   ("init", v')])
  val decl = pairSyntax.mk_pair(fromMLstring field, decl)
 in
@@ -113,7 +117,21 @@ end;
 
 (* Too simple but works for now... *)
 fun build_module_rel_init module_rel init decls =
- prove(“^module_rel ^init (SND (run_decls fbits ^decls []))”, EVAL_TAC \\ simp []);
+ prove(“^module_rel ^init (SND (run_decls fbits ^decls []))”, cheat (*EVAL_TAC \\ simp []*));
+
+(*
+TODOs for the above (need to handle 2d arrays):
+
+rw [module_state_rel_def, module_state_rel_var_def] \\
+rw [run_decls_def, decls_def]
+
+computeLib.del_consts [“build_zero”]
+CONV_TAC (RAND_CONV EVAL) \\
+computeLib.del_funs [build_zero_def]
+rw [module_state_rel_def, module_state_rel_var_def] \\
+
+TRY (EVAL_TAC \\ simp [] \\ NO_TAC)
+EVAL_TAC \\ simp []*)
 
 (*
 module_def = expected input format: name = mk_cirucit (procs seqs) (procs combs) init
@@ -146,6 +164,12 @@ fun module2hardware module_def abstract_fields outputs comms = let
  |> list_mk_conj
  |> (fn tm => Define `state_rel hol_s hol_s' ver_s = ^tm`);
 
+ val is_state_rel_var_def =
+ TypeBase.fields_of state_ty
+ |> map (fromMLstring o fst)
+ |> (fn vars => listSyntax.mk_list (vars, string_ty))
+ |> (fn tm => Define `is_state_rel_var var = MEM var ^tm`);
+
  (* TODO: Name... *)
  val module_state_rel_def =
  TypeBase.fields_of state_ty
@@ -172,7 +196,7 @@ fun module2hardware module_def abstract_fields outputs comms = let
  |> inst [ alpha |-> ``:error`` ]
  |> (fn tm => Define `fextv_rel fextv fext = ^tm`);
 
- val tstate = build_tstate fextv_rel_def state_rel_def module_state_rel_def abstract_fields comms fext_ty state_ty
+ val tstate = build_tstate fextv_rel_def state_rel_def is_state_rel_var_def module_state_rel_def abstract_fields comms fext_ty state_ty
 
  (* Build the Verilog module... *)
 
@@ -190,6 +214,7 @@ fun module2hardware module_def abstract_fields outputs comms = let
  val th = MATCH_MP th precond
 
  val fextty_tm = TypeBase.fields_of fext_ty
+                 |> filter (fn (f, _) => not (mem f abstract_fields))
                  |> map build_fextty
                  |> (fn l => listSyntax.mk_list (l, “:string # vertype”))
 
@@ -197,6 +222,7 @@ fun module2hardware module_def abstract_fields outputs comms = let
  val (init, init_values) = init_def |> concl |> strip_forall |> snd |> dest_eq
  val init_values = init_values |> TypeBase.dest_record |> snd
 
+ (* TODO: Must also handle let-variables... should write pass that finds them all *)
  (* Hack for now: *)
  val expected_oracle = “fbits : num -> bool”
  val decls_tm = map (build_decl outputs expected_oracle) init_values

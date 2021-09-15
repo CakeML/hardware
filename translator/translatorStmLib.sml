@@ -9,8 +9,10 @@ open translatorTheory;
 open translatorCoreLib translatorExpLib;
 
 (* TODO: Move *)
-val Eval_get_hol_prog = rand o rator
-val Eval_exp_get_pred_exp = rand o rand o rator
+val Eval_get_prog = rand;
+val Eval_get_hol_prog = rand o rator;
+val Eval_exp_get_pred_exp = rand o rand o rator;
+val Eval_exp_CONV = RATOR_CONV o RAND_CONV;
 
 (*
 Testing:
@@ -81,6 +83,32 @@ fun first_PART_MATCH proj ths tm =
    nil => failwith "No match in list"
  | th::ths => PART_MATCH proj th tm handle HOL_ERR _ => first_PART_MATCH proj ths tm;
 
+fun inst_Eval_env s v th = let
+ val name = v |> dest_var |> fst
+ val namet = fromMLstring name
+ val vinv = predicate_for_value v
+ val env_tm = mk_var ("env", “:envT”)
+ val assum = mk_var_has_value (env_tm, namet, mk_comb(vinv, v))
+
+ (* TODO: Should generate fresh variable here, but did not find any good API for this... *)
+ val forallv = mk_var ("v", value_ty)
+ val new_env = listSyntax.mk_cons (pairSyntax.mk_pair (namet, forallv), env_tm)
+
+ val th = th |> DISCH assum
+             |> INST [env_tm |-> new_env]
+             |> ASM_CONV_RULE (PURE_ONCE_REWRITE_CONV [var_has_value_env_new_var
+                                                       (*var_has_type_env_new_var*)]
+                               THENC (DEPTH_CONV stringLib.string_EQ_CONV)
+                               THENC REWRITE_CONV [])
+
+ val (new_assum, th) = UNDISCH_TM th
+ val th = th |> CONV_RULE (Eval_exp_CONV (UNBETA_CONV v))
+             |> DISCH new_assum
+             |> GEN forallv
+in
+ th
+end;
+
 (* For debugging: val tm = (!tm_trace) |> hd *)
 (* val s = ``s:state_circuit`` *)
 val tm_trace = ref ([]:term list);
@@ -134,29 +162,77 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
  in
  (* state update or just new local variable? *)
   if type_of v = #state_ty tstate then let
+   fun trans_to_state_body_form th inners newstateprog = let
+    val fext_rel = #fext_rel tstate in
+       th |> CONV_RULE (Eval_exp_CONV (UNBETA_CONV inners))
+          |> DISCH_ALL
+          |> Q.INST [`env` |-> `env'`]
+          |> Q.DISCH (`^fext_rel fextv fext /\ prun fextv (vs with vars := env) ^newstateprog = INR vs'`)
+          |> Q.INST [`env'` |-> `vs'.vars`]
+   end
+
+   fun get_var_bubble_thm th = let
+    val precond = th |> concl |> dest_imp |> snd
+   in
+    if is_imp precond then let
+      val precond = precond |> dest_imp |> fst
+    in
+     SOME bubble_var_has_value
+    (*if is_var_has_value precond then
+      SOME bubble_var_has_value
+    else if is_var_has_type_old precond then
+      SOME bubble_var_has_type
+    else
+      raise UnableToTranslate (th |> concl, "Unknown precondition")*)
+    end
+    else
+      NONE
+   end
+
+   fun bubble_var th bubble_thm = let
+    val res = MATCH_MP bubble_thm th
+    val precond = res |> concl |> dest_imp |> fst |> EVAL_PROVE
+    val res = MATCH_MP res precond
+   in
+    UNDISCH res
+   end
+
+   fun bubble_vars th =
+    case get_var_bubble_thm th of
+      SOME bubble_thm => bubble_vars (bubble_var th bubble_thm)
+    | NONE => th
+    
    val arg' = hol2hardware' tstate s s' arg
    val body' = hol2hardware' tstate s v body
-   val body' = CONV_RULE (RATOR_CONV (RAND_CONV (UNBETA_CONV v))) body'
-   val body' = body' |> Q.GEN ‘env’ |> GENL [s, v]
-   (*val arg'_prog = arg' |> concl |> EvalS_get_prog*)
-  in
+   val arg'_prog = arg' |> concl |> Eval_get_prog
+   (* Lots of work is needed here since let-vars might not be translatable to mutable variables,
+      consider e.g. (in pseudocode):
+
+      let x = 2 in
+       (let x = 3 in x + 5);
+       x + 7 // if we translate "x" to the same mutable variable it is 3 here now!
+   *)
+   val body' = trans_to_state_body_form body' v arg'_prog
+   val body' = bubble_vars body'
+   val body' = body' |> Q.GENL [`vs`, `vs'`, `fextv`] |> GEN v |> GEN s
    (* can probably change a few things to use MATCH_MP instead of HO_MATCH_MP here *)
-   HO_MATCH_MP Eval_Eval (CONJ arg' body')
-  end else
-   failwith "Non-state let handling disabled for now!"
-   (*let
-   val arg' = hol2hardware_exp s arg
-      (* NOTE: In other situations, this might be another expression,
-               but this is not relevant in this translation ... *)
-      val body' = hol2hardware_body s body
-      val body' = inst_EvalS_env s v body'
-      val body' = INST [v |-> (arg' |> concl |> Eval_get_pred_exp)] body'
-      val not_state_var = mk_neg (mk_state_var vname) |> EVAL_PROVE (* TODO: We compute this in inst_EvalS_env also ... *)
-      val prun_bassn_type_pred_thm = get_prun_bassn_type_pred v
-      val result = LIST_CONJ [not_state_var, prun_bassn_type_pred_thm, arg', body']
-                   |> MATCH_MP EvalS_Let
-                   |> UNDISCH
- end*)
+   val result = HO_MATCH_MP Eval_Eval (CONJ arg' body')
+  in
+   check_inv_Eval "let1" tm result
+  end else let
+   val arg' = hol2hardware_exp tstate s s' arg
+   (* NOTE: In other situations, this might be another expression,
+            but this is not relevant in this translation...
+      NOTE: Not sure what the above NOTE means... *)
+   val body' = hol2hardware' tstate s s' body
+   val body' = inst_Eval_env s v body'
+   val body' = INST [v |-> (arg' |> concl |> Eval_exp_get_pred_exp)] body'
+   val result = LIST_CONJ [#rel_var_inv tstate, arg', body']
+                |> MATCH_MP Eval_Let
+                |> EVAL_MP
+  in
+   check_inv_Eval "let2" tm result
+  end
  end
 
  (* Case on word type *)
@@ -168,12 +244,13 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
  in
   (* If the last term in the case is ARB, we must prove that we never execute that branch...
      Currently, we only handle the special case where all cases are covered in order *)
-  if last_case ~~ arb then let
+  if is_arb last_case then let
    val th = MATCH_MP Eval_Case_ARB second_last_Eval
             |> ISPECL [second_last_exp, var]
             |> Q.ID_SPEC (* <-- what happens on collision? *)
             |> EVAL_MP
-            |> UNDISCH
+   val Eval_exp_assum = th |> concl |> dest_imp |> fst
+   val th = UNDISCH th
    val th = foldl (fn ((next_exp, next_case), th) => let
                     val next_Eval = hol2hardware' tstate s s' next_case
                    in
@@ -185,7 +262,12 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
    val th = MATCH_MP th (ISPEC var word_ls_0)
    val th = (CONV_RULE o Eval_holexp_CONV) (UNBETA_CONV var THENC
                                             REWR_CONV (GSYM literal_case_THM)) th
-   val th = MATCH_MP (DISCH_ALL th) exp_Eval (* <-- not robust with DISCH_ALL here *)
+
+   (*fun is_Eval_exp tm = case total (fst o dest_const o fst o strip_comb) tm of
+                          NONE => false
+                        | SOME name => name = "Eval_exp"
+   val Eval_exp_assum = th |> hypset |> HOLset.find is_Eval_exp |> valOf*)
+   val th = MATCH_MP (DISCH Eval_exp_assum th) exp_Eval
   in
    th
   end else let
@@ -193,7 +275,8 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
    val th = MATCH_MP Eval_Case_catch_all (CONJ second_last_Eval last_Eval)
             |> ISPECL [second_last_exp, var]
             |> Q.ID_SPEC (* <-- same problem as above? *)
-            |> UNDISCH
+   val Eval_exp_assum = th |> concl |> dest_imp |> fst
+   val th = UNDISCH th
    val th = foldl (fn ((next_exp, next_case), th) => let
                     val next_Eval = hol2hardware' tstate s s' next_case
                    in
@@ -203,7 +286,7 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
                    end) th tms
    val th = (CONV_RULE o Eval_holexp_CONV) (UNBETA_CONV var THENC
                                             REWR_CONV (GSYM literal_case_THM)) th
-   val th = MATCH_MP (DISCH_ALL th) exp_Eval (* <-- not robust with DISCH_ALL here *)
+   val th = MATCH_MP (DISCH Eval_exp_assum th) exp_Eval
   in
    th
   end
@@ -215,38 +298,50 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
   val (fupd, Kval) = dest_comb fupd_arg
   val newval = combinSyntax.dest_K_1 Kval
   val key = fupd |> dest_const |> fst
+
+  fun opt_to_list NONE = []
+    | opt_to_list (SOME x) = [x]
  in
   case lookup_opt key (#write_thms tstate) of
-   SOME (base_thm, base_bit_thm, step_thm) =>
-   if is_fcp_update newval then let
-    val th = valOf base_bit_thm (* should be fine doing valOf here... *)
-    val th = PART_MATCH (Eval_get_hol_prog o snd o dest_imp) th tm
-    val (precond_eval, precond) = th |> concl |> dest_imp |> fst |> dest_conj
-    val precond_eval_th = EVAL_PROVE precond_eval
-    val precond_th = precond |> Eval_exp_get_pred_exp |> hol2hardware_exp tstate s s'
+   SOME (base_thm, base_bit_thm, base_slice_thm, step_thm) =>
+   if identical arg s' then let
+    val th = first_PART_MATCH (Eval_get_hol_prog o snd o dest_imp)
+                              (opt_to_list base_slice_thm @ opt_to_list base_bit_thm @ [base_thm])
+                              tm
+    val precond = th |> concl |> dest_imp |> fst
+    val precond = if is_conj precond then let
+                   val (precond_eval, precond) = dest_conj precond
+                   val precond_eval_th = EVAL_PROVE precond_eval
+                   val precond_th = precond |> Eval_exp_get_pred_exp |> hol2hardware_exp tstate s s'
+                  in
+                   CONJ precond_eval_th precond_th
+                  end else let
+                   val precond_th = precond |> Eval_exp_get_pred_exp |> hol2hardware_exp tstate s s'
+                  in
+                   precond_th
+                  end
+    val result = MATCH_MP th precond
    in
-    MATCH_MP th (CONJ precond_eval_th precond_th)
-   end else if identical arg s' then let
-    val newval' = hol2hardware_exp tstate s s' newval
-   in
-    MATCH_MP base_thm newval'
+    check_inv_Eval "state-base" tm result
    end else let
     val newval' = hol2hardware_exp tstate s s' newval
     val arg' = hol2hardware' tstate s s' arg
+    val result = MATCH_MP step_thm (CONJ newval' arg') |> EVAL_MP
    in
-    MATCH_MP step_thm (CONJ newval' arg') |> EVAL_MP
+    check_inv_Eval "state-let" tm result
    end
  | NONE =>
    case lookup_opt key (#write_2d_thms tstate) of
     SOME (base_thm, base_slice_thm) => let
-     val th = first_PART_MATCH (Eval_get_hol_prog o snd o dest_imp) [base_thm, base_slice_thm] tm
+     val th = first_PART_MATCH (Eval_get_hol_prog o snd o dest_imp) [base_slice_thm, base_thm] tm
      val (precond_eval, precond) = th |> concl |> dest_imp |> fst |> dest_conj
      val precond_eval_th = EVAL_PROVE precond_eval
      val precond_th = precond |> strip_conj
                               |> map (hol2hardware_exp tstate s s' o Eval_exp_get_pred_exp)
                               |> LIST_CONJ
+     val result = MATCH_MP th (CONJ precond_eval_th precond_th)
     in
-     MATCH_MP th (CONJ precond_eval_th precond_th)
+     check_inv_Eval "state-step" tm result
     end
   | NONE => failwith "Unknown state update"
  end
