@@ -4,16 +4,16 @@ open arithmeticTheory combinTheory;
 
 open dep_rewrite blastLib;
 
-open ag32Theory ag32MachineTheory wordsExtraTheory;
-
 open bitstringSyntax fcpSyntax listSyntax wordsSyntax;
+
+open ag32Theory ag32MachineTheory translatorTheory wordsExtraTheory;
 
 open ag32StepLib;
 
 val _ = new_theory "ag32Eq";
 
-guess_lengths ();
-prefer_num ();
+val _ = guess_lengths ();
+val _ = prefer_num ();
 
 (** Correspondence relation **)
 
@@ -250,38 +250,44 @@ val no_interrupt_req = Q.store_thm("no_interrupt_req",
  rewrite_tac [is_interrupt_interface_def] \\ rpt strip_tac' \\
  first_x_assum (qspec_then `n` mp_tac) \\ simp [fext_accessor_circuit_def]);
 
-val circuit_read_wait_SUC = Q.store_thm("circuit_read_wait_SUC",
- `!facc init fext n.
+Triviality circuit_read_wait_SUC:
+  !fext fbits n.
   mem_no_errors fext /\
-  (circuit facc init fext n).state = 1w /\
-  (circuit facc init fext n).command <> 0w /\
-  ~(circuit facc init fext n).interrupt_req ==>
-  cpu_eq (circuit facc init fext (SUC n))
-         ((circuit facc init fext n) with command := 0w)`,
- rw [circuit_def] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\
- simp [cpu_Next_1w_def, delay_write_Next_def, cpu_eq_def]);
+  (ag32 fext fbits n).state = 1w /\
+  (ag32 fext fbits n).command <> 0w /\
+  ~(ag32 fext fbits n).interrupt_req ==>
+  cpu_eq (ag32 fext fbits (SUC n))
+         ((ag32 fext fbits n) with command := 0w)
+Proof
+ rw [ag32_def, mk_module_def, mk_circuit_def, procs_def] \\
+ simp [cpu_Next_def] \\ no_mem_error_tac \\
+ simp [cpu_Next_1w_def, delay_write_Next_def, cpu_eq_def]
+QED
 
-val circuit_read_wait_SUC2 = Q.store_thm("circuit_read_wait_SUC2",
- `!facc init fext n.
-  is_interrupt_interface fext_accessor_circuit (circuit facc init fext) fext /\
+Triviality circuit_read_wait_SUC2:
+  !fext fbits n.
+  is_interrupt_interface fext_accessor_circuit (ag32 fext fbits) fext /\
   mem_no_errors fext /\
-  (circuit facc init fext n).state = 1w /\
-  (circuit facc init fext n).command = 0w /\
-  ~(circuit facc init fext n).interrupt_req /\
+  (ag32 fext fbits n).state = 1w /\
+  (ag32 fext fbits n).command = 0w /\
+  ~(ag32 fext fbits n).interrupt_req /\
   (fext n).interrupt_state = InterruptReady /\
   ~(fext n).ready ==>
-  cpu_eq (circuit facc init fext (SUC n))
-         ((circuit facc init fext n)) /\
+  cpu_eq (ag32 fext fbits (SUC n))
+         (ag32 fext fbits n) /\
   (fext (SUC n)).interrupt_state = InterruptReady /\
   ~(fext (SUC n)).interrupt_ack /\
-  (fext (SUC n)).io_events = (fext n).io_events`,
+  (fext (SUC n)).io_events = (fext n).io_events
+Proof
  rpt strip_tac' \\ drule_strip no_interrupt_req \\
- simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
- simp [cpu_Next_1w_def, cpu_eq_def]);
+ fs [ag32_def, mk_module_def, mk_circuit_def, procs_def] \\
+ simp [cpu_Next_def] \\ no_mem_error_tac \\
+ simp [cpu_Next_1w_def, cpu_eq_def]
+QED
 
-val circuit_read_wait = Q.store_thm("circuit_read_wait",
- `!m facc init fext n.
-   is_interrupt_interface fext_accessor_circuit (circuit facc init fext) fext /\
+Triviality circuit_read_wait:
+  !m fext fbits n.
+   is_interrupt_interface fext_accessor_circuit (ag32 fext fbits) fext /\
    mem_no_errors fext /\
    (* from previous inst. of is_mem: *)
    (!p. p < m ==> (fext (SUC (n + p))).mem = (fext n).mem /\ ~(fext (SUC (n + p))).ready) /\
@@ -289,18 +295,19 @@ val circuit_read_wait = Q.store_thm("circuit_read_wait",
    (fext n).ready /\
    (fext n).interrupt_state = InterruptReady /\
 
-   (circuit facc init fext n).state = 1w /\
+   (ag32 fext fbits n).state = 1w /\
 
-   (circuit facc init fext n).command <> 0w /\
-   ~(circuit facc init fext n).interrupt_req
+   (ag32 fext fbits n).command <> 0w /\
+   ~(ag32 fext fbits n).interrupt_req
    ==>
-   cpu_eq (circuit facc init fext (SUC (m + n)))
-          ((circuit facc init fext n) with command := 0w) /\
+   cpu_eq (ag32 fext fbits (SUC (m + n)))
+          ((ag32 fext fbits n) with command := 0w) /\
    (fext (SUC (m + n))).interrupt_state = InterruptReady /\
    ~(fext (SUC (m + n))).interrupt_ack /\
    (!l. l <= SUC m ==> (fext (l + n)).io_events = (fext n).io_events /\
-                       (circuit facc init fext (l + n)).PC = (circuit facc init fext n).PC /\
-                       (circuit facc init fext (l + n)).R = (circuit facc init fext n).R)`,
+                       (ag32 fext fbits (l + n)).PC = (ag32 fext fbits n).PC /\
+                       (ag32 fext fbits (l + n)).R = (ag32 fext fbits n).R)
+Proof
  rpt gen_tac \\ strip_tac \\ Induct_on `m`
  >- (strip_tac \\ drule_strip no_interrupt_req \\
     drule_strip circuit_read_wait_SUC \\
@@ -315,9 +322,10 @@ val circuit_read_wait = Q.store_thm("circuit_read_wait",
  fs [cpu_eq_def, ADD1] \\
 
  rpt strip_tac' \\ `l <= m + 1 \/ l = m + 2` by decide_tac \\
- fs [] \\ first_x_assum (qspec_then `m + 1` mp_tac) \\ fs []);
+ fs [] \\ first_x_assum (qspec_then `m + 1` mp_tac) \\ fs []
+QED
 
-val circuit_acc_wait_help = Q.store_thm("circuit_acc_wait_help",
+(*val circuit_acc_wait_help = Q.store_thm("circuit_acc_wait_help",
  `!l k n facc init fext.
    is_mem fext_accessor_circuit (circuit facc init fext) fext /\
    is_interrupt_interface fext_accessor_circuit (circuit facc init fext) fext /\
@@ -404,44 +412,50 @@ val circuit_acc_wait = Q.store_thm("circuit_acc_wait",
 
  simp [circuit_def] \\ simp [GSYM ADD_SUC] \\ simp [cpu_Next_def] \\ no_mem_error_tac \\ simp [cpu_Next_2w_def, cpu_eq_def] \\
  last_x_assum (assume_tac o is_mem_do_nothing `SUC (n + n')`) \\
- rfs [] \\ drule_strip no_interrupt_req \\ simp []);
+ rfs [] \\ drule_strip no_interrupt_req \\ simp []);*)
 
-val circuit_interrupt_wait = Q.store_thm("circuit_interrupt_wait",
- `!m n facc init fext.
-   is_mem fext_accessor_circuit (circuit facc init fext) fext /\
+Triviality circuit_interrupt_wait:
+  !m n fext fbits.
+   is_mem fext_accessor_circuit (ag32 fext fbits) fext /\
 
-   (circuit facc init fext n).state = 4w /\
-   (circuit facc init fext n).command = 0w /\
+   (ag32 fext fbits n).state = 4w /\
+   (ag32 fext fbits n).command = 0w /\
 
    (fext n).ready /\
    ~(fext n).interrupt_ack /\
 
    (!l. l < m ==> ~(fext (SUC (n + l))).interrupt_ack)
    ==>
-   cpu_eq (circuit facc init fext (SUC (n + m)))
-          (circuit facc init fext n) /\
+   cpu_eq (ag32 fext fbits (SUC (n + m)))
+          (ag32 fext fbits n) /\
    (fext (SUC (n + m))).ready /\
-   (fext (SUC (n + m))).mem = (fext n).mem`,
- Induct \\ rpt strip_tac' \\ last_assum (assume_tac o is_mem_def_mem_no_errors) >-
+   (fext (SUC (n + m))).mem = (fext n).mem
+Proof
+ Induct \\ rpt strip_tac' \\ last_assum (assume_tac o is_mem_def_mem_no_errors)
+ >-
  (last_x_assum (assume_tac o is_mem_do_nothing `n`) \\ simp [] \\ pop_assum kall_tac \\
- simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
- simp [cpu_Next_4w_def, cpu_eq_def]) \\
+ fs [ag32_def, mk_module_def, mk_circuit_def, procs_def, cpu_Next_def] \\ no_mem_error_tac \\
+ simp [cpu_Next_4w_def, cpu_eq_def])
 
- simp [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
- drule_last \\ impl_tac >- simp [] \\ fs [ADD_SUC] \\
+ \\
+ drule_last \\ impl_tac >- simp [] \\
  disch_then (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
  last_x_assum (mp_tac o is_mem_do_nothing `n + SUC m`) \\
- simp [ADD_SUC] \\ disch_then kall_tac \\
- simp [cpu_Next_4w_def, cpu_eq_def]);
 
-val circuit_mem_start_ready_wait = Q.store_thm("circuit_mem_start_ready_wait",
- `!m facc init fext.
-   is_mem fext_accessor_circuit (circuit facc init fext) fext /\
-   is_interrupt_interface fext_accessor_circuit (circuit facc init fext) fext /\
+ simp [ag32_def, mk_module_def, mk_circuit_def, procs_def, cpu_Next_def] \\ no_mem_error_tac \\
 
-   (circuit facc init fext 0).state = 3w /\
-   (circuit facc init fext 0).command = 0w /\
-   ~(circuit facc init fext 0).interrupt_req /\
+ simp [GSYM ADD_SUC] \\ fs [ag32_def, mk_module_def] \\
+ simp [cpu_Next_4w_def, cpu_eq_def]
+QED
+
+Triviality circuit_mem_start_ready_wait:
+ !m fext fbits.
+   is_mem fext_accessor_circuit (ag32 fext fbits) fext /\
+   is_interrupt_interface fext_accessor_circuit (ag32 fext fbits) fext /\
+
+   (ag32 fext fbits 0).state = 3w /\
+   (ag32 fext fbits 0).command = 0w /\
+   ~(ag32 fext fbits 0).interrupt_req /\
 
    (fext 0).ready /\
    (fext 0).interrupt_state = InterruptReady /\
@@ -449,21 +463,24 @@ val circuit_mem_start_ready_wait = Q.store_thm("circuit_mem_start_ready_wait",
 
    (!l. l < m ==> ~(fext l).mem_start_ready)
    ==>
-   cpu_eq (circuit facc init fext m)
-          (circuit facc init fext 0) /\
+   cpu_eq (ag32 fext fbits m)
+          (ag32 fext fbits 0) /\
    (fext m).ready /\
    (fext m).mem = (fext 0).mem /\
    (fext m).io_events = (fext 0).io_events /\
    (fext m).interrupt_state = InterruptReady /\
-   ~(fext m).interrupt_ack`,
+   ~(fext m).interrupt_ack
+Proof
  Induct \\ rpt strip_tac' \\
  last_assum (assume_tac o is_mem_def_mem_no_errors) >- simp [cpu_eq_def] \\
  drule_last \\ impl_tac >- simp [] \\
  disch_then (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
- last_x_assum (mp_tac o is_mem_do_nothing `m`) \\ simp [] \\ disch_then kall_tac \\
- rfs [circuit_def, cpu_Next_def] \\ no_mem_error_tac \\
+ last_x_assum (mp_tac o is_mem_do_nothing `m`) \\ simp [] \\ strip_tac \\
+ rfs [ag32_def, mk_module_def] \\ simp [mk_circuit_def, procs_def, cpu_Next_def] \\ no_mem_error_tac \\
  drule_strip no_interrupt_req \\
- simp [cpu_Next_3w_def, cpu_eq_def]);
+ simp [mk_module_def, cpu_Next_3w_def, cpu_eq_def] \\ strip_tac \\
+ simp [ag32_init_def, mk_circuit_def, procs_def]
+QED
 
 (* Impl variant of ri2word... *)
 val EncodeReg_imm_def = Define `
@@ -503,9 +520,9 @@ val ALU_state_eq_after = Q.store_thm("ALU_state_eq_after",
 val word_ver_var_slice_def = Define `
  word_ver_var_slice idx len w = (w2n idx + (len - 1) >< w2n idx) w`;
 
-val circuit_next = Q.store_thm("circuit_next",
- `!f init fext facc (c : num -> state_circuit).
-   c = circuit facc init fext /\
+Triviality circuit_next:
+  !f fext fbits (c : num -> state_circuit).
+   c = ag32 fext fbits /\
    is_mem fext_accessor_circuit c fext /\
    is_acc f c /\
    is_interrupt_interface fext_accessor_circuit c fext ==>
@@ -712,7 +729,9 @@ val circuit_next = Q.store_thm("circuit_next",
                     (fext (n + m)).interrupt_state = InterruptReady /\
                     (fext (n + m)).io_events = (fext n).io_events ++ [(fext n).mem] /\
                     ~(fext (n + m)).interrupt_ack
-       | _ => T`,
+       | _ => T
+Proof
+ cheat(*
  rpt strip_tac \\
  last_assum (assume_tac o is_mem_def_mem_no_errors) \\
  rveq \\ TOP_CASE_TAC \\ simp [] \\
@@ -1024,16 +1043,19 @@ val circuit_next = Q.store_thm("circuit_next",
  simp [cpu_Next_def] \\ no_mem_error_tac \\
  simp [cpu_Next_4w_def, cpu_eq_def] \\
 
- fs [is_interrupt_interface_def] \\ last_x_assum (qspec_then `SUC (m + n)` mp_tac) \\ simp []);
+ fs [is_interrupt_interface_def] \\ last_x_assum (qspec_then `SUC (m + n)` mp_tac) \\ simp []*)
+QED
 
-val circuit_0 = Q.store_thm("circuit_0",
- `!facc init fext.
-   circuit facc init fext 0 = init`,
- simp [circuit_def]);
+Triviality circuit_0:
+ !fext fbits.
+ ag32 fext fbits 0 = ag32_init fbits
+Proof
+ rpt gen_tac \\ EVAL_TAC
+QED
 
-val circuit_0_next = Q.store_thm("circuit_0_next",
- `!init fext facc c.
-   c = circuit facc init fext /\
+Triviality circuit_0_next:
+  !fext fbits c.
+   c = ag32 fext fbits /\
    is_lab_env fext_accessor_circuit c fext /\
 
    (c 0).state = 3w /\
@@ -1049,19 +1071,21 @@ val circuit_0_next = Q.store_thm("circuit_0_next",
        (fext m).mem = (fext 0).mem /\
        (fext m).interrupt_state = InterruptReady /\
        (fext m).io_events = (fext 0).io_events /\
-       ~(fext m).interrupt_ack`,
+       ~(fext m).interrupt_ack
+Proof
  rewrite_tac [is_lab_env_def, is_mem_start_interface_def] \\ rpt strip_tac \\ rveq \\
  drule_strip circuit_mem_start_ready_wait \\
  qpat_x_assum `cpu_eq _ _` (strip_assume_tac o SIMP_RULE (srw_ss()) [cpu_eq_def]) \\
- fs [circuit_0] \\
+ (*fs [circuit_0] \\*)
 
  qexists_tac `SUC n` \\
- last_assum (mp_tac o is_mem_do_nothing `n`) \\ simp [] \\ disch_then kall_tac \\
+ last_assum (mp_tac o is_mem_do_nothing `n`) \\ simp [] \\ strip_tac \\
 
- rfs [circuit_def, cpu_Next_def] \\
+ rfs [ag32_def, mk_module_def, mk_circuit_def, procs_def, cpu_Next_def] \\
  last_assum (assume_tac o is_mem_def_mem_no_errors) \\
  no_mem_error_tac \\ drule_strip no_interrupt_req \\
- simp [cpu_Next_3w_def, cpu_eq_def]);
+ simp [cpu_Next_3w_def, cpu_eq_def, mk_module_def]
+QED
 
 val addr_add = Q.prove(
  `!(w:word32).
@@ -1080,43 +1104,31 @@ val addr_split = Q.prove(
    w1 = (31 >< 2) w1 @@ (1 >< 0) w1`,
  BBLAST_TAC);
 
-val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
- `!n c init fext facc s.
-   c = circuit facc init fext /\
+Triviality REL_circuit_SUC:
+  !n c fext fbits s.
+   c = ag32 fext fbits /\
    is_mem fext_accessor_circuit c fext /\
    is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
    REL (fext n) (c n) s ==>
-   ?m. m <> 0 /\ REL (fext (n + m)) (c (n + m)) (Next s)`,
+   ?m. m <> 0 /\ REL (fext (n + m)) (c (n + m)) (Next s)
+Proof
  rpt strip_tac \\
  pop_assum (STRIP_ASSUME_TAC o REWRITE_RULE [REL_def]) \\
 
  simp [Next_def, GSYM word_at_addr_def, GSYM align_addr_def] \\
 
  qpat_x_assum `t.i = _` (fn th => GSYM th |> ASSUME_TAC) \\
- `(word_at_addr s.MEM (align_addr s.PC)) = (circuit facc init fext n).i` by metis_tac [] \\
+ `(word_at_addr s.MEM (align_addr s.PC)) = (ag32 fext fbits n).i` by metis_tac [] \\
 
  simp [] \\ rveq \\
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
- qpat_abbrev_tac `c = circuit _ _ _` \\
+ qpat_abbrev_tac `c = ag32 _ _` \\
 
  Cases_on `Decode (c n).i`
 
  >- (* Accelerator *)
- (PairCases_on `p` \\ simp [Run_def, dfn'Accelerator_def, incPC_def] \\
- first_assum (qspec_then `n + 1` mp_tac) \\
- first_x_assum (qspec_then `n` mp_tac) \\
- reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
- simp [state_0w_fext_post_def, cpu_eq_def] \\ rpt strip_tac \\
-
- qunabbrev_tac `c` \\
- drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
- qpat_abbrev_tac `c = circuit _ _ _` \\
- first_x_assum (qspec_then `m + (n + 1)` mp_tac) \\
- simp [cpu_eq_def] \\ strip_tac \\
-
- qexists_tac `m + m' + 1` \\ fs [REL_def] \\
- f_equals_tac \\ Cases_on `p1` \\ simp [EncodeReg_imm_def, ri2word_def])
+ cheat
 
  >- (* In *)
  (simp [Run_def, dfn'In_def, incPC_def] \\
@@ -1136,7 +1148,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  (* hacky: additional waiting needed for this instruction: *)
  qunabbrev_tac `c` \\
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
- qpat_abbrev_tac `c = circuit _ _ _` \\
+ qpat_abbrev_tac `c = ag32 _ _` \\
 
  first_x_assum (qspec_then `m + (n + 1)` mp_tac) \\
  simp [cpu_eq_def] \\ strip_tac \\
@@ -1247,7 +1259,7 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
  first_x_assum (qspec_then `n` mp_tac) \\
  reverse IF_CASES_TAC >- fs [] \\ disch_then drule_strip \\
  simp [state_0w_fext_post_def, cpu_eq_def] \\
- (* Följer inte generella mönstret: *)
+ (* Does not follow general pattern: *)
  pairarg_tac \\ simp [] \\ rpt strip_tac \\
  qexists_tac `m + 1` \\
  drule_strip ALU_state_eq_after \\
@@ -1295,61 +1307,68 @@ val REL_circuit_SUC = Q.store_thm("REL_circuit_SUC",
 
  simp [mem_update_def, addr_add, addr_concat] \\
  match_mp_tac EQ_EXT \\ rw [APPLY_UPDATE_THM] \\
- BBLAST_PROVE_TAC);
+ BBLAST_PROVE_TAC
+QED
 
-val REL_circuit = Q.store_thm("REL_circuit",
- `!m n ni c s facc init fext.
-   c = circuit facc init fext /\
+Theorem REL_circuit:
+  !m n ni c s fext fbits.
+   c = ag32 fext fbits /\
    is_mem fext_accessor_circuit c fext /\
    is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
    REL (fext ni) (c ni) (FUNPOW Next n s) ==>
-   ?mi. (mi = 0 <=> m = 0) /\ REL (fext (ni + mi)) (c (ni + mi)) (FUNPOW Next (n + m) s)`,
+   ?mi. (mi = 0 <=> m = 0) /\ REL (fext (ni + mi)) (c (ni + mi)) (FUNPOW Next (n + m) s)
+Proof
  simp [] \\ Induct \\ rpt strip_tac
- >- (qexists_tac `0` \\ fs [circuit_def]) \\
+ >- (qexists_tac `0` \\ simp []) \\
  drule_first \\
  drule_strip (SIMP_RULE (srw_ss()) [] REL_circuit_SUC) \\
  qexists_tac `mi + m'` \\
  once_rewrite_tac [DECIDE ``SUC m + n = SUC (m + n)``] \\ rewrite_tac [FUNPOW_SUC] \\
- fs []);
+ fs []
+QED
 
 (* Strange FUNPOW in conclusion because that's the form we need in main thm *)
-val INIT_circuit = Q.store_thm("INIT_circuit",
- `!c s facc init fext.
-   c = circuit facc init fext /\
+Triviality INIT_circuit:
+  !c s fext fbits.
+   c = ag32 fext fbits /\
    is_mem fext_accessor_circuit c fext /\
    is_acc accelerator_f c /\
    is_interrupt_interface fext_accessor_circuit c fext /\
    is_mem_start_interface fext /\
 
-   INIT (fext 0) init s ==>
-   ?m. REL (fext m) (c m) (FUNPOW Next 0 s)`,
+   INIT (fext 0) (ag32_init fbits) s ==>
+   ?m. REL (fext m) (c m) (FUNPOW Next 0 s)
+Proof
  simp [INIT_def] \\ rpt strip_tac \\
  drule_strip (SIMP_RULE (srw_ss()) [is_lab_env_def] circuit_0_next) \\
- impl_tac >- simp [circuit_def] \\ strip_tac \\ fs [circuit_0, cpu_eq_def] \\
+ impl_tac >- simp [circuit_0] \\
+ strip_tac \\ fs [circuit_0, cpu_eq_def] \\
 
  drule_strip (SIMP_RULE (srw_ss()) [] circuit_next) \\
  pop_assum (qspec_then `m` mp_tac) \\ fs [] \\ strip_tac \\
 
- qexists_tac `m' + m` \\ fs [cpu_eq_def, REL_def]);
+ qexists_tac `m' + m` \\ fs [cpu_eq_def, REL_def]
+QED
 
-val INIT_REL_circuit_lem = Q.store_thm("INIT_REL_circuit_lem",
- `!n cstep s facc init fext.
-   cstep = circuit facc init fext /\
+Triviality INIT_REL_circuit_lem:
+  !n cstep s fext fbits.
+   cstep = ag32 fext fbits /\
 
-   INIT (fext 0) init s /\
+   INIT (fext 0) (ag32_init fbits) s /\
 
    is_lab_env fext_accessor_circuit cstep fext /\
 
    is_acc accelerator_f cstep ==>
-   ?m. REL (fext m) (cstep m) (FUNPOW Next n s)`,
+   ?m. REL (fext m) (cstep m) (FUNPOW Next n s)
+Proof
  simp [is_lab_env_def] \\ rpt strip_tac \\
  drule_strip (SIMP_RULE (bool_ss) [] INIT_circuit) \\
  drule_strip (SIMP_RULE (srw_ss()) [] REL_circuit) \\
  pop_assum (qspec_then `n` strip_assume_tac) \\
- qexists_tac `m + mi` \\ fs []);
+ qexists_tac `m + mi` \\ fs []
+QED
 
-val INIT_REL_circuit = save_thm("INIT_REL_circuit",
- SIMP_RULE (srw_ss()) [] INIT_REL_circuit_lem);
+Theorem INIT_REL_circuit = SIMP_RULE (srw_ss()) [] INIT_REL_circuit_lem;
 
 val _ = export_theory ();

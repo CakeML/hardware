@@ -157,7 +157,7 @@ sig
 
   val is_VArray2_t : term -> bool
   val dest_VArray2_t : term -> term * term
-  val mk_VArray2_t : num -> num -> term
+  val mk_VArray2_t : Arbnum.num -> Arbnum.num -> term
 
   val mk_var_has_value : term * term * term -> term
 end
