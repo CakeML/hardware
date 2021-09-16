@@ -395,9 +395,9 @@ val cpu_Next_0w_def = Define `
       execute_instruction wV aV bV PC_next fext s s'`;
 
 val cpu_Next_1w_def = Define `
- cpu_Next_1w fext s' =
+ cpu_Next_1w fext s s' =
   let s' =
-   (if fext.ready /\ s'.command = 0w then
+   (if fext.ready /\ s.command = 0w then
     let s' = delay_write_Next fext s';
         s' = s' with <| i := fext.inst_rdata; do_delay_write := 5w |> in
      if s'.do_interrupt then s' with <| interrupt_req := T; do_interrupt := F; state := 4w |> else s' with state := 0w
@@ -435,7 +435,7 @@ val cpu_Next_def = Define `
     0w (* execute *) =>
      cpu_Next_0w fext s s'
   | 1w (* wait for mem *) =>
-     cpu_Next_1w fext s'
+     cpu_Next_1w fext s s'
   | 2w (* wait for acc *) =>
      cpu_Next_2w fext s s'
   | 3w (* wait for start of mem *) =>

@@ -1,7 +1,7 @@
 open hardwarePreamble;
 
 open alignmentTheory alistTheory;
-open ag32MachineTheory (*ag32AddAcceleratorTheory ag32EqTheory*);
+open ag32MachineTheory ag32EqTheory;
 
 open translatorLib;
 
@@ -24,103 +24,24 @@ val comms = ["PC", "data_out",
 val trans_thm = module2hardware ag32_def
                                 ["mem", "io_events", "interrupt_state"]
                                 ["PC"]
-                                ["PC"; "data_out";
-                                 "command"; "data_addr"; "data_wdata"; "data_wstrb";
-                                 "acc_arg"; "acc_arg_ready";
-                                 "acc_res"; "acc_res_ready";
-                                 "interrupt_req"]
+                                ["PC", "data_out",
+                                 "command", "data_addr", "data_wdata", "data_wstrb",
+                                 "acc_arg", "acc_arg_ready",
+                                 "acc_res", "acc_res_ready",
+                                 "interrupt_req"];
 
-(* Cpu *)
-val trans = hol2hardware_step_function cpu_step_def;
-val prog_def = EvalS_get_prog (trans |> concl);
-val prog_def = Define `prog = ^prog_def`;
-val trans = REWRITE_RULE [GSYM prog_def] trans;
-val prog_comm = intro_cvars_for_prog (prog_def |> concl |> lhs);
-(* temp, export: *) val prog_comm_def = Define `prog_comm = ^prog_comm`;
 
-(* Acc *)
-val trans_acc = hol2hardware_step_function addacc_next_def;
-val prog_acc_def = EvalS_get_prog (trans_acc |> concl);
-val prog_acc_def = Define `prog_acc = ^prog_acc_def`;
-val trans_acc = REWRITE_RULE [GSYM prog_acc_def] trans_acc;
-val prog_acc_comm = intro_cvars_for_prog (prog_acc_def |> concl |> lhs);
-(* temp, export: *) val prog_acc_comm_def = Define `prog_acc_comm = ^prog_acc_comm`;
+Definition INIT_fext_def:
+ INIT_fext fext <=>
+ fext.io_events = [] /\
+ fext.ready /\
+ fext.interrupt_state = InterruptReady /\
+ ~fext.interrupt_ack
+End
 
-(* Normalize for extraction *)
-(* This can be simplified for now because only the processor has preconds *)
-val trans = vars_has_type_cleanup trans;
-val ag32types_def = trans |> hyp |> hd |> rand |> (fn tm => Define `ag32types = ^tm`);
-val trans = trans |> DISCH_ALL |> PURE_REWRITE_RULE [GSYM ag32types_def] |> UNDISCH_ALL;
+(** OLD **)
 
-val prg_to_trans = [trans, trans_acc]
- |> map (fn t => (t |> concl |> rator |> rand |> strip_comb |> fst, (t |> concl |> rand, t |> GEN_ALL)));
-
-(* Duplication from circuitExampleTrans... *)
-fun mget_var_init_tac (g as (tms, tm)) = let
-  val (mget_var_tm, pred_tm) = tm |> boolSyntax.dest_exists |> snd |> dest_conj
-  val prg = pred_tm |> rator |> rand |> rand |> strip_comb |> fst
-  val var = mget_var_tm |> lhs |> rand
-  val res = lookup_term prg prg_to_trans
-in
-  (first_x_assum (strip_assume_tac o SIMP_RULE (srw_ss()) [] o SPEC (fst res)) \\
-  pop_assum (mp_tac o (CONV_RULE (LAND_CONV EVAL)) o SPEC var)) g
-end;
-
-val computer_Next_relM = Q.store_thm("computer_next_relM",
- `!n fext fextv init vs ps.
-  (* Will MP_MATCH away this afterwards, because Eval thm for processor has preconds: *)
-  vars_has_type vs ag32types ==>
-
-  ps = [prog; prog_acc] /\
-  (* Simulation step *)
-  relM (circuit addacc_next init fext n) vs /\ lift_fext fextv fext
-  ==>
-  ?vs'. mstep_commit (fextv n) (MAP (intro_cvars cvars) ps) vs = INR vs' /\
-        relM (circuit addacc_next init fext (SUC n)) vs'`,
- rewrite_tac [lift_fext_relS_fextv_fext] \\ rpt strip_tac \\ first_x_assum (qspec_then `n` assume_tac) \\
- qspecl_then [`cvars`, `fext n`, `ps`, `fextv n`, `vs`, `circuit addacc_next init fext n`, `\vs. vars_has_type vs ag32types`] mp_tac mstep_commit_lift_EvalSs \\ impl_tac
- >- (simp [] \\ rpt conj_tac
-    >- (gen_tac \\ strip_tac \\ rveq \\
-        (conj_tac >- (metis_tac [DISCH_ALL trans, trans_acc])) \\ EVAL_TAC)
-    >- EVAL_TAC
-    \\ match_mp_tac comp_idx_iter_all_idx \\ EVAL_TAC \\ rw []) \\
- strip_tac \\ simp [] \\
-
- drule_strip relM_relS \\
- drule_strip (trans |> DISCH_ALL |> REWRITE_RULE [EvalS_def] |> GEN_ALL) \\
- drule_strip (trans_acc |> DISCH_ALL |> REWRITE_RULE [EvalS_def] |> GEN_ALL) \\
-
- rw [relM_def, relM_var_def, circuit_def] \\
-
- (* TODO: Somewhat of a hack currently to handle "data_in" not written to *)
- TRY (mget_var_init_tac \\ fs [relS_def, relS_var_def] \\ NO_TAC) \\
-
- drule_strip mstep_commit_intro_cvars_no_writes \\
- disch_then (qspec_then `"data_in"` mp_tac) \\ impl_tac >- EVAL_TAC \\
-
- qpat_x_assum `prun _ _ prog = _` assume_tac \\
- drule_strip prun_same_after \\ last_x_assum (qspec_then `"data_in"` mp_tac) \\
- impl_tac >- EVAL_TAC \\ disch_then (mp_tac o GSYM) \\ simp [get_var_mget_var] \\
- fs [relS_def, relS_var_def]);
-
-(* Could move this further up *)
-val computer_def = Define `
- computer = MAP (intro_cvars cvars) [prog; prog_acc]`;
-
-val computer_Next_relM_run = Q.store_thm("computer_Next_relM_run",
- `!n fextv fext init vs.
-  vars_has_type vs ag32types /\ relM init vs /\ lift_fext fextv fext
-  ==>
-  ?vs'. mrun fextv computer vs n = INR vs' /\
-        relM (circuit addacc_next init fext n) vs'`,
- rpt strip_tac \\ match_mp_tac mstep_commit_mrun \\ qexists_tac `ag32types` \\ rpt conj_tac
- >- simp [circuit_def]
- >- simp []
- (* TODO: Not sure why match_mp_tac doesn't work here... *)
- \\ rpt strip_tac \\ drule_strip (SIMP_RULE (srw_ss()) [] computer_Next_relM) \\ simp [computer_def]);
-
-(** Lift INIT_REL_circuit to Verilog level **)
-
+(*
 (* Similar to REL, but for initial state *)
 val INIT_verilog_vars_def = Define `
  INIT_verilog_vars env <=>
@@ -134,13 +55,6 @@ val INIT_verilog_vars_def = Define `
   BOOL F (THE (ALOOKUP env "interrupt_req")) /\
 
   WORD_ARRAY WORD (\(i:word6). (0w:word32)) (THE (ALOOKUP env "R"))`;
-
-val INIT_fext_def = Define `
- INIT_fext fext <=>
- fext.io_events = [] /\
- fext.ready /\
- fext.interrupt_state = InterruptReady /\
- ~fext.interrupt_ack`;
 
 val INIT_verilog_def = Define `
  INIT_verilog fext env <=> INIT_verilog_vars env /\ INIT_fext fext`;
@@ -285,5 +199,6 @@ val INIT_REL_circuit_verilog = Q.store_thm("INIT_REL_circuit_verilog",
  drule_strip computer_Next_relM_run \\ pop_assum (qspec_then `m` strip_assume_tac) \\
 
  asm_exists_tac \\ simp [] \\ asm_exists_tac \\ simp []);
+*)
 
 val _ = export_theory ();
