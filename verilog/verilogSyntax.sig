@@ -18,8 +18,8 @@ sig
   val is_ShiftLogicalL : term -> bool
   val is_ShiftLogicalR : term -> bool
 
-  (*val is_ArrayEqual : term -> bool
-  val is_ArrayNotEqual : term -> bool*)
+  val is_ArrayEqual : term -> bool
+  val is_ArrayNotEqual : term -> bool
   val is_LessThan : term -> bool
   val is_LowerThan : term -> bool
   val is_LessThanOrEqual : term -> bool
@@ -88,6 +88,19 @@ sig
 
   (* Statements *)
 
+  val Indexing_tm : term
+  val NoIndexing_tm : term
+  val SliceIndexing_tm : term
+  val dest_Indexing : term -> term * term * term
+  val dest_NoIndexing : term -> term
+  val dest_SliceIndexing : term -> term * term * term * term
+  val is_Indexing : term -> bool
+  val is_NoIndexing : term -> bool
+  val is_SliceIndexing : term -> bool
+  val mk_Indexing : term * term * term -> term
+  val mk_NoIndexing : term -> term
+  val mk_SliceIndexing : term * term * term * term -> term
+                                   
   val Skip_tm : term
   val is_Skip : term -> bool
 

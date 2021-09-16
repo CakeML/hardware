@@ -455,7 +455,7 @@ fun hol2hardware_exp (tstate:tstate) s s' tm =
   val arg' = hol2hardware_exp tstate s s' arg
   val result = MATCH_MP Eval_exp_v2w (CONJ precond arg')
  in
-  (*check_inv_Eval_exp "v2w" tm*) result
+  ((CONV_RULE o RAND_CONV o RAND_CONV) SIZES_CONV) result
  end
 
  (* Other compound expression, e.g. state projection *)

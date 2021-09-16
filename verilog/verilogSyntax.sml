@@ -34,13 +34,11 @@ val is_ShiftLogicalL = same_const ShiftLogicalL_tm;
 val ShiftLogicalR_tm = ``ShiftLogicalR``;
 val is_ShiftLogicalR = same_const ShiftLogicalR_tm;
 
-(*
 val ArrayEqual_tm = ``ArrayEqual``;
 val is_ArrayEqual = same_const ArrayEqual_tm;
 
 val ArrayNotEqual_tm = ``ArrayNotEqual``;
 val is_ArrayNotEqual = same_const ArrayNotEqual_tm;
-*)
 
 val LessThan_tm = ``LessThan``;
 val is_LessThan = same_const LessThan_tm;
@@ -54,10 +52,8 @@ val is_LessThanOrEqual = same_const LessThanOrEqual_tm;
 val LowerThanOrEqual_tm = ``LowerThanOrEqual``;
 val is_LowerThanOrEqual = same_const LowerThanOrEqual_tm;
 
-
 val SignExtend_tm = ``SignExtend``;
 val is_SignExtend = same_const SignExtend_tm;
-
 
 val (Const_tm, mk_Const, dest_Const, is_Const) = op1 "Const"
 val (Var_tm, mk_Var, dest_Var, is_Var) = op1 "Var"
@@ -84,6 +80,10 @@ fun dest_Var_generic tm =
   failwith "Not a Var nor a InputVar";
 
 (** Statements **)
+
+val (NoIndexing_tm, mk_NoIndexing, dest_NoIndexing, is_NoIndexing) = op1 "NoIndexing"
+val (Indexing_tm, mk_Indexing, dest_Indexing, is_Indexing) = op3 "Indexing"
+val (SliceIndexing_tm, mk_SliceIndexing, dest_SliceIndexing, is_SliceIndexing) = op4 "SliceIndexing"
 
 val Skip_tm = ``Skip``;
 val is_Skip = same_const Skip_tm;

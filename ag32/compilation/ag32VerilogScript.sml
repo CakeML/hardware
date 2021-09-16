@@ -1,16 +1,15 @@
 open hardwarePreamble;
 
 open alignmentTheory alistTheory;
-open ag32MachineTheory ag32EqTheory;
+open ag32Machine2Theory (*ag32EqTheory*);
 
-open translatorLib;
+open translatorLib verilogPrintLib;
 
 val _ = new_theory "ag32Verilog";
 
 val _ = guess_lengths ();
 val _ = prefer_num ();
 
-(*
 val module_def = ag32_def;
 val abstract_fields = ["mem", "io_events", "interrupt_state"];
 val outputs = ["PC"];
@@ -19,25 +18,28 @@ val comms = ["PC", "data_out",
              "acc_arg", "acc_arg_ready",
              "acc_res", "acc_res_ready",
              "interrupt_req"];
-*)
 
-val trans_thm = module2hardware ag32_def
-                                ["mem", "io_events", "interrupt_state"]
-                                ["PC"]
-                                ["PC", "data_out",
-                                 "command", "data_addr", "data_wdata", "data_wstrb",
-                                 "acc_arg", "acc_arg_ready",
-                                 "acc_res", "acc_res_ready",
-                                 "interrupt_req"];
+val trans_thm = module2hardware module_def
+                                abstract_fields
+                                outputs
+                                comms;
 
+val verilogstr =
+ definition"ag32_v_def"
+ |> REWRITE_RULE [definition"ag32_v_seqs_def", definition"ag32_v_combs_def"]
+ |> concl
+ |> rhs
+ |> verilog_print "processor";
 
-Definition INIT_fext_def:
+print verilogstr
+
+(*Definition INIT_fext_def:
  INIT_fext fext <=>
  fext.io_events = [] /\
  fext.ready /\
  fext.interrupt_state = InterruptReady /\
  ~fext.interrupt_ack
-End
+End*)
 
 (** OLD **)
 

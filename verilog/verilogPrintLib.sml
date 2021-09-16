@@ -53,17 +53,17 @@ fun exp_print tm =
     tm |> dest_InputVar |> fromHOLstring
 
   else if is_ArrayIndex tm then let
-    val (var, is) = dest_ArrayIndex tm
+    val (var, _, is) = dest_ArrayIndex tm
     val var = dest_Var_generic var
   in
-    (fromHOLstring var) ^ (exp_print_list is)
+    (fromHOLstring var) ^ "[" ^ (exp_print is) ^ "]"
   end
 
   else if is_ArraySlice tm then let
-    val (var, is, high_bound, low_bound) = dest_ArraySlice tm
+    val (var, (*is,*) high_bound, low_bound) = dest_ArraySlice tm
     val var = dest_Var_generic var
   in
-    (fromHOLstring var) ^ (exp_print_list is) ^ "[" ^ (dest_numeral_to_string high_bound) ^ ":" ^ (dest_numeral_to_string low_bound) ^ "]"
+    (fromHOLstring var) (*^ (exp_print_list is)*) ^ "[" ^ (dest_numeral_to_string high_bound) ^ ":" ^ (dest_numeral_to_string low_bound) ^ "]"
   end
 
   else if is_ArrayConcat tm then let
@@ -177,6 +177,28 @@ end
 and exp_print_list tm =
     tm |> dest_list |> fst |> map (fn tm => "[" ^ exp_print tm ^ "]") |> String.concat;
 
+fun write_spec_print tm =
+ if is_NoIndexing tm then
+  tm |> dest_NoIndexing |> fromHOLstring
+ else if is_Indexing tm then let
+  val (var, _, index) = dest_Indexing tm
+  val var = fromHOLstring var
+ in
+  var ^ "[" ^ (exp_print index) ^ "]"
+ end else if is_SliceIndexing tm then let
+  val (var, is, n1, n2) = dest_SliceIndexing tm
+  val var = fromHOLstring var
+ in
+  var ^ (exp_print_list is) ^ "[" ^ (dest_numeral_to_string n1) ^ ":" ^ (dest_numeral_to_string n2) ^ "]"
+ end else
+  failwith ("Unknown write_spec ctor.: " ^ term_to_string tm);
+
+fun X_print print_fun tm =
+ if optionSyntax.is_none tm then
+  "'x"
+ else
+  tm |> optionSyntax.dest_some |> print_fun;
+
 fun vprog_print tm =
   if is_Skip tm then
     failwith "Cannot translate Skip"
@@ -203,13 +225,16 @@ fun vprog_print tm =
   end
 
   else if is_Case tm then let
-    val (ctm, cases, def) = dest_Case tm
+    val (_, ctm, cases, def) = dest_Case tm
     val ctm = exp_print ctm
     val cases = cases |> dest_list |> fst |> map vprog_cases_print |> String.concat
     val def = if is_some def then let
                 val def = dest_some def
               in
-                "default : " ^ (vprog_print_paren def)
+                if is_Skip def then
+                  ""
+                else
+                  "default : " ^ (vprog_print_paren def)
               end else if is_none def then
                 ""
               else
@@ -220,16 +245,16 @@ fun vprog_print tm =
 
   else if is_BlockingAssign tm then let
     val (lhs, rhs) = dest_BlockingAssign tm
-    val lhs = exp_print lhs
-    val rhs = exp_print rhs
+    val lhs = write_spec_print lhs
+    val rhs = X_print exp_print rhs
   in
     lhs ^ " = " ^ rhs ^ ";\n"
   end
 
   else if is_NonBlockingAssign tm then let
     val (lhs, rhs) = dest_NonBlockingAssign tm
-    val lhs = exp_print lhs
-    val rhs = exp_print rhs
+    val lhs = write_spec_print lhs
+    val rhs = X_print exp_print rhs
   in
     lhs ^ " <= " ^ rhs ^ ";\n"
   end
@@ -252,7 +277,55 @@ in
   exp ^ " : " ^ prg
 end;
 
-fun type2vertype tm =
+fun verilog_print modulename tm = let
+ val (ty, fields) = TypeBase.dest_record tm
+ val _ = assert (fn _ => (ty |> dest_type |> fst) = "module") ty
+
+ val exts = lookup "fextty" fields |> listSyntax.dest_list |> fst |> map pairSyntax.dest_pair
+in
+  "`timescale 1ns / 1ps\n" ^
+  "\n" ^
+  "module " ^ modulename ^ "(\n" ^
+  "  input clk,\n" ^
+(*(TypeBase.fields_of state_ty
+   |> filter (fn (var, _) => mem var input_vars)
+   |> map (fn p => "  input " ^ print_interface_var p ^ ",\n")
+   |> String.concat) ^
+
+  (TypeBase.fields_of state_ty
+   |> filter (fn (var, _) => mem var output_vars)
+   |> map (fn p => "  output " ^ print_interface_var p ^ ",\n")
+   |> String.concat) ^
+
+  (TypeBase.fields_of fext_ty
+   |> filter is_fext_var
+   |> map (fn var => "  input " ^ print_fext_var var)
+   |> String.concatWith ",\n") ^*)
+  ");\n\n" ^
+
+(*(TypeBase.fields_of state_ty
+   |> filter is_internal_var
+   |> map (fn p => print_interface_var p ^ ";\n")
+   |> concat) ^*)
+
+  (lookup "combs" fields
+   |> listSyntax.dest_list |> fst
+   |> map (fn tm => "\nalways_comb begin\n" ^
+                    vprog_print tm ^
+                    "end\n")
+   |> String.concat) ^
+
+   (lookup "ffs" fields
+   |> listSyntax.dest_list |> fst
+   |> map (fn tm => "\nalways_ff @ (posedge clk) begin\n" ^
+                    vprog_print tm ^
+                    "end\n")
+   |> String.concat) ^
+  
+  "\n" ^ "endmodule\n"
+end;
+
+(*fun type2vertype tm =
   if same_const BOOL_tm tm then
     "logic"
   else if same_const WORD_tm tm then let
@@ -289,6 +362,6 @@ fun print_var var ty = let
   val ty = type2vertype ty
 in
   ty ^ " " ^ var
-end;
+end;*)
 
 end
