@@ -1240,7 +1240,7 @@ Proof
  drule_strip netlist_run_no_pseudos_populated_by_regs \\
  impl_tac >- fs [populated_by_regs_only_def] \\ strip_tac \\
  drule_strip regs_run_populated_by_regs_only \\
- impl_tac >- fs [populated_by_regs_only_def, populated_by_regs_def,
+ impl_tac >- gs [populated_by_regs_only_def, populated_by_regs_def,
                  cget_var_def, ALOOKUP_FILTER_FST, is_RegVar_def] \\ strip_tac \\
  
  drule_strip cells_run_cong \\ first_x_assum (qspec_then ‘SUC n’ strip_assume_tac) \\ rw [SF SFY_ss]

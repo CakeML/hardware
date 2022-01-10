@@ -820,7 +820,7 @@ Proof
  >- (drule_strip pruns_fbits \\ qexists_tac `n` \\ rw [] \\ fs []) \\
 
  pairarg_tac \\ rveq \\ drule_first \\ gvs [sum_bind_INR] \\
- imp_res_tac pruns_fbits \\ fs [] \\
+ imp_res_tac pruns_fbits \\ rfs [] \\
  qmatch_asmsub_rename_tac ‘init_seq_eq fbits _ n_mrun’ \\
  qmatch_asmsub_rename_tac ‘init_seq_eq (shift_seq n_mrun fbits) _ n_ffs’ \\
  qmatch_asmsub_rename_tac ‘init_seq_eq s.fbits _ n_combs’ \\
@@ -829,7 +829,7 @@ Proof
  last_x_assum (qspec_then `fbits''` mp_tac) \\
  impl_tac >- fs [init_seq_eq_def] \\ strip_tac \\ simp [] \\
 
- last_x_assum (qspec_then `shift_seq n_mrun fbits''` mp_tac) \\
+ first_x_assum (qspec_then `shift_seq n_mrun fbits''` mp_tac) \\
  impl_tac >- fs [init_seq_eq_def, shift_seq_def] \\ strip_tac \\ simp [] \\
 
  first_x_assum (qspec_then `shift_seq (n_mrun + n_ffs) fbits''` mp_tac) \\
