@@ -10,6 +10,60 @@ open verilogSyntax;
 exception UnableToTranslate of term * string;
 exception UnableToTranslateTy of hol_type * string;
 
+type allfieldinfo = { ty : hol_type, accessor : term, inner_accessor : term, fupd_key : string list, fupd : term };
+
+fun all_fields_of ty : (string * allfieldinfo) list =
+ all_fields_of' ty ty []
+
+and all_fields_of' base_ty ty accessors =
+ TypeBase.fields_of ty |> map (all_fields_of_field base_ty accessors) |> flatten
+
+and all_fields_of_field base_ty accessors (f, fd) = let
+  val accessors = (#accessor fd) :: accessors
+  val fty = #ty fd
+ in
+  if TypeBase.is_record_type fty then let
+   fun mk_K_11 tm = combinSyntax.mk_K_1 (tm, type_of tm)
+   fun try_drop_abs tm = if is_abs tm then (tm |> dest_abs |> snd) else tm
+   fun try_drop_comb tm = if is_comb tm then (tm |> dest_comb |> snd) else tm
+
+   fun comb_depth tm =
+    if is_comb tm then 1 + (tm |> dest_comb |> snd |> comb_depth) else 0
+
+   fun apply_while f condf tm =
+     if condf tm then apply_while f condf (f tm) else tm
+
+   fun new_fupt fupt accessor = let
+    (* kind of a hack, to handle nested records inside records *)
+    val s = accessor |> try_drop_abs |> apply_while (snd o dest_comb) (fn tm => (comb_depth tm) >= (length accessors))
+    val (vs, tm) = strip_abs fupt
+    val tm = list_mk_comb (#fupd fd, [mk_K_11 tm, s])
+    val tm = list_mk_abs (vs, tm)
+   in
+    tm
+   end
+
+   fun update_fupd (f, res_fd : allfieldinfo) =
+    (f, { ty = #ty res_fd,
+          accessor = #accessor res_fd,
+          inner_accessor = #inner_accessor res_fd,
+          fupd_key = (#fupd fd |> dest_const |> fst) :: #fupd_key res_fd,
+          fupd = new_fupt (#fupd res_fd) (#accessor res_fd) })
+  in
+   all_fields_of' base_ty fty accessors |> map update_fupd
+  end else let
+   val s = mk_var ("s", base_ty)
+   val ac = if length accessors = 1 then (hd accessors) else (foldr mk_comb s accessors |> curry mk_abs s)
+
+   val fupd_accessor = if length accessors = 1 then s else (dest_abs ac |> snd |> dest_comb |> snd)
+   val e = mk_var ("e", fty)
+   val fupd = list_mk_comb (#fupd fd, [combinSyntax.mk_K_1 (e, fty), fupd_accessor])
+            |> curry list_mk_abs [s, e]
+  in
+   [(f, { ty = fty, accessor = ac, inner_accessor = #accessor fd, fupd_key = [#fupd fd |> dest_const |> fst], fupd = fupd })]
+  end
+ end;
+
 (** Type predicates **)
 
 fun predicate_for_type ty =

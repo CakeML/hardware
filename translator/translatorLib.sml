@@ -8,6 +8,8 @@ open verilogTheory;
 open translatorTheory;
 open translatorCoreLib translatorExpLib translatorStmLib;
 
+open stringSyntax listSyntax;
+
 (* Test:
 open avgCircuitTheory;
 val module_def = avg_def;
@@ -25,20 +27,22 @@ val s = “s:state”
 val s' = “s':state”
 *)
 
-fun build_state_rel_var comms (field, field_data : TypeBase.rcd_fieldinfo) = let
+fun build_state_rel_var comms (field, data : allfieldinfo) = let
+ val ty = #ty data
+ val accessf = #accessor data
  val fieldHOL = fromMLstring field
- val accessf = #accessor field_data
  val pred = accessf |> type_of |> dom_rng |> snd |> predicate_for_type
 in
  if mem field comms then
-  ``state_rel_cvar hol_s hol_s' ver_s ^fieldHOL ^pred ^accessf``
+  [``state_rel_cvar hol_s hol_s' ver_s ^fieldHOL ^pred ^accessf``]
  else
-  ``state_rel_var hol_s' ver_s ^fieldHOL ^pred ^accessf``
+  [``state_rel_var hol_s' ver_s ^fieldHOL ^pred ^accessf``]
 end;
 
-fun build_module_state_rel_var (field, field_data : TypeBase.rcd_fieldinfo) = let
+fun build_module_state_rel_var (field, data : allfieldinfo) = let
+ val ty = #ty data
+ val accessf = #accessor data
  val fieldHOL = fromMLstring field
- val accessf = #accessor field_data
  val pred = accessf |> type_of |> dom_rng |> snd |> predicate_for_type
 in
   ``module_state_rel_var hol_s ver_s ^fieldHOL ^pred ^accessf``
@@ -119,6 +123,13 @@ end;
 fun build_module_rel_init module_rel init decls =
  prove(“^module_rel ^init (SND (run_decls fbits ^decls []))”, cheat (*EVAL_TAC \\ simp []*));
 
+fun dest_record_rec tm =
+ tm
+ |> TypeBase.dest_record
+ |> snd
+ |> map (fn (f, d) => if TypeBase.is_record d then dest_record_rec d else [(f, d)])
+ |> flatten;
+
 (*
 TODOs for the above (need to handle 2d arrays):
 
@@ -159,21 +170,22 @@ fun module2hardware module_def abstract_fields outputs comms = let
 
  (* TODO: Name... *)
  val state_rel_def =
- TypeBase.fields_of state_ty
+ all_fields_of state_ty
  |> map (build_state_rel_var comms)
+ |> flatten
  |> list_mk_conj
  |> (fn tm => Define `state_rel hol_s hol_s' ver_s = ^tm`);
 
  val is_state_rel_var_def =
- TypeBase.fields_of state_ty
+ all_fields_of state_ty
  |> map (fromMLstring o fst)
  |> (fn vars => listSyntax.mk_list (vars, string_ty))
  |> (fn tm => Define `is_state_rel_var var = MEM var ^tm`);
 
  (* TODO: Name... *)
  val module_state_rel_def =
- TypeBase.fields_of state_ty
- |> map (build_module_state_rel_var)
+ all_fields_of state_ty
+ |> map build_module_state_rel_var
  |> list_mk_conj
  |> (fn tm => Define `module_state_rel hol_s ver_s = ^tm`);
 
@@ -219,8 +231,8 @@ fun module2hardware module_def abstract_fields outputs comms = let
                  |> (fn l => listSyntax.mk_list (l, “:string # vertype”))
 
  val init_def = get_def theory init
- val (init, init_values) = init_def |> concl |> strip_forall |> snd |> dest_eq
- val init_values = init_values |> TypeBase.dest_record |> snd
+ val (init, init_values) = init_def |> concl |> strip_forall |> snd |> dest_eq                                   
+ val init_values = init_values |> dest_record_rec
 
  (* TODO: Must also handle let-variables... should write pass that finds them all *)
  (* Hack for now: *)

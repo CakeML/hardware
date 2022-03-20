@@ -2,13 +2,21 @@ open hardwarePreamble;
 
 open avgCircuitTheory;
 
-open translatorLib compileLib RTLPrintLib;
+open translatorLib (*compileLib RTLPrintLib*);
 
 val _ = new_theory "avgCircuitCompile";
 
 (** HOL -> Verilog **)
 
-val trans_thm = module2hardware avg_def ["avg"] ["h0", "h1", "h2", "h3"];
+(* Just to make debugging easier: *)
+local
+ val module_def = avg_def;
+ val abstract_fields = [];
+ val outputs = ["avg"];
+ val comms = ["h0", "h1", "h2", "h3"];
+in
+ val trans_thm = module2hardware avg_def abstract_fields outputs comms
+end
 
 (*
 
@@ -35,7 +43,7 @@ end
 
 (** Verilog -> netlist **)
 
-val (circuit, circuit_correct) = compile (definition "avg_v_def")
+(*val (circuit, circuit_correct) = compile (definition "avg_v_def")*)
 
 (*
 print_Circuit (circuit |> concl |> rhs) |> print
@@ -58,6 +66,7 @@ Proof
  fs [definition"module_state_rel_def", module_state_rel_var_def, sum_alookup_INR, WORD_def, avg_correct]
 QED
 
+(*
 Definition w2net_def:
  w2net w = CArray (w2v w)
 End
@@ -167,5 +176,6 @@ Proof
  first_x_assum (qspec_then ‘"avg"’ mp_tac) \\
  simp [definition"avg_v_def", definition"avg_v_decls_def", w2ver_def, w2net_def, sum_alookup_INR]
 QED
+*)
 
 val _ = export_theory ();

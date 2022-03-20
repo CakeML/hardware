@@ -133,9 +133,9 @@ QED
 
 (* "Communication" variable *)
 Definition state_rel_cvar_def:
- state_rel_cvar hol_s hol_s' ver_s var a accessf ⇔
-  (∃v. get_var ver_s var = INR v ∧ a (accessf hol_s) v) ∧
-  (∃v. get_cvar_rel ver_s var = INR v ∧ a (accessf hol_s') v)
+ state_rel_cvar hol_s hol_s' ver_s var a accessfs ⇔
+  (∃v. get_var ver_s var = INR v ∧ a (accessfs hol_s) v) ∧
+  (∃v. get_cvar_rel ver_s var = INR v ∧ a (accessfs hol_s') v)
 End
 
 Theorem state_rel_cvar_set_var:

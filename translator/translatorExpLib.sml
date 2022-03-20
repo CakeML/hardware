@@ -4,8 +4,8 @@ struct
 open hardwarePreamble;
 
 open stringSyntax bitstringSyntax;
-
-open verilogTheory verilogTypeTheory;
+open sumExtraTheory;
+open verilogTheory verilogMetaTheory verilogTypeTheory;
 
 open translatorTheory;
 open translatorCoreLib;
@@ -70,38 +70,39 @@ type tstate = { fext_ty : hol_type,
                 module_rel : term,
                 comms : string list,
                 read_thms : (term * thm) list,
-                write_thms : (string * (thm * thm option * thm option * thm)) list,
-                write_2d_thms : (string * (thm * thm)) list,
+                write_thms : (string list * (thm * thm option * thm option)) list,
+                write_2d_thms : (string list * (thm * thm)) list,
                 fext_read_thms : (term * thm) list,
                 module_rel_rel : thm,
                 rel_module_rel : thm };
 
-fun build_Eval_exp_var fext_rel_const rel_const rel comms (name, accessf) = let
- val nameHOL = fromMLstring name
- val typepred = accessf |> dest_const |> snd |> dom_rng |> snd |> predicate_for_type
-in
- if mem name comms then
-  Q.prove(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s)) (Var ^nameHOL)`,
-          rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_cvar_def])
- else
-  Q.prove(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s')) (Var ^nameHOL)`,
-          rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_var_def])
-end;
+fun build_Eval_exp_var fext_rel_const rel_const rel comms (name, accessf, ty) = let
+  val nameHOL = fromMLstring name
+  val typepred = predicate_for_type ty
+  val th =
+   if mem name comms then
+    Q.prove(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s)) (Var ^nameHOL)`,
+             rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_cvar_def])
+   else
+    Q.prove(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s')) (Var ^nameHOL)`,
+            rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_var_def])
+ in
+  CONV_RULE (TRY_CONV (STRIP_QUANT_CONV (RATOR_CONV (RAND_CONV (RAND_CONV BETA_CONV))))) th
+ end;
 
-fun build_update_stmts comms fext_rel rel field fupd facc = let
+fun build_update_stmts comms fext_rel rel field fupd facc ty = let
  val fieldHOL = fromMLstring field
- val ty = fupd |> type_of |> dom_rng |> fst |> dom_rng |> fst
  val pred = predicate_for_type ty
  val assn = if mem field comms then NonBlockingAssign_tm else BlockingAssign_tm
 in
  (``!s s' w exp.
      Eval_exp ^fext_rel ^rel fext s s' env (^pred w) exp ==>
-     Eval ^fext_rel ^rel fext s s' env (^fupd (K w) s') (^assn (NoIndexing ^fieldHOL) (SOME exp))``,
+     Eval ^fext_rel ^rel fext s s' env (^fupd s' w) (^assn (NoIndexing ^fieldHOL) (SOME exp))``,
   (if is_word_type ty then
     ``!s s' i env w exp.
        i < dimindex(:'a) /\
        Eval_exp ^fext_rel ^rel fext s s' env (BOOL w) exp ==>
-       Eval ^fext_rel ^rel fext s s' env (^fupd (K ((i :+ w) (^facc s'))) s')
+       Eval ^fext_rel ^rel fext s s' env (^fupd s' ((i :+ w) (^facc s')))
                                          (^assn (Indexing ^fieldHOL 0 (Const (n2ver i))) (SOME exp))``
    |> inst [ alpha |-> dest_word_type ty ]
    |> SOME
@@ -113,26 +114,17 @@ in
    ``!s env (w:'a word) exp hb lb.
       (dimindex(:'a) = hb + 1 - lb /\ lb <= hb /\ hb < dimindex(:'b)) /\
       Eval_exp ^fext_rel ^rel fext s s' env (WORD w) exp ==>
-      Eval ^fext_rel ^rel fext s s' env (^fupd (K (bit_field_insert hb lb w (^facc s'))) s')
+      Eval ^fext_rel ^rel fext s s' env (^fupd s' (bit_field_insert hb lb w (^facc s')))
                                         (^assn (SliceIndexing ^fieldHOL [] hb lb) (SOME exp))``
    |> inst [ beta |-> beta_size ]
    |> SOME
   end else
-   NONE),
-  ``!s s' f fv w exp.
-     Eval_exp ^fext_rel ^rel fext s s' env (^pred w) exp /\
-     Eval ^fext_rel ^rel fext s s' env f fv ==>
-     EVERY (\var. ~MEM var (vwrites fv)) (evreads exp) ==>
-     Eval ^fext_rel ^rel fext s s' env (^fupd (K w) f) (Seq fv (^assn (NoIndexing ^fieldHOL) (SOME exp)))``)
+   NONE))
 end;
 
-fun update_base_tac step_thm =
- rpt strip_tac \\ drule_strip step_thm \\ disch_then (qspecl_then [‘s'’, ‘Skip’] mp_tac) \\
- simp [Eval_Seq_Skip, Eval_Skip, vwrites_def];
-
-fun update_step_tac rel =
+fun update_base_tac rel =
  rw [EVERY_MEM, Eval_exp_def, Eval_def, prun_def] \\
- rpt drule_first \\ drule_strip update_step_lem \\
+ rpt drule_first \\
  simp [sum_bind_def, sum_for_def, sum_map_def,
        prun_assn_rhs_def, prun_bassn_def, prun_nbassn_def, assn_def] \\
  fs [rel, state_rel_var_def, state_rel_cvar_def,
@@ -149,18 +141,23 @@ fun update_base_bit_tac rel =
  simp [get_var_cleanup, get_cvar_rel_set_var_neq, get_cvar_rel_set_nbq_var, w2ver_def, v2ver_def] \\
  simp [GSYM revLUPDATE_MAP, revLUPDATE_fcp_update];
 
-fun prove_update_thms fext_rel_const rel rel_const comms (field, field_data:TypeBase.rcd_fieldinfo) = let
+fun prove_update_thms fext_rel_const rel rel_const comms (field, field_data:allfieldinfo) = let
  val fupd = #fupd field_data
  val facc = #accessor field_data
- val key = fupd |> dest_const |> fst
- val (base_stmt, base_bit_stmt, base_slice_stmt, step_stmt) =
-     build_update_stmts comms fext_rel_const rel_const field fupd facc
- val step_thm = prove (step_stmt, update_step_tac rel)
- val base_thm = prove (base_stmt, update_base_tac step_thm)
+ val key = #fupd_key field_data (*fupd |> dest_const |> fst*)
+ val (base_stmt, base_bit_stmt, base_slice_stmt) =
+     build_update_stmts comms fext_rel_const rel_const field fupd facc (#ty field_data)
+
+ val base_thm = prove (base_stmt, update_base_tac rel)
+ val base_thm = CONV_RULE (DEPTH_CONV BETA_CONV) base_thm
+
  val base_slice_thm = Option.map (fn tm => prove (tm, cheat (*update_base_slice_tac rel*))) base_slice_stmt
+ val base_slice_thm = Option.map (fn th => CONV_RULE (DEPTH_CONV BETA_CONV) th) base_slice_thm
+
  val base_bit_thm = Option.map (fn tm => prove (tm, update_base_bit_tac rel)) base_bit_stmt
+ val base_bit_thm = Option.map (fn th => CONV_RULE (DEPTH_CONV BETA_CONV) th) base_bit_thm
 in
- (key, (base_thm, base_bit_thm, base_slice_thm, step_thm))
+ (key, (base_thm, base_bit_thm, base_slice_thm))
 end;
 
 fun build_update_stmts_2d comms fext_rel_const rel_const field fupd facc = let
@@ -222,7 +219,7 @@ fun update_base_slice_2d_tac rel field =
  cheat; (* Fix later... *)
 
 (* TODO: Step thms missing for now *)
-fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:TypeBase.rcd_fieldinfo) = let
+fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:allfieldinfo) = let
  val fupd = #fupd field_data
  val facc = #accessor field_data
  val key = fupd |> dest_const |> fst
@@ -230,7 +227,7 @@ fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:T
  val base_thm = prove (base_stmt, update_base_2d_tac rel field)
  val base_slice_thm = prove (base_slice_stmt, update_base_slice_2d_tac rel field)
 in
- (key, (base_thm, base_slice_thm))
+ ([key], (base_thm, base_slice_thm))
 end;
 
 fun build_fext_read_thms fext_rel_const rel fext_rel (name, accessf) = let
@@ -276,13 +273,13 @@ fun build_tstate fext_rel rel is_rel_var module_rel abstract_fields comms fext_t
  val module_rel_const = module_rel |> concl |> strip_forall |> snd |> lhs |> strip_comb |> fst;
  
  val var_thms =
- TypeBase.fields_of state_ty
- |> map (fn (field, field_data : TypeBase.rcd_fieldinfo) =>
-            (#accessor field_data,
-             build_Eval_exp_var fext_rel_const rel_const rel comms (field, #accessor field_data)))
+ all_fields_of state_ty
+ |> map (fn (field, data) =>
+            (#inner_accessor data,
+             build_Eval_exp_var fext_rel_const rel_const rel comms (field, #accessor data, #ty data)))
  val (update_thms_2d, update_thms) =
- TypeBase.fields_of state_ty
- |> partition (fn (_, field_data : TypeBase.rcd_fieldinfo) => (field_data |> #ty |> dest_type |> fst) = "fun");
+ all_fields_of state_ty
+ |> partition (fn (_, data) => (data |> #ty |> dest_type |> fst) = "fun");
  val update_thms =
  update_thms
  |> map (prove_update_thms fext_rel_const rel rel_const comms);
@@ -463,32 +460,31 @@ fun hol2hardware_exp (tstate:tstate) s s' tm =
   val (f, arg) = dest_comb tm
  in
   (* SUBCASE: Read of communication variable? *)
-  if identical arg s orelse identical arg s' then
    case lookup_same f (#read_thms tstate) of
-          SOME th => check_inv_Eval_exp "state-read" tm (SPECL [s, s'] th) (* TODO: Add better error checking *)
-        | NONE => raise UnableToTranslate (tm, "Unknown state projection")
+    SOME th => check_inv_Eval_exp "state-read" tm (SPECL [s, s'] th) (* TODO: Add better error checking *)
+  | NONE =>
   (* SUBCASE: External read? *)
-  else if is_var arg andalso (arg |> dest_var |> fst) = "fext" then
-   case lookup_same f (#fext_read_thms tstate) of
-          SOME result => check_inv_Eval_exp "external-read" tm (SPECL [s, s'] result)
-        | NONE => raise UnableToTranslate (tm, "Unknown fext projection")
-  (* SUBCASE: Array indexing? Just assume it is for now... TODO *)
-   else let
-    (* Strips state var as well... *)
-    val (f, args) = strip_comb tm
-    val f = mk_comb (f, hd args)
-    val args = tl args
-    val f' = hol2hardware_exp tstate s s' f
-    val args' = map (hol2hardware_exp tstate s s') args
-    val precond = LIST_CONJ (f' :: args')
-    val result = case length args' of
-                     1 => MATCH_MP Eval_exp_WORD_ARRAY_indexing precond
-                 (*| 2 => MATCH_MP Eval_WORD_ARRAY_indexing2 precond*)
-                   | _ => raise UnableToTranslate (tm, "Unsupported indexing")
-   in
-    check_inv_Eval_exp "state-read-indexing" tm result
-   end
-  (*else raise UnableToTranslate (tm, "Unknown comb case, not state projection")*)
+    if is_var arg andalso (arg |> dest_var |> fst) = "fext" then
+     case lookup_same f (#fext_read_thms tstate) of
+            SOME result => check_inv_Eval_exp "external-read" tm (SPECL [s, s'] result)
+          | NONE => raise UnableToTranslate (tm, "Unknown fext projection")
+    (* SUBCASE: Array indexing? Just assume it is for now... TODO *)
+     else let
+      (* Strips state var as well... *)
+      val (f, args) = strip_comb tm
+      val f = mk_comb (f, hd args)
+      val args = tl args
+      val f' = hol2hardware_exp tstate s s' f
+      val args' = map (hol2hardware_exp tstate s s') args
+      val precond = LIST_CONJ (f' :: args')
+      val result = case length args' of
+                       1 => MATCH_MP Eval_exp_WORD_ARRAY_indexing precond
+                   (*| 2 => MATCH_MP Eval_WORD_ARRAY_indexing2 precond*)
+                     | _ => raise UnableToTranslate (tm, "Unsupported indexing")
+     in
+      check_inv_Eval_exp "state-read-indexing" tm result
+     end
+   (*else raise UnableToTranslate (tm, "Unknown comb case, not state projection")*)
  end
 
  else raise UnableToTranslate (tm, "Unknown case");

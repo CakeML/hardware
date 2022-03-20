@@ -11,7 +11,15 @@ val _ = new_theory "avgCircuit";
 val _ = prefer_num ();
 
 Datatype:
- avg_state = <| h0 : word8; h1 : word8; h2 : word8; h3 : word8; avg : word8 |>
+ avg_state_very_inner = <| h0 : word8 |>
+End
+
+Datatype:
+ avg_state_inner = <| very_inner : avg_state_very_inner; h1 : word8 |>
+End
+
+Datatype:
+ avg_state = <| inner : avg_state_inner; h2 : word8; h3 : word8; avg : word8 |>
 End
 
 Datatype:
@@ -39,7 +47,7 @@ QED
 
 Definition avg_comb_def:
  avg_comb (fext:avg_ext_state) (s:avg_state) (s':avg_state) = let
-  s' = s' with avg := s.h0 + s.h1 + s.h2 + s.h3 in
+  s' = s' with avg := s.inner.very_inner.h0 + s.inner.h1 + s.h2 + s.h3 in
   soft_div_by_4 s'
 End
 
@@ -47,15 +55,14 @@ Theorem avg_comb_trans = REWRITE_RULE [soft_div_by_4_def] avg_comb_def;
 
 Theorem avg_comb_alt:
  avg_comb fext s s' = let 
-  s' = s' with avg := s.h0 + s.h1 + s.h2 + s.h3 in
+  s' = s' with avg := s.inner.very_inner.h0 + s.inner.h1 + s.h2 + s.h3 in
   s' with avg := s'.avg // 4w
 Proof
  rw [avg_comb_def, soft_div_by_4_correct]
 QED
 
 Theorem avg_comb_const:
- (avg_comb fext s s').h0 = s'.h0 ∧
- (avg_comb fext s s').h1 = s'.h1 ∧
+ (avg_comb fext s s').inner = s'.inner ∧
  (avg_comb fext s s').h2 = s'.h2 ∧
  (avg_comb fext s s').h3 = s'.h3
 Proof
@@ -64,13 +71,13 @@ QED
 
 Definition avg_ff_def:
  avg_ff (fext:avg_ext_state) (s:avg_state) (s':avg_state) = let
-  s' = s' with h0 := fext.signal;
-  s' = s' with h1 := s.h0;
-  s' = s' with h2 := s.h1 in
+  s' = s' with inner := (s'.inner with very_inner := (s'.inner.very_inner with h0 := fext.signal));
+  s' = s' with inner := (s'.inner with h1 := s.inner.very_inner.h0);
+  s' = s' with h2 := s.inner.h1 in
   s' with h3 := s.h2
 End
 
-val init_tm = add_x_inits “<| h0 := 0w; h1 := 0w; h2 := 0w; h3 := 0w |>”;
+val init_tm = add_x_inits “<| inner := <| very_inner := <| h0 := 0w; |>; h1 := 0w; |>; h2 := 0w; h3 := 0w |>”;
 
 Definition avg_init_def:
  avg_init fbits = ^init_tm
@@ -100,8 +107,8 @@ End
 
 Definition avg_inv_def:
  avg_inv fext n s ⇔
-  s.h0 = signal_previously fext n 1 ∧
-  s.h1 = signal_previously fext n 2 ∧
+  s.inner.very_inner.h0 = signal_previously fext n 1 ∧
+  s.inner.h1 = signal_previously fext n 2 ∧
   s.h2 = signal_previously fext n 3 ∧
   s.h3 = signal_previously fext n 4 ∧
   s.avg = avg_spec fext n
@@ -113,7 +120,7 @@ Proof
  ntac 2 gen_tac \\ Induct >- EVAL_TAC \\
  fs [avg_inv_def, avg_spec_def, avg_alt, mk_module_def, mk_circuit_def, avg_comb_const] \\
  ntac 4 (conj_asm1_tac >-
-         (rw [avg_ff_def, signal_previously_def, arithmeticTheory.ADD1] \\ fs [])) \\
+         (rw [avg_ff_def, signal_previously_def, arithmeticTheory.ADD1] \\ gs [])) \\
  simp [avg_comb_alt]
 QED
 

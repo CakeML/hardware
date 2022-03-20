@@ -293,18 +293,27 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
  end
 
  (* Must be a variable write *)
- else if is_comb tm andalso (tm |> rator |> is_comb) then let
-  val (fupd_arg, arg) = dest_comb tm
+ else if is_comb tm then let
+  (*val (fupd_arg, arg) = dest_comb tm
   val (fupd, Kval) = dest_comb fupd_arg
-  val newval = combinSyntax.dest_K_1 Kval
-  val key = fupd |> dest_const |> fst
+  val newval = combinSyntax.dest_K_1 Kval*)
+  fun build_key tm = let
+   val (f, args) = strip_comb tm
+  in
+   if is_const f andalso length args = 2 andalso combinSyntax.is_K_1 (hd args) then
+     (f |> dest_const |> fst) :: (args |> hd |> combinSyntax.dest_K_1 |> build_key)
+   else
+     []
+  end
+ 
+  val key = build_key tm
 
   fun opt_to_list NONE = []
     | opt_to_list (SOME x) = [x]
  in
   case lookup_opt key (#write_thms tstate) of
-   SOME (base_thm, base_bit_thm, base_slice_thm, step_thm) =>
-   if identical arg s' then let
+   SOME (base_thm, base_bit_thm, base_slice_thm) =>
+   (*if identical arg s' then*) let
     val th = first_PART_MATCH (Eval_get_hol_prog o snd o dest_imp)
                               (opt_to_list base_slice_thm @ opt_to_list base_bit_thm @ [base_thm])
                               tm
@@ -323,13 +332,13 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
     val result = MATCH_MP th precond
    in
     check_inv_Eval "state-base" tm result
-   end else let
+   end (*else let
     val newval' = hol2hardware_exp tstate s s' newval
     val arg' = hol2hardware' tstate s s' arg
     val result = MATCH_MP step_thm (CONJ newval' arg') |> EVAL_MP
    in
     check_inv_Eval "state-let" tm result
-   end
+   end*)
  | NONE =>
    case lookup_opt key (#write_2d_thms tstate) of
     SOME (base_thm, base_slice_thm) => let
