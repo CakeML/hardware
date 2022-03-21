@@ -138,37 +138,71 @@ end;
 *)
 
 (** Handling X values in HOL circuits **)
-
 (* Limited error-handling for now *)
-fun add_x_init filled oracle ((field, field_data : TypeBase.rcd_fieldinfo), (inits, shift)) =
- case lookup_opt field filled of
-   SOME _ => (inits, shift)
- | NONE => let
-    val ty = #ty field_data
-    val fupd = #fupd field_data
-    val (tname, _) = dest_type ty
-   in
-    if tname = "bool" then
-     (mk_comb (fupd, combinSyntax.mk_K_1(mk_comb(oracle, term_of_int shift), ty)) :: inits, shift + 1)
-    else if is_word_type ty then let
-     val n = ty |> dest_word_type |> dest_numeric_type
-     val ggenlist_tm = “ggenlist”
-     val v = bitstringSyntax.mk_v2w (list_mk_icomb(ggenlist_tm, [oracle, term_of_int shift, mk_numeral n]),
-                                    dest_word_type ty)
-     val inits' = mk_comb (fupd, combinSyntax.mk_K_1(v, ty)) :: inits
-    in
-     (inits', shift + Arbnumcore.toInt n)
-    end else
-     raise UnableToTranslateTy (ty, "unknown type")
-   end;
+
+datatype rec_hol_record = HOLRecord of string * hol_type * (rec_hol_record list) | HOLRecordField of string * hol_type * (term option);
+
+fun rec_dest_record_field filled_fields (f, f_data) = let
+ val prevval = lookup_opt f filled_fields
+ val ty = #ty f_data
+in
+ if TypeBase.is_record_type ty then let
+  val filled_fields = case prevval of
+                        NONE => []
+                      | SOME tm => tm |> TypeBase.dest_record |> snd
+  val allfields = TypeBase.fields_of ty
+ in
+  HOLRecord (f, ty, map (rec_dest_record_field filled_fields) allfields)
+ end else
+  HOLRecordField (f, ty, prevval)
+end;
+
+fun rec_dest_record tm : rec_hol_record = let
+ val (ty, filled_fields) = TypeBase.dest_record tm
+ val allfields = TypeBase.fields_of ty
+in
+ HOLRecord ("", ty, map (rec_dest_record_field filled_fields) allfields)
+end;
+
+fun rec_mk_record r =
+ case r of
+   HOLRecord (field, ty, rr) => [(field, TypeBase.mk_record (ty, rr |> map rec_mk_record |> flatten))]
+ | HOLRecordField (field, ty, v) => (case v of NONE => [] | SOME tm => [(field, tm)]);
+
+fun rec_record_map f r =
+ case r of
+   HOLRecord (field, ty, rr) => HOLRecord (field, ty, map (rec_record_map f) rr)
+ | HOLRecordField (field, ty, v) => HOLRecordField (field, ty, f ty v);
 
 fun add_x_inits det_values = let
+ val shift = ref 0
+
+ fun add_x_init oracle ty v =
+  case v of
+    SOME tm => SOME tm
+  | NONE => SOME (
+     if ty = bool then let
+      val shift_old = !shift;
+      val _ = (shift := shift_old + 1)
+     in
+      mk_comb (oracle, term_of_int shift_old)
+     end else if is_word_type ty then let
+      val n = ty |> dest_word_type |> dest_numeric_type
+      val ggenlist_tm = mk_const ("ggenlist", “:(num -> α) -> num -> num -> α list”)
+      val shift_old = !shift;
+      val _ = (shift := shift_old + (Arbnumcore.toInt n))
+     in
+      bitstringSyntax.mk_v2w (list_mk_icomb (ggenlist_tm, [oracle, term_of_int shift_old, mk_numeral n]),
+                              dest_word_type ty)
+     end else
+      raise UnableToTranslateTy (ty, "unknown/unsupported type"))
+
  val oracle = mk_var("fbits", “:num -> bool”)
- val (state_ty, filled) = TypeBase.dest_record det_values
- (* We do this in two steps to get oracle reads in the right order: *)
- val inits = TypeBase.fields_of state_ty |> foldl (add_x_init filled oracle) ([], 0) |> fst
+ val r = rec_dest_record tm
+ val r = rec_record_map (add_x_init oracle) r
+ val r = r |> rec_mk_record |> hd |> snd
 in
- foldl (fn (init, tm) => mk_comb(init, tm)) det_values inits
+ r
 end;
 
 end
