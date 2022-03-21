@@ -25,26 +25,27 @@ val dest_numeral_to_string = Arbnumcore.toString o dest_numeral;
 fun op_to_string print_tm op_tm = mk_comb (print_tm, op_tm) |> EVAL |> concl |> rhs |> fromHOLstring;
 fun op_to_string_space print_tm op_tm = " " ^ (op_to_string print_tm op_tm) ^ " ";
 
+fun dest_bool tm =
+ if same_const tm T then
+  true
+ else if same_const tm F then
+  false
+ else
+  failwith $ "Unknown bool: " ^ (term_to_string tm);
+
+fun const_print tm =
+ if is_w2ver tm then
+  w2ver_print tm
+ else if is_VBool tm then
+  if (tm |> dest_VBool |> dest_bool) then "1" else "0"
+ else if is_n2ver tm then
+  tm |> dest_n2ver |> dest_numeral |> Arbnumcore.toString (* TODO: Width here? *)
+ else
+  failwith ("Unknown constant type: " ^ term_to_string tm);
+
 fun exp_print tm =
-  if is_Const tm then let
-    val tm = dest_Const tm
-  in
-    if is_w2ver tm then
-      w2ver_print tm
-    else if is_VBool tm then let
-      val tm = dest_VBool tm
-    in
-      if same_const T tm then
-        "1"
-      else if same_const F tm then
-        "0"
-      else
-        failwith "Not a constant bool"
-    end else if is_n2ver tm then
-      tm |> dest_n2ver |> dest_numeral |> Arbnumcore.toString (* TODO: Width here? *)
-    else
-      failwith ("Unknown constant type: " ^ term_to_string tm)
-  end
+  if is_Const tm then
+   tm |> dest_Const |> const_print
 
   else if is_Var tm then
     tm |> dest_Var |> fromHOLstring
@@ -206,7 +207,7 @@ fun vprog_print tm =
   else if is_Seq tm then let
     val (tm1, tm2) = dest_Seq tm
   in
-    (vprog_print tm1) ^ (vprog_print tm2)
+    (vprog_print tm1) ^ (if is_Skip tm2 then "" else vprog_print tm2)
   end
 
   (* NOTE: If false-branch is Skip, then we do not output anything for that branch *)
@@ -277,36 +278,84 @@ in
   exp ^ " : " ^ prg
 end;
 
+(*fun vtype_print tm =
+ if is_VBool_t tm then
+  "logic"
+ else if same_const WORD_tm tm then let
+  val size = tm |> type_of |> dom_rng |> fst |> dest_word_type
+                |> fcpSyntax.dest_numeric_type |> Arbnumcore.less1 |> Arbnumcore.toString
+ in
+  "logic[" ^ size ^ ":0]"
+ end else if is_comb tm andalso same_const (rator tm) WORD_ARRAY_tm then let
+  (* Sanity check for now: *)
+  val () = if same_const WORD_tm (rand tm) then () else failwith "expected WORD"
+  val (size1, size2) = tm |> type_of |> dom_rng |> fst |> dom_rng |> list_of_pair
+                          |> map (fcpSyntax.dest_numeric_type o
+                                  dest_word_type)
+                          |> pair_of_list
+  val size1 = Arbnumcore.toString (Arbnumcore.less1 (Arbnumcore.pow (Arbnumcore.two, size1)))
+  val size2 = Arbnumcore.toString (Arbnumcore.less1 size2)
+  in
+    "logic[" ^ size1 ^ ":0][" ^ size2 ^ ":0]"
+  end else
+    failwith "Unknown type";*)
+
+fun vtype_print tm =
+ if is_VBool_t tm then
+  "logic"
+ else if is_VArray_t tm then let
+  val dim = dest_VArray_t tm |> dest_numeral |> Arbnumcore.less1
+ in
+  (* TODO: Check printing order... *)
+  "logic" ^ "[" ^ (Arbnumcore.toString dim) ^ ":0]"
+ end else
+  failwith $ "Unknown type: " ^ (term_to_string tm);
+
+(* else if is_VArray_t tm then let
+  val dims = dest_VArray_t tm |> map (Arbnumcore.less1 o dest_numeral)
+ in
+  (* TODO: Check printing order... *)
+  "logic" ^ ((map (fn n => "[" ^ (Arbnumcore.toString n) ^ ":0]") dims) |> concat)*)
+
+fun fext_print var ty =
+ "input " ^ (vtype_print ty) ^ " " ^ (fromHOLstring var);
+
+fun decl_print var data = let
+ val ty = lookup "type" data |> vtype_print
+ val init = lookup "init" data |> X_print const_print
+in
+ ty ^ " " ^ var ^ " = " ^ init
+end;
+
 fun verilog_print modulename tm = let
  val (ty, fields) = TypeBase.dest_record tm
  val _ = assert (fn _ => (ty |> dest_type |> fst) = "module") ty
-
- val exts = lookup "fextty" fields |> listSyntax.dest_list |> fst |> map pairSyntax.dest_pair
+ val (exts, ints) =
+  lookup "decls" fields
+  |> dest_list |> fst
+  |> map dest_pair
+  |> map (fn (f, d) => (f |> fromHOLstring, d |> TypeBase.dest_record |> snd))
+  |> partition (fn (f, d) => lookup "output" d |> dest_bool)
 in
   "`timescale 1ns / 1ps\n" ^
   "\n" ^
   "module " ^ modulename ^ "(\n" ^
   "  input clk,\n" ^
-(*(TypeBase.fields_of state_ty
-   |> filter (fn (var, _) => mem var input_vars)
-   |> map (fn p => "  input " ^ print_interface_var p ^ ",\n")
+
+  (lookup "fextty" fields
+   |> dest_list |> fst
+   |> map dest_pair
+   |> map (fn (f, d) => "  " ^ fext_print f d ^ ",\n")
    |> String.concat) ^
 
-  (TypeBase.fields_of state_ty
-   |> filter (fn (var, _) => mem var output_vars)
-   |> map (fn p => "  output " ^ print_interface_var p ^ ",\n")
+  (exts
+   |> map (fn (f, d) => "  output " ^ decl_print f d)
+   |> String.concatWith ",\n") ^
+  "\n);\n\n" ^
+
+  (ints
+   |> map (fn (f, d) => decl_print f d ^ ";\n")
    |> String.concat) ^
-
-  (TypeBase.fields_of fext_ty
-   |> filter is_fext_var
-   |> map (fn var => "  input " ^ print_fext_var var)
-   |> String.concatWith ",\n") ^*)
-  ");\n\n" ^
-
-(*(TypeBase.fields_of state_ty
-   |> filter is_internal_var
-   |> map (fn p => print_interface_var p ^ ";\n")
-   |> concat) ^*)
 
   (lookup "combs" fields
    |> listSyntax.dest_list |> fst
@@ -321,47 +370,8 @@ in
                     vprog_print tm ^
                     "end\n")
    |> String.concat) ^
-  
+
   "\n" ^ "endmodule\n"
 end;
-
-(*fun type2vertype tm =
-  if same_const BOOL_tm tm then
-    "logic"
-  else if same_const WORD_tm tm then let
-    val size = tm |> type_of |> dom_rng |> fst |> dest_word_type
-                  |> fcpSyntax.dest_numeric_type |> Arbnumcore.less1 |> Arbnumcore.toString
-  in
-    "logic[" ^ size ^ ":0]"
-  end else if is_comb tm andalso same_const (rator tm) WORD_ARRAY_tm then let
-    (* Sanity check for now: *)
-    val () = if same_const WORD_tm (rand tm) then () else failwith "expected WORD"
-    val (size1, size2) = tm |> type_of |> dom_rng |> fst |> dom_rng |> list_of_pair
-                            |> map (fcpSyntax.dest_numeric_type o
-                                    dest_word_type)
-                            |> pair_of_list
-    val size1 = Arbnumcore.toString (Arbnumcore.less1 (Arbnumcore.pow (Arbnumcore.two, size1)))
-    val size2 = Arbnumcore.toString (Arbnumcore.less1 size2)
-  in
-    "logic[" ^ size1 ^ ":0][" ^ size2 ^ ":0]"
-  end else
-    failwith "Unknown type";
-
-fun newtype2vertype tm =
-  if is_VBool_t tm then
-    "logic"
-  else if is_VArray_t tm then let
-    val dims = dest_VArray_t tm |> map (Arbnumcore.less1 o dest_numeral)
-  in
-    (* TODO: Check printing order... *)
-    "logic" ^ ((map (fn n => "[" ^ (Arbnumcore.toString n) ^ ":0]") dims) |> concat)
-  end else
-    failwith "Unknown type: " ^ (term_to_string tm);
-
-fun print_var var ty = let
-  val ty = type2vertype ty
-in
-  ty ^ " " ^ var
-end;*)
 
 end

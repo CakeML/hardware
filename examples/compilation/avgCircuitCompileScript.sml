@@ -2,7 +2,7 @@ open hardwarePreamble;
 
 open avgCircuitTheory;
 
-open translatorLib (*compileLib RTLPrintLib*);
+open translatorLib verilogPrintLib (*compileLib RTLPrintLib*);
 
 val _ = new_theory "avgCircuitCompile";
 
@@ -15,8 +15,21 @@ local
  val outputs = ["avg"];
  val comms = ["h0", "h1", "h2", "h3"];
 in
- val trans_thm = module2hardware avg_def abstract_fields outputs comms
+ val trans_thm = module2hardware_old avg_def abstract_fields outputs comms
 end
+
+val verilogstr =
+ definition"avg_v_def"
+ |> REWRITE_RULE [definition"avg_v_seqs_def", definition"avg_v_combs_def", definition"avg_v_decls_def"]
+ |> concl
+ |> rhs
+ |> verilog_print "avg";
+
+(*
+
+print verilogstr;
+
+*)
 
 (*
 

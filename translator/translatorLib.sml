@@ -267,4 +267,11 @@ in
  th
 end;
 
+(* Old API for backward comp: *)
+fun module2hardware_old module_def abstract_fields outputs comms = let
+ val tstate = init_translator module_def abstract_fields comms
+in
+ module2hardware tstate module_def abstract_fields outputs comms
+end
+
 end
