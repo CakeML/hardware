@@ -90,20 +90,20 @@ fun build_Eval_exp_var fext_rel_const rel_const rel comms (name, accessf, ty) = 
   CONV_RULE (TRY_CONV (STRIP_QUANT_CONV (RATOR_CONV (RAND_CONV (RAND_CONV BETA_CONV))))) th
  end;
 
-fun build_update_stmts comms fext_rel rel field fupd facc ty = let
+fun build_update_stmts comms fext_rel_const rel_const field fupd facc ty = let
  val fieldHOL = fromMLstring field
  val pred = predicate_for_type ty
  val assn = if mem field comms then NonBlockingAssign_tm else BlockingAssign_tm
 in
  (``!s s' w exp.
-     Eval_exp ^fext_rel ^rel fext s s' env (^pred w) exp ==>
-     Eval ^fext_rel ^rel fext s s' env (^fupd s' w) (^assn (NoIndexing ^fieldHOL) (SOME exp))``,
+     Eval_exp ^fext_rel_const ^rel_const fext s s' env (^pred w) exp ==>
+     Eval ^fext_rel_const ^rel_const fext s s' env (^fupd s' w) (^assn (NoIndexing ^fieldHOL) (SOME exp))``,
   (if is_word_type ty then
     ``!s s' i env w exp.
        i < dimindex(:'a) /\
-       Eval_exp ^fext_rel ^rel fext s s' env (BOOL w) exp ==>
-       Eval ^fext_rel ^rel fext s s' env (^fupd s' ((i :+ w) (^facc s')))
-                                         (^assn (Indexing ^fieldHOL 0 (Const (n2ver i))) (SOME exp))``
+       Eval_exp ^fext_rel_const ^rel_const fext s s' env (BOOL w) exp ==>
+       Eval ^fext_rel_const ^rel_const fext s s' env (^fupd s' ((i :+ w) (^facc s')))
+                                                     (^assn (Indexing ^fieldHOL 0 (Const (n2ver i))) (SOME exp))``
    |> inst [ alpha |-> dest_word_type ty ]
    |> SOME
   else
@@ -113,9 +113,9 @@ in
    in
    ``!s env (w:'a word) exp hb lb.
       (dimindex(:'a) = hb + 1 - lb /\ lb <= hb /\ hb < dimindex(:'b)) /\
-      Eval_exp ^fext_rel ^rel fext s s' env (WORD w) exp ==>
-      Eval ^fext_rel ^rel fext s s' env (^fupd s' (bit_field_insert hb lb w (^facc s')))
-                                        (^assn (SliceIndexing ^fieldHOL [] hb lb) (SOME exp))``
+      Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD w) exp ==>
+      Eval ^fext_rel_const ^rel_const fext s s' env (^fupd s' (bit_field_insert hb lb w (^facc s')))
+                                                    (^assn (SliceIndexing ^fieldHOL [] hb lb) (SOME exp))``
    |> inst [ beta |-> beta_size ]
    |> SOME
   end else
@@ -133,18 +133,20 @@ fun update_base_tac rel =
 fun update_base_bit_tac rel =
  rw [Eval_exp_def, Eval_def, prun_def] \\
  drule_first \\
- fs [rel, state_rel_var_def, state_rel_cvar_def, WORD_def, BOOL_def] \\ rveq \\
+ qpat_x_assum ‘state_rel _ _ _’ (strip_assume_tac o (SIMP_RULE (srw_ss()) [rel])) \\
+ fs [state_rel_var_def, state_rel_cvar_def, WORD_def, BOOL_def] \\ rveq \\
  simp [sum_bind_def, sum_map_def, sum_for_def, prun_assn_rhs_def, prun_bassn_def, prun_nbassn_def, assn_def,
        erun_def, ver2n_n2ver, GSYM get_cvar_rel_get_use_nbq_var, get_use_nbq_var_F,
        w2ver_def, v2ver_def, get_VArray_data_def, get_VBool_data_def] \\
  dep_rewrite.DEP_REWRITE_TAC [prun_set_var_index_ok_idx] \\ simp [bitstringTheory.length_w2v, sum_map_def] \\
+ simp [rel, state_rel_var_def, state_rel_cvar_def, WORD_def, BOOL_def] \\
  simp [get_var_cleanup, get_cvar_rel_set_var_neq, get_cvar_rel_set_nbq_var, w2ver_def, v2ver_def] \\
  simp [GSYM revLUPDATE_MAP, revLUPDATE_fcp_update];
 
 fun prove_update_thms fext_rel_const rel rel_const comms (field, field_data:allfieldinfo) = let
  val fupd = #fupd field_data
  val facc = #accessor field_data
- val key = #fupd_key field_data (*fupd |> dest_const |> fst*)
+ val key = #fupd_key field_data
  val (base_stmt, base_bit_stmt, base_slice_stmt) =
      build_update_stmts comms fext_rel_const rel_const field fupd facc (#ty field_data)
 
@@ -160,10 +162,10 @@ in
  (key, (base_thm, base_bit_thm, base_slice_thm))
 end;
 
-fun build_update_stmts_2d comms fext_rel_const rel_const field fupd facc = let
+(* todo: this will not work properly for nested 2d arrays *)
+fun build_update_stmts_2d comms fext_rel_const rel_const field fupd facc ty = let
  val fieldHOL = fromMLstring field
- val ty = fupd |> type_of |> dom_rng |> fst |> dom_rng |> fst
- val state_ty = fupd |> type_of |> dom_rng |> snd |> dom_rng |> fst
+ val state_ty = facc |> type_of |> dom_rng |> fst
  val pred = predicate_for_type ty
  val (prev_s, assn) = if mem field comms then
                        (mk_var ("s", state_ty), NonBlockingAssign_tm)
@@ -176,14 +178,14 @@ in
     T /\
     (Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD i) ie /\
     Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD v) ve) ==>
-    Eval ^fext_rel_const ^rel_const fext s s' env (^fupd (K ((i =+ v) (^facc ^prev_s))) s')
+    Eval ^fext_rel_const ^rel_const fext s s' env (^fupd s' ((i =+ v) (^facc ^prev_s)))
                                                   (^assn (Indexing ^fieldHOL 0 ie) (SOME ve))``,
   ``!s s' i ie (v:'a word) ve hb lb.
      (dimindex(:'a) = hb + 1 − lb /\ lb <= hb /\ hb < dimindex(:'b)) /\
      (Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD i) ie /\
       Eval_exp ^fext_rel_const ^rel_const fext s s' env (WORD v) ve) ==>
      Eval ^fext_rel_const ^rel_const fext s s' env
-          (^fupd (K ((i =+ bit_field_insert hb lb v (^facc ^prev_s i)) (^facc ^prev_s))) s')
+          (^fupd s' ((i =+ bit_field_insert hb lb v (^facc ^prev_s i)) (^facc ^prev_s)))
           (^assn (SliceIndexing ^fieldHOL [ie] hb lb) (SOME ve))``
  |> inst [ beta |-> el_size ])
 end;
@@ -222,12 +224,12 @@ fun update_base_slice_2d_tac rel field =
 fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:allfieldinfo) = let
  val fupd = #fupd field_data
  val facc = #accessor field_data
- val key = fupd |> dest_const |> fst
- val (base_stmt, base_slice_stmt) = build_update_stmts_2d comms fext_rel_const rel_const field fupd facc
+ val key = #fupd_key field_data
+ val (base_stmt, base_slice_stmt) = build_update_stmts_2d comms fext_rel_const rel_const field fupd facc (#ty field_data)
  val base_thm = prove (base_stmt, update_base_2d_tac rel field)
  val base_slice_thm = prove (base_slice_stmt, update_base_slice_2d_tac rel field)
 in
- ([key], (base_thm, base_slice_thm))
+ (key, (base_thm, base_slice_thm))
 end;
 
 fun build_fext_read_thms fext_rel_const rel fext_rel (name, accessf) = let
@@ -258,6 +260,15 @@ fun prove_rel_var_inv rel rel_const is_rel_var is_rel_var_const =
        ^rel_const s s' (ver_s with vars := (var, v)::env) = ^rel_const s s' (ver_s with vars := env)”,
        simp [rel, is_rel_var, state_rel_var_set_var, state_rel_cvar_set_var]);
 
+(* map with logging *)
+fun map_fields f l = let
+ val len = length l
+in                  
+ mapi (fn i => fn (field, data) =>
+          (print $ field ^ " (" ^ (Int.toString (i + 1)) ^ "/" ^ (Int.toString len) ^ ")... ";
+           f (field, data))) l
+end;
+
 (* rel and rel_comb should be full defs
 
 Debugging:
@@ -271,21 +282,32 @@ fun build_tstate fext_rel rel is_rel_var module_rel abstract_fields comms fext_t
  val rel_const = rel |> concl |> strip_forall |> snd |> lhs |> strip_comb |> fst;
  val is_rel_var_const = is_rel_var |> concl |> strip_forall |> snd |> lhs |> strip_comb |> fst;
  val module_rel_const = module_rel |> concl |> strip_forall |> snd |> lhs |> strip_comb |> fst;
- 
+
+ val _ = print "Building selection thms... ";
  val var_thms =
  all_fields_of state_ty
- |> map (fn (field, data) =>
-            (#inner_accessor data,
-             build_Eval_exp_var fext_rel_const rel_const rel comms (field, #accessor data, #ty data)))
+ |> map_fields (fn (field, data) =>
+                 (#inner_accessor data,
+                  build_Eval_exp_var fext_rel_const rel_const rel comms (field, #accessor data, #ty data)))
+ 
  val (update_thms_2d, update_thms) =
  all_fields_of state_ty
  |> partition (fn (_, data) => (data |> #ty |> dest_type |> fst) = "fun");
+
+ val _ = print "\n";
+ val _ = print "Building update thms... ";
  val update_thms =
  update_thms
- |> map (prove_update_thms fext_rel_const rel rel_const comms);
+ |> map_fields (prove_update_thms fext_rel_const rel rel_const comms);
+
+ val _ = print "\n";
+ val _ = print "Building 2D update thms... ";
  val update_thms_2d =
  update_thms_2d
- |> map (prove_update_thms_2d fext_rel_const rel rel_const comms);
+ |> map_fields (prove_update_thms_2d fext_rel_const rel rel_const comms);
+
+ val _ = print "\n";
+ val _ = print "Building everything else... ";
  val fext_read_thms =
  TypeBase.fields_of fext_ty
  |> filter (fn (f, _) => not (mem f abstract_fields))

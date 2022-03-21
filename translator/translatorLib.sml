@@ -144,29 +144,12 @@ rw [module_state_rel_def, module_state_rel_var_def] \\
 TRY (EVAL_TAC \\ simp [] \\ NO_TAC)
 EVAL_TAC \\ simp []*)
 
-(*
-module_def = expected input format: name = mk_cirucit (procs seqs) (procs combs) init
-abstract_fields = fields of fext only used for "abstract" modeling, i.e. never read or written to by circuit directly (used e.g. to model state machines outside of the circuit)
-outputs = outputs of circuit
-comms = variables that should be written to nonblockingly
-*)
-fun module2hardware module_def abstract_fields outputs comms = let
+fun init_translator module_def abstract_fields comms = let
  val (module, def) = module_def |> concl |> dest_eq
- val module_name = module |> dest_const |> fst
-
- fun new_module_definition name tm = let
-  val name = concat $ module_name :: (if name = "" then ["_v"] else ["_v_", name])
-  val def = new_definition(name ^ "_def", mk_icomb(mk_comb(equality, mk_var(name, alpha)), tm))
-  val _ = computeLib.add_funs [def]
- in
-  def
- end
-
- val theory = module |> dest_thy_const |> #Thy
  val state_ty = module |> dest_const |> snd |> dom_rng |> snd |> dom_rng |> snd |> dom_rng |> snd
  val fext_ty = module |> dest_const |> snd |> dom_rng |> fst |> dom_rng |> snd
 
- (* Build tstate... *)
+  (* Build tstate... *)
 
  (* TODO: Name... *)
  val state_rel_def =
@@ -209,6 +192,31 @@ fun module2hardware module_def abstract_fields outputs comms = let
  |> (fn tm => Define `fextv_rel fextv fext = ^tm`);
 
  val tstate = build_tstate fextv_rel_def state_rel_def is_state_rel_var_def module_state_rel_def abstract_fields comms fext_ty state_ty
+in
+ tstate
+end;
+
+(*
+module_def = expected input format: name = mk_cirucit (procs seqs) (procs combs) init
+abstract_fields = fields of fext only used for "abstract" modeling, i.e. never read or written to by circuit directly (used e.g. to model state machines outside of the circuit)
+outputs = outputs of circuit
+comms = variables that should be written to nonblockingly
+*)
+fun module2hardware tstate module_def abstract_fields outputs comms = let
+ val (module, def) = module_def |> concl |> dest_eq
+ val module_name = module |> dest_const |> fst
+
+ fun new_module_definition name tm = let
+  val name = concat $ module_name :: (if name = "" then ["_v"] else ["_v_", name])
+  val def = new_definition(name ^ "_def", mk_icomb(mk_comb(equality, mk_var(name, alpha)), tm))
+  val _ = computeLib.add_funs [def]
+ in
+  def
+ end
+
+ val theory = module |> dest_thy_const |> #Thy
+ val state_ty = module |> dest_const |> snd |> dom_rng |> snd |> dom_rng |> snd |> dom_rng |> snd
+ val fext_ty = module |> dest_const |> snd |> dom_rng |> fst |> dom_rng |> snd
 
  (* Build the Verilog module... *)
 
