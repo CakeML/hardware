@@ -227,7 +227,9 @@ fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:a
  val key = #fupd_key field_data
  val (base_stmt, base_slice_stmt) = build_update_stmts_2d comms fext_rel_const rel_const field fupd facc (#ty field_data)
  val base_thm = prove (base_stmt, update_base_2d_tac rel field)
+ val base_thm = CONV_RULE (DEPTH_CONV BETA_CONV) base_thm
  val base_slice_thm = prove (base_slice_stmt, update_base_slice_2d_tac rel field)
+ val base_slice_thm = CONV_RULE (DEPTH_CONV BETA_CONV) base_slice_thm
 in
  (key, (base_thm, base_slice_thm))
 end;

@@ -36,6 +36,9 @@ fun dest_bool tm =
 fun const_print tm =
  if is_w2ver tm then
   w2ver_print tm
+ (* Note: maybe we should be more precise in what we print here? *)
+ else if is_build_zero tm then
+  "'0"
  else if is_VBool tm then
   if (tm |> dest_VBool |> dest_bool) then "1" else "0"
  else if is_n2ver tm then
@@ -278,53 +281,31 @@ in
   exp ^ " : " ^ prg
 end;
 
-(*fun vtype_print tm =
- if is_VBool_t tm then
-  "logic"
- else if same_const WORD_tm tm then let
-  val size = tm |> type_of |> dom_rng |> fst |> dest_word_type
-                |> fcpSyntax.dest_numeric_type |> Arbnumcore.less1 |> Arbnumcore.toString
+fun var_print name ttm =
+ if is_VBool_t ttm then
+  "logic " ^ name 
+ else if is_VArray_t ttm then let
+  val dim = dest_VArray_t ttm |> dest_numeral |> Arbnumcore.less1
  in
-  "logic[" ^ size ^ ":0]"
- end else if is_comb tm andalso same_const (rator tm) WORD_ARRAY_tm then let
-  (* Sanity check for now: *)
-  val () = if same_const WORD_tm (rand tm) then () else failwith "expected WORD"
-  val (size1, size2) = tm |> type_of |> dom_rng |> fst |> dom_rng |> list_of_pair
-                          |> map (fcpSyntax.dest_numeric_type o
-                                  dest_word_type)
-                          |> pair_of_list
-  val size1 = Arbnumcore.toString (Arbnumcore.less1 (Arbnumcore.pow (Arbnumcore.two, size1)))
-  val size2 = Arbnumcore.toString (Arbnumcore.less1 size2)
-  in
-    "logic[" ^ size1 ^ ":0][" ^ size2 ^ ":0]"
-  end else
-    failwith "Unknown type";*)
-
-fun vtype_print tm =
- if is_VBool_t tm then
-  "logic"
- else if is_VArray_t tm then let
-  val dim = dest_VArray_t tm |> dest_numeral |> Arbnumcore.less1
+  "logic[" ^ (Arbnumcore.toString dim) ^ ":0] " ^ name
+ end else if is_VArray2_t ttm then let
+  val (dim1, dim2) = dest_VArray2_t ttm
+  val dim1 = dim1 |> dest_numeral |> Arbnumcore.less1
+  val dim2 = dim2 |> dest_numeral |> Arbnumcore.less1
  in
-  (* TODO: Check printing order... *)
-  "logic" ^ "[" ^ (Arbnumcore.toString dim) ^ ":0]"
+  (* Should really have a choice here, but right not we print to unpacked arrays unconditionally *)
+  "logic[" ^ (Arbnumcore.toString dim2) ^ ":0] " ^ name ^ "[" ^ (Arbnumcore.toString dim1) ^ ":0]"
  end else
-  failwith $ "Unknown type: " ^ (term_to_string tm);
-
-(* else if is_VArray_t tm then let
-  val dims = dest_VArray_t tm |> map (Arbnumcore.less1 o dest_numeral)
- in
-  (* TODO: Check printing order... *)
-  "logic" ^ ((map (fn n => "[" ^ (Arbnumcore.toString n) ^ ":0]") dims) |> concat)*)
+  failwith $ "Unknown type: " ^ (term_to_string ttm);
 
 fun fext_print var ty =
- "input " ^ (vtype_print ty) ^ " " ^ (fromHOLstring var);
+ "input " ^ (var_print (fromHOLstring var) ty);
 
 fun decl_print var data = let
- val ty = lookup "type" data |> vtype_print
+ val ty = lookup "type" data |> var_print var
  val init = lookup "init" data |> X_print const_print
 in
- ty ^ " " ^ var ^ " = " ^ init
+ ty ^ " = " ^ init
 end;
 
 fun verilog_print modulename tm = let

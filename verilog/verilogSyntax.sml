@@ -121,7 +121,7 @@ val dest_VArray_t = rand;
 fun mk_VArray_t i = mk_comb (VArray_t_tm, numSyntax.mk_numeral i);
 
 val VArray2_t_tm = ``VArray2_t``;
-fun is_VArray2_t tm = is_comb tm andalso identical (rator tm) VArray2_t_tm;
+val is_VArray2_t = (identical VArray2_t_tm) o fst o strip_comb;
 val dest_VArray2_t = pair_of_list o snd o strip_comb;
 fun mk_VArray2_t i1 i2 = list_mk_comb (VArray2_t_tm, map numSyntax.mk_numeral [i1, i2]);
 
