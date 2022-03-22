@@ -198,7 +198,7 @@ fun add_x_inits det_values = let
       raise UnableToTranslateTy (ty, "unknown/unsupported type"))
 
  val oracle = mk_var("fbits", “:num -> bool”)
- val r = rec_dest_record tm
+ val r = rec_dest_record det_values
  val r = rec_record_map (add_x_init oracle) r
  val r = r |> rec_mk_record |> hd |> snd
 in
