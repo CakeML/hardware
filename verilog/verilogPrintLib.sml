@@ -294,7 +294,8 @@ fun var_print name ttm =
   val dim2 = dim2 |> dest_numeral |> Arbnumcore.less1
  in
   (* Should really have a choice here, but right not we print to unpacked arrays unconditionally *)
-  "logic[" ^ (Arbnumcore.toString dim2) ^ ":0] " ^ name ^ "[" ^ (Arbnumcore.toString dim1) ^ ":0]"
+  (* unpacked: "logic[" ^ (Arbnumcore.toString dim2) ^ ":0] " ^ name ^ "[" ^ (Arbnumcore.toString dim1) ^ ":0]" *)
+  (* packed: *) "logic[" ^ (Arbnumcore.toString dim1) ^ ":0][" ^ (Arbnumcore.toString dim2) ^ ":0]" ^ name
  end else
   failwith $ "Unknown type: " ^ (term_to_string ttm);
 
