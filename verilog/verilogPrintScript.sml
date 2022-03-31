@@ -16,7 +16,7 @@ val bbop_print_def = Define `
 val abop_print_def = Define `
  (abop_print BitwiseAnd = "&") /\
  (abop_print BitwiseOr = "|") /\
- (abop_print BitwiseXor = "^^")`;
+ (abop_print BitwiseXor = "^")`;
 
 val arith_print_def = Define `
  (arith_print Minus = "-") /\
