@@ -64,12 +64,11 @@ Proof
 QED
 
 Theorem nd_reset_const:
- ∀s v s' v'. nd_reset s v = (s', v') ==> s'.vars = s.vars /\ s'.nbq = s.nbq
+ (∀v s s' v'. nd_reset s v = (s', v') ==> s'.vars = s.vars /\ s'.nbq = s.nbq) ∧
+ (∀vs s s' vs'. nd_reset_list s vs = (s', vs') ==> s'.vars = s.vars /\ s'.nbq = s.nbq)
 Proof
- cheat
- (*Induct \\ simp [nd_reset_def] \\ Cases_on ‘v’ \\ simp [nd_reset_def]
- Cases_on `v` \\ simp [nd_reset_def, oracle_bit_def, shift_seq_def] \\
- rpt strip_tac' \\ pairarg_tac \\ fs [nd_reset_def] \\ rw []*)
+ Induct \\ simp [nd_reset_def] \\ rpt strip_tac' \\
+ rpt (pairarg_tac \\ gvs []) \\ metis_tac []
 QED
 
 Theorem prun_assn_rhs_const:
@@ -78,7 +77,7 @@ Theorem prun_assn_rhs_const:
 Proof
  Cases_on `rhs`
  >- (Cases_on `lhs` \\ simp [prun_assn_rhs_def, prun_assn_lhs_prev_def, prun_assn_rhs_def, sum_map_INR] \\
-    rpt strip_tac' \\ drule_strip nd_reset_const \\ simp [])
+    rpt strip_tac' \\ drule_strip (CONJUNCT1 nd_reset_const) \\ simp [])
  \\ simp [prun_assn_rhs_def, sum_map_INR]
 QED
 
@@ -106,12 +105,17 @@ Proof
 QED
 
 Theorem nd_reset_type_preserving:
- !t v v' env env'.
- nd_reset env v = (env', v') /\ vertype_v v t ==> (?fbits. env' = env with fbits := fbits) /\ vertype_v v' t
+ (!v env v' env' t. nd_reset env v = (env', v') /\ vertype_v v t ==>
+                    (?fbits. env' = env with fbits := fbits) /\ vertype_v v' t) ∧
+ (!vs env env' vs' t. nd_reset_list env vs = (env', vs') ∧ EVERY (λv. vertype_v v t) vs ==>
+                      (?fbits. env' = env with fbits := fbits) ∧ EVERY (λv. vertype_v v t) vs' ∧ LENGTH vs' = LENGTH vs)
 Proof
- cheat
- (*Cases \\ rw [Once vertype_v_cases] \\ fs [nd_reset_def] \\ pairarg_tac \\ fs [] \\ rveq \\
- metis_tac [oracle_bits_correct]*)
+ Induct \\ simp [nd_reset_def] \\ rpt strip_tac' \\ rpt (pairarg_tac \\ gvs [])
+ >- (fs [Once vertype_v_cases] \\ metis_tac [])
+ >- (qpat_x_assum ‘vertype_v _ _’ (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_v_cases]) \\ drule_first \\
+     simp [Once vertype_v_cases] \\ metis_tac [])
+ >- simp [pstate_component_equality]
+ >- (rpt drule_first \\ simp [] \\ metis_tac [])
 QED
 
 (** fbits thms **)
@@ -240,7 +244,38 @@ Theorem prun_set_var_index_INR:
 Proof
  rw [prun_set_var_index_def, sum_for_INR, set_index_LUPDATE, revLUPDATE_def] \\ metis_tac []
 QED
-        
+
+Theorem set_slice_MAP:
+ ∀n m f xs ys. set_slice n m (MAP f xs) (MAP f ys) = MAP f (set_slice n m xs ys)
+Proof
+ simp [set_slice_def, MAP_TAKE, MAP_DROP]
+QED
+
+Theorem EL_all_eq:
+ !l1 l2. LENGTH l1 = LENGTH l2 /\ (!n. n < LENGTH l1 ==> EL n l1 = EL n l2) ==> l1 = l2
+Proof
+ Induct \\ rw [] \\ Cases_on `l2` \\ fs [] \\ conj_tac
+ >- (first_x_assum (qspec_then `0` assume_tac) \\ fs [])
+ \\ first_x_assum match_mp_tac \\ rw [] \\ first_x_assum (qspec_then `SUC n` assume_tac) \\ fs []
+QED
+
+(* TODO: Slow proof, just direct and ugly *)
+Theorem prun_set_slice_bit_field_insert:
+ !wold wnew vold vnew hb lb.
+  WORD (wold:'a word) (VArray vold) /\
+  WORD (wnew:'b word) (VArray vnew) /\ dimindex(:'b) = hb + 1 − lb /\
+  lb <= hb /\ hb < dimindex(:'a) ==>
+  prun_set_slice hb lb vold vnew = INR (MAP VBool (w2v (bit_field_insert hb lb wnew wold)))
+Proof
+ rpt strip_tac \\ simp [prun_set_slice_def] \\
+ simp [bit_field_insert_def, set_slice_def] \\
+ gvs [WORD_def, w2ver_def, v2ver_def, bitstringTheory.w2v_def, MAP_GENLIST, TAKE_GENLIST, DROP_GENLIST] \\
+ simp [word_modify_def] \\
+ match_mp_tac EL_all_eq \\
+ conj_tac >- simp [arithmeticTheory.MIN_DEF] \\
+ simp [] \\ rpt strip_tac \\ simp [EL_APPEND_EQN] \\ rw [] \\ fs [fcpTheory.FCP_BETA, arithmeticTheory.MIN_DEF]
+QED
+
 (** prun induction cases **)
 
 Theorem prun_Seq:
@@ -366,7 +401,7 @@ Proof
  (* Blocking assignments *)
  >- (fs [prun_assn_rhs_def, sum_map_INR, prun_assn_lhs_prev_def] \\ pairarg_tac \\ rveq \\
     fs [prun_bassn_def, sum_for_INR, assn_def] \\
-    drule_strip vertype_env_get_var_type \\ drule_strip nd_reset_type_preserving \\
+    drule_strip vertype_env_get_var_type \\ drule_strip (CONJUNCT1 nd_reset_type_preserving) \\
     simp [set_var_fbits, vertype_env_fbits, vertype_env_filled_fbits] \\
     simp [vertype_env_set_var, vertype_env_filled_set_var])
  >- (fs [prun_assn_rhs_def, sum_map_INR, prun_bassn_def] \\ rveq \\ fs [sum_for_INR, assn_def] \\ rveq \\
@@ -381,7 +416,7 @@ Proof
  (* Non-blocking assignments, essentially copied from blocking cases *)
  >- (fs [prun_assn_rhs_def, sum_map_INR, prun_assn_lhs_prev_def] \\ pairarg_tac \\ rveq \\
     fs [prun_nbassn_def, sum_for_INR, assn_def] \\
-    drule_strip vertype_env_get_var_type \\ drule_strip nd_reset_type_preserving \\
+    drule_strip vertype_env_get_var_type \\ drule_strip (CONJUNCT1 nd_reset_type_preserving) \\
     simp [set_nbq_var_fbits, vertype_env_fbits, vertype_env_filled_fbits] \\
     simp [vertype_env_set_nbq_var, vertype_env_filled_set_nbq_var])
  >- (fs [prun_assn_rhs_def, sum_map_INR, prun_nbassn_def] \\ rveq \\ fs [sum_for_INR, assn_def] \\ rveq \\

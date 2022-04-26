@@ -15,6 +15,11 @@ open sumExtraTheory verilogMetaTheory;
 
 (*val check_inv_fail = ref T;*)
 
+val translator_turbo_mode = ref false;
+
+fun turbo_prove (tm, tac) = prove(tm, if (!translator_turbo_mode) then cheat else tac);
+fun turbo_prove_q (tm, tac) = Q.prove(tm, if (!translator_turbo_mode) then cheat else tac);
+
 fun check_inv_err name tm result tm2 = let
   in if identical tm2 tm then result else let
     (*val _ = (check_inv_fail := tm)*)
@@ -68,6 +73,7 @@ type tstate = { fext_ty : hol_type,
                 is_rel_var : term,
                 rel_var_inv : thm,
                 module_rel : term,
+                module_rel_def : thm,
                 comms : string list,
                 read_thms : (term * thm) list,
                 write_thms : (string list * (thm * thm option * thm option)) list,
@@ -81,11 +87,11 @@ fun build_Eval_exp_var fext_rel_const rel_const rel comms (name, accessf, ty) = 
   val typepred = predicate_for_type ty
   val th =
    if mem name comms then
-    Q.prove(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s)) (Var ^nameHOL)`,
-             rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_cvar_def])
+    turbo_prove_q(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s)) (Var ^nameHOL)`,
+                  rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_cvar_def])
    else
-    Q.prove(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s')) (Var ^nameHOL)`,
-            rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_var_def])
+    turbo_prove_q(`!s s'. Eval_exp ^fext_rel_const ^rel_const fext s s' env (^typepred (^accessf s')) (Var ^nameHOL)`,
+                  rw [Eval_exp_def, erun_def, erun_get_var_def, rel, state_rel_var_def])
  in
   CONV_RULE (TRY_CONV (STRIP_QUANT_CONV (RATOR_CONV (RAND_CONV (RAND_CONV BETA_CONV))))) th
  end;
@@ -130,6 +136,25 @@ fun update_base_tac rel =
  fs [rel, state_rel_var_def, state_rel_cvar_def,
      get_var_cleanup, get_cvar_rel_set_var_neq, get_cvar_rel_set_nbq_var];
 
+fun update_base_slice_tac rel =
+ rw [Eval_exp_def, Eval_def, prun_def] \\
+ drule_first \\
+ qpat_x_assum ‘state_rel _ _ _’ (strip_assume_tac o (SIMP_RULE (srw_ss()) [rel])) \\
+ fs [state_rel_var_def, state_rel_cvar_def, WORD_def, BOOL_def] \\ rveq \\
+ simp [prun_assn_rhs_def, sum_map_def, sum_bind_def, prun_bassn_def, prun_nbassn_def, assn_def,
+       GSYM get_cvar_rel_get_use_nbq_var, get_use_nbq_var_F,
+       w2ver_def, v2ver_def, get_VArray_data_def] \\
+
+ qmatch_goalsub_abbrev_tac `bit_field_insert _ _ wnew wold` \\
+ Q.ISPECL_THEN [`wold`, `wnew`] mp_tac prun_set_slice_bit_field_insert \\
+ unabbrev_all_tac \\
+ disch_then (fn th => dep_rewrite.DEP_REWRITE_TAC [th]) \\
+ conj_tac >- simp [WORD_def, w2ver_def, v2ver_def] \\
+ simp [sum_for_def, sum_map_def] \\
+
+ simp [rel, state_rel_var_def, state_rel_cvar_def, WORD_def, BOOL_def] \\
+ simp [get_var_cleanup, get_cvar_rel_set_var_neq, get_cvar_rel_set_nbq_var, w2ver_def, v2ver_def];
+
 fun update_base_bit_tac rel =
  rw [Eval_exp_def, Eval_def, prun_def] \\
  drule_first \\
@@ -150,13 +175,13 @@ fun prove_update_thms fext_rel_const rel rel_const comms (field, field_data:allf
  val (base_stmt, base_bit_stmt, base_slice_stmt) =
      build_update_stmts comms fext_rel_const rel_const field fupd facc (#ty field_data)
 
- val base_thm = prove (base_stmt, update_base_tac rel)
+ val base_thm = turbo_prove (base_stmt, update_base_tac rel)
  val base_thm = CONV_RULE (DEPTH_CONV BETA_CONV) base_thm
 
- val base_slice_thm = Option.map (fn tm => prove (tm, cheat (*update_base_slice_tac rel*))) base_slice_stmt
+ val base_slice_thm = Option.map (fn tm => turbo_prove (tm, update_base_slice_tac rel)) base_slice_stmt
  val base_slice_thm = Option.map (fn th => CONV_RULE (DEPTH_CONV BETA_CONV) th) base_slice_thm
 
- val base_bit_thm = Option.map (fn tm => prove (tm, update_base_bit_tac rel)) base_bit_stmt
+ val base_bit_thm = Option.map (fn tm => turbo_prove (tm, update_base_bit_tac rel)) base_bit_stmt
  val base_bit_thm = Option.map (fn th => CONV_RULE (DEPTH_CONV BETA_CONV) th) base_bit_thm
 in
  (key, (base_thm, base_bit_thm, base_slice_thm))
@@ -216,9 +241,34 @@ fun update_base_2d_tac rel field =
  dep_rewrite.DEP_REWRITE_TAC [revEL_revLUPDATE_valid_idxes] \\
  rw [] \\ gs [w2n_lt];
 
-(* Also inefficient! *)
+(* Also inefficient (proof thrown together...)! *)
 fun update_base_slice_2d_tac rel field =
- cheat; (* Fix later... *)
+ rw [Eval_def, Eval_exp_def, prun_def] \\
+ drule_first \\ drule_first \\ drule_strip (state_rel_field rel field) \\
+ fs [state_rel_var_def, WORD_def] \\
+ fs [WORD_ARRAY_cases(*, sum_revEL_INR*)] \\ rveq \\
+ simp [prun_assn_rhs_def, prun_bassn_def, assn_def, sum_revEL_revEL,
+       ver2n_w2ver, get_use_nbq_var_def, get_VArray_data_def,
+       sum_for_def, sum_map_def, sum_bind_def] \\
+ first_x_assum (qspec_then ‘i’ strip_assume_tac) \\
+ fs [sum_bind_def, WORD_def] \\ simp [w2ver_def, v2ver_def, get_VArray_data_def, sum_bind_def] \\
+
+ qmatch_goalsub_abbrev_tac `bit_field_insert _ _ wnew wold` \\
+ Q.ISPECL_THEN [`wold`, `wnew`] mp_tac prun_set_slice_bit_field_insert \\
+ unabbrev_all_tac \\
+ disch_then (fn th => dep_rewrite.DEP_REWRITE_TAC [th]) \\
+ conj_tac >- simp [WORD_def, w2ver_def, v2ver_def] \\
+ simp [sum_for_def, sum_map_def, sum_bind_def] \\
+
+ dep_rewrite.DEP_REWRITE_TAC [prun_set_var_index_ok_idx] \\
+ conj_tac >- (qspec_then ‘i’ mp_tac w2n_lt \\ simp []) \\
+ simp [sum_map_def] \\
+
+ fs [rel, state_rel_var_def, state_rel_cvar_def, get_cvar_rel_set_var_neq, get_var_cleanup] \\
+ fs [WORD_ARRAY_def, WORD_def, combinTheory.UPDATE_def] \\ gen_tac \\
+ dep_rewrite.DEP_REWRITE_TAC [sum_revEL_revEL] \\
+ dep_rewrite.DEP_REWRITE_TAC [revEL_revLUPDATE_valid_idxes] \\
+ fs [sum_revEL_INR] \\ IF_CASES_TAC \\ fs [w2ver_def, v2ver_def];
 
 (* TODO: Step thms missing for now *)
 fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:allfieldinfo) = let
@@ -226,9 +276,9 @@ fun prove_update_thms_2d fext_rel_const rel rel_const comms (field, field_data:a
  val facc = #accessor field_data
  val key = #fupd_key field_data
  val (base_stmt, base_slice_stmt) = build_update_stmts_2d comms fext_rel_const rel_const field fupd facc (#ty field_data)
- val base_thm = prove (base_stmt, update_base_2d_tac rel field)
+ val base_thm = turbo_prove (base_stmt, update_base_2d_tac rel field)
  val base_thm = CONV_RULE (DEPTH_CONV BETA_CONV) base_thm
- val base_slice_thm = prove (base_slice_stmt, update_base_slice_2d_tac rel field)
+ val base_slice_thm = turbo_prove (base_slice_stmt, update_base_slice_2d_tac rel field)
  val base_slice_thm = CONV_RULE (DEPTH_CONV BETA_CONV) base_slice_thm
 in
  (key, (base_thm, base_slice_thm))
@@ -323,7 +373,7 @@ fun build_tstate fext_rel rel is_rel_var module_rel abstract_fields comms fext_t
 in
  { fext_ty = fext_ty, fext_rel = fext_rel_const,
    state_ty = state_ty, rel = rel_const, is_rel_var = is_rel_var_const, rel_var_inv = rel_var_inv,
-   module_rel = module_rel_const,
+   module_rel = module_rel_const, module_rel_def = module_rel,
    comms = comms,
    read_thms = var_thms, write_thms = update_thms, write_2d_thms = update_thms_2d,
    fext_read_thms = fext_read_thms,

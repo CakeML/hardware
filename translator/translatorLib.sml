@@ -120,8 +120,22 @@ in
 end;
 
 (* Too simple but works for now... *)
-fun build_module_rel_init module_rel init decls =
- prove(“^module_rel ^init (SND (run_decls fbits ^decls []))”, cheat (*EVAL_TAC \\ simp []*));
+fun build_module_rel_init module_rel_def module_rel init_def init decls_def = let
+ val decls = decls_def |> concl |> lhs
+in
+ turbo_prove(
+  “^module_rel ^init (SND (run_decls fbits ^decls []))”,
+  rewrite_tac [decls_def] \\
+  (* Very inefficient symbolic execution... *)
+  rpt (CHANGED_TAC (once_rewrite_tac [run_decls_def] \\
+                    simp [nd_value_def, oracle_bits_ggenlist, oracleTheory.oracle_bit_def,
+                          GSYM oracleTheory.shift_seq_add])) \\
+  simp [init_def, module_rel_def] \\
+  rpt conj_tac \\
+  simp [module_state_rel_var_def, ggenlist_shift_seq,
+        BOOL_refl, BOOL_refl_shift_seq,
+        WORD_refl_w2ver, WORD_refl_ggenlist, WORD_ARRAY_WORD_0])
+end;
 
 fun dest_record_rec tm =
  tm
@@ -249,7 +263,9 @@ fun module2hardware tstate module_def abstract_fields outputs comms = let
                 |> (fn l => listSyntax.mk_list (l, “:string # var_metadata”))
  val decls_def = new_module_definition "decls" decls_tm
 
- val precond = build_module_rel_init (#module_rel tstate) init (decls_def |> concl |> lhs)
+ val _ = print "\n";
+ val _ = print "Building declarations thm... ";
+ val precond = build_module_rel_init (#module_rel_def tstate) (#module_rel tstate) init_def init decls_def
  val th = MATCH_MP th precond
 
  val module_tm = TypeBase.mk_record (“:module”, [("fextty", fextty_tm),

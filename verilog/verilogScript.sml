@@ -766,13 +766,13 @@ val set_slice_def = Define `
       first_skip  = DROP take_n olddata;
       middle      = TAKE drop_n first_skip;
       middle_skip = DROP drop_n first_skip in
-  INR (first ++ newdata ++ middle_skip)`;
+  first ++ newdata ++ middle_skip`;
 
 val prun_set_slice_def = Define `
  prun_set_slice ih il olddata newdata =
   let len = LENGTH olddata in
    if il <= ih /\ ih < len then
-    set_slice (len - ih - 1) ((ih - il) + 1) olddata newdata
+    INR $ set_slice (len - ih - 1) ((ih - il) + 1) olddata newdata
    else
     INL InvalidIndex`;
 

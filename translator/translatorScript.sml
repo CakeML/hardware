@@ -1024,6 +1024,56 @@ Proof
  rw [module_state_rel_var_def]
 QED*)
 
+Theorem oracle_bits_ggenlist:
+ !n oracle. oracle_bits oracle n = (ggenlist oracle 0 n, shift_seq n oracle)
+Proof
+ simp [oracle_bits_genlist, ggenlist_def, SF ETA_ss]
+QED
+
+Theorem BOOL_refl:
+ ∀b. BOOL b (VBool b)
+Proof
+ rw [BOOL_def]
+QED
+
+Theorem BOOL_refl_shift_seq:
+ ∀n fbits. BOOL (fbits n) (VBool (shift_seq n fbits 0))
+Proof
+ rw [oracleTheory.shift_seq_def, BOOL_refl]
+QED
+
+Theorem WORD_refl_w2ver:
+ ∀w. WORD w (w2ver w)
+Proof
+ rw [WORD_def]
+QED
+
+Theorem length_ggenlist:
+ ∀f n m. LENGTH (ggenlist f n m) = m
+Proof
+ simp [ggenlist_def]
+QED
+
+Theorem ggenlist_shift_seq:
+ ∀s n m fbits. ggenlist (shift_seq s fbits) n m = ggenlist fbits (s + n) m
+Proof
+ rw [ggenlist_def, shift_seq_def]
+QED
+
+Theorem WORD_refl_ggenlist:
+ ∀fbits n m. m = dimindex(:'a) ⇒ WORD (v2w (ggenlist fbits n m):'a word) (v2ver (ggenlist fbits n m))
+Proof
+ rw [WORD_def, w2ver_def, bitstringTheory.w2v_v2w, bitstringTheory.fixwidth_id_imp, length_ggenlist]
+QED
+
+Theorem WORD_ARRAY_WORD_0:
+ ∀n m. n = dimindex(:'a) ∧ m = dimword(:'b) ⇒ WORD_ARRAY WORD ((K 0w) : 'b word -> 'a word) (build_zero (VArray2_t m n))
+Proof
+ rw [WORD_ARRAY_def, WORD_def, build_zero_def, sum_revEL_INR, w2n_lt] \\
+ rw [revEL_def, rich_listTheory.EL_REPLICATE, w2ver_def, v2ver_def] \\
+ simp [rich_listTheory.REPLICATE_GENLIST, bitstringTheory.w2v_def, MAP_GENLIST, GENLIST_FUN_EQ, word_0]
+QED
+
 Theorem mk_circuit_to_mk_module:
  ∀m.
  (∀n fbits' fbits.
