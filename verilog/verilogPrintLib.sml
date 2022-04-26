@@ -295,8 +295,8 @@ fun var_print name ttm =
   val dim2 = dim2 |> dest_numeral |> Arbnumcore.less1
  in
   (* Should really have a choice here, but right not we print to unpacked arrays unconditionally *)
-  (* unpacked: *) (SOME dim1_orig, "logic[" ^ (Arbnumcore.toString dim2) ^ ":0] " ^ name ^ "[" ^ (Arbnumcore.toString dim1) ^ ":0]")
-  (* packed: "logic[" ^ (Arbnumcore.toString dim1) ^ ":0][" ^ (Arbnumcore.toString dim2) ^ ":0]" ^ name *)
+  (* unpacked: (SOME dim1_orig, "logic[" ^ (Arbnumcore.toString dim2) ^ ":0] " ^ name ^ "[" ^ (Arbnumcore.toString dim1) ^ ":0]") *)
+  (* packed: *) (NONE, "logic[" ^ (Arbnumcore.toString dim1) ^ ":0][" ^ (Arbnumcore.toString dim2) ^ ":0] " ^ name)
  end else
   failwith $ "Unknown type: " ^ (term_to_string ttm);
 
@@ -304,7 +304,7 @@ fun fext_print var ty =
  "input " ^ (snd $ var_print (fromHOLstring var) ty);
 
 fun decl_print var data = let
- fun array_2d_init_print dim tm =
+ fun unpacked_array_2d_init_print dim tm =
   if is_build_zero tm then let
    val dim = dim |> Arbnumcore.toInt
    fun repeat n c = List.tabulate (n, (K c))
@@ -313,8 +313,8 @@ fun decl_print var data = let
   end else
    failwith ("Unknown constant type: " ^ term_to_string tm);
     
- val (array_2d_dim, ty) = lookup "type" data |> var_print var
- val init = lookup "init" data |> X_print (case array_2d_dim of SOME dim => array_2d_init_print dim | NONE => const_print)
+ val (unpacked_array_2d_dim, ty) = lookup "type" data |> var_print var
+ val init = lookup "init" data |> X_print (case unpacked_array_2d_dim of SOME dim => unpacked_array_2d_init_print dim | NONE => const_print)
 in
  ty ^ " = " ^ init
 end;
