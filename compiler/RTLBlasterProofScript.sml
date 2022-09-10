@@ -44,6 +44,12 @@ Proof
  decide_tac
 QED
 
+Triviality lt3:
+ ∀b. b < 3 ⇔ b = 0 ∨ b = 1 ∨ b = 2
+Proof
+ decide_tac
+QED
+
 Triviality lt4:
  ∀n. n < 4 ⇔ n = 0 ∨ n = 1 ∨ n = 2 ∨ n = 3
 Proof
@@ -753,116 +759,80 @@ Proof
  simp [] \\ strip_tac \\ drule_first \\ fs [arithmeticTheory.ADD1]
 QED
 
-Theorem blast_cellMux_correct:
- !lhs rhs lhs' rhs' c c' tmpnum s fext.
+Theorem gol_mux_array_correct:
+ ∀c not_c inpt inpf c' inpt' inpf' tmpnum fext s.
  cell_inp_run fext s c = INR (CBool c') ∧
+ cell_inp_run fext s not_c = INR (CBool (¬c')) ∧
+ cell_inp_run fext s inpt = INR (CBool inpt') ∧
+ cell_inp_run fext s inpf = INR (CBool inpf') ∧
+ cell_input_lt c tmpnum ∧
+ cell_input_lt not_c tmpnum ∧
+ cell_input_lt inpt tmpnum ∧
+ cell_input_lt inpf tmpnum ⇒
+ ∃s'. sum_foldM (cell_run fext) s (gol_mux_array tmpnum c not_c inpt inpf) = INR s' ∧
+      s'.fbits = s.fbits ∧
+      (!inp. cell_input_lt inp tmpnum ==> cell_inp_run fext s' inp = cell_inp_run fext s inp) ∧
+      (cell_inp_run fext s' (VarInp (NetVar (tmpnum + 2)) NoIndexing) = INR (CBool (if c' then inpt' else inpf')))
+Proof
+ simp [gol_mux_array_def, sum_foldM_def, cell_run_def, cell2_run_def, sum_bind_def, sum_bind_INR] \\ rpt strip_tac' \\
+ simp [cell_input_lt_cell_inp_run_cset_var_plus, cell2_run_def] \\
+ simp [cell_inp_run_cset_var, cell2_run_def] \\ rw [cell_input_lt_cell_inp_run_cset_var_plus]
+QED
+
+Theorem blast_cellMux_correct:
+ !lhs rhs c not_c s lhs' rhs' c' tmpnum fext.
  LENGTH lhs = LENGTH rhs ∧
  LENGTH lhs' = LENGTH lhs ∧
- (!i. i < LENGTH lhs ==> cell_inp_run fext s (EL i lhs) = INR (CBool (EL i lhs'))) ∧
  LENGTH rhs' = LENGTH rhs ∧
- (!i. i < LENGTH rhs ==> cell_inp_run fext s (EL i rhs) = INR (CBool (EL i rhs'))) ∧
  cell_input_lt c tmpnum ∧
+ cell_input_lt not_c tmpnum ∧
  EVERY (\inp. cell_input_lt inp tmpnum) lhs ∧
- EVERY (\inp. cell_input_lt inp tmpnum) rhs ⇒
- ∃s'. sum_foldM (cell_run fext) s (MAP2i (λi inp2 inp3. CellMux (i + tmpnum) c inp2 inp3) lhs rhs) = INR s' /\
+ EVERY (\inp. cell_input_lt inp tmpnum) rhs ∧
+ (!i. i < LENGTH lhs ==> cell_inp_run fext s (EL i lhs) = INR (CBool (EL i lhs'))) ∧
+ (!i. i < LENGTH rhs ==> cell_inp_run fext s (EL i rhs) = INR (CBool (EL i rhs'))) ∧
+ cell_inp_run fext s c = INR (CBool c') ∧
+ cell_inp_run fext s not_c = INR (CBool ~c') ⇒
+ ∃s'. sum_foldM (cell_run fext) s (FLAT (MAP2i (λi inp2 inp3. gol_mux_array (3*i + tmpnum) c not_c inp2 inp3) lhs rhs)) = INR s' /\
       s'.fbits = s.fbits /\ (* <-- follows from general determinism thm... *)
       (!inp. cell_input_lt inp tmpnum ==> cell_inp_run fext s' inp = cell_inp_run fext s inp) /\
-      (!i. i < LENGTH lhs ==> cell_inp_run fext s' (VarInp (NetVar (i + tmpnum)) NoIndexing) =
+      (!i. i < LENGTH lhs ==> cell_inp_run fext s' (VarInp (NetVar (3*i + tmpnum + 2)) NoIndexing) =
                               INR (CBool (EL i (if c' then lhs' else rhs'))))
 Proof
  Induct >- rw [sum_foldM_def] \\ Cases_on ‘lhs'’ >- rw [] \\ Cases_on ‘rhs’ >- rw [] \\ Cases_on ‘rhs'’ >- rw [] \\
- fs [sum_foldM_def, sum_bind_INR, cell_run_def] \\ rpt strip_tac' \\
+ simp [sum_foldM_append, sum_bind_INR] \\ rpt strip_tac' \\
 
  first_assum (qspec_then `0` mp_tac) \\ impl_tac >- simp [] \\
  last_assum (qspec_then `0` mp_tac) \\ impl_tac >- simp [] \\ 
- PURE_REWRITE_TAC [EL, HD] \\ rpt strip_tac \\ simp [cellMux_run_def] \\
+ PURE_REWRITE_TAC [EL, HD] \\ rpt strip_tac \\ 
+ 
+ rename1 ‘gol_mux_array _ _ _ inpt inpf’ \\
+ qspecl_then [‘c’, ‘not_c’, ‘inpt’, ‘inpf’] assume_tac gol_mux_array_correct \\ drule_first \\ simp [] \\
+ 
+ first_x_assum (qspecl_then [‘t'’, ‘c’, ‘not_c’, ‘s'’, ‘t’, ‘t''’, ‘c'’, ‘tmpnum + 3’, ‘fext’] mp_tac) \\
+ impl_tac >- (rw [cell_input_lt_cell_inp_run_cset_var]
+ THEN2 (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
+ THEN2 (match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp [])
+ THEN2 (rpt (first_x_assum (qspec_then ‘SUC i’ mp_tac)) \\ fs [EVERY_EL, cell_input_lt_cell_inp_run_cset_var])) \\
+ strip_tac \\
 
- qmatch_goalsub_abbrev_tac `sum_foldM _ s' _` \\
- first_x_assum (qspecl_then [‘t'’, ‘t’, ‘t''’, ‘c’, ‘c'’, ‘SUC tmpnum’, ‘s'’, ‘fext’] mp_tac) \\
- unabbrev_all_tac \\ impl_tac >- (rw [cell_input_lt_cell_inp_run_cset_var]
- >- (fs [EVERY_EL, cell_input_lt_cell_inp_run_cset_var] \\ last_x_assum (qspec_then ‘SUC i’ mp_tac) \\ simp [])
- >- (fs [EVERY_EL, cell_input_lt_cell_inp_run_cset_var] \\ last_x_assum (qspec_then ‘SUC i’ mp_tac) \\ simp [])
- >- (first_x_assum (qspec_then ‘SUC i’ mp_tac) \\ fs [EVERY_EL, cell_input_lt_cell_inp_run_cset_var] \\ simp [])
- >- (first_x_assum (qspec_then ‘SUC i’ mp_tac) \\ fs [EVERY_EL, cell_input_lt_cell_inp_run_cset_var] \\ simp [])
- >- (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
- \\ match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp []) \\ strip_tac \\
+ ‘((λi inp2 inp3. gol_mux_array (3 * i + tmpnum) c not_c inp2 inp3) ∘ SUC) =
+  (λi inp2 inp3. gol_mux_array (3 * i + (tmpnum + 3)) c not_c inp2 inp3)’
+ by (rw [FUN_EQ_THM] \\ f_equals_tac \\ decide_tac) \\ simp [] \\
 
- ‘((λi inp2 inp3. CellMux (i + tmpnum) c inp2 inp3) ∘ SUC) = (λi inp2 inp3. CellMux (i + SUC tmpnum) c inp2 inp3)’
- by simp [FUN_EQ_THM] \\
-
- simp [cset_var_fbits] \\ rpt strip_tac
- >- (drule_strip cell_input_lt_SUC \\ drule_first \\ simp [cell_input_lt_cell_inp_run_cset_var])
+ rpt strip_tac
+ >- (drule_strip cell_input_lt_le \\ simp [])
  \\ Cases_on ‘i’ \\ fs []
- >- (first_x_assum (qspec_then ‘VarInp (NetVar tmpnum) NoIndexing’ mp_tac) \\
+ >- (first_x_assum (qspec_then ‘VarInp (NetVar (tmpnum + 2)) NoIndexing’ mp_tac) \\
      impl_tac >- simp [cell_input_lt_def, var_lt_def] \\ strip_tac \\ rw [cell_inp_run_cset_var])
- \\ drule_first \\ rw [] \\ fs [arithmeticTheory.ADD1]
+ \\ drule_first \\ rw [] \\ gs [arithmeticTheory.ADD1] \\ first_x_assum (qspec_then ‘n’ mp_tac) \\
+    disch_then (assume_tac o GSYM) \\ simp [] \\ f_equals_tac \\ decide_tac
 QED
 
-(* should be merged with above... blasterstate_ok unrolled... *)        
-(*Theorem blast_cell_input_bool_cell_input_lt:
- !inp inp' blast_s out tmpnum.
- blast_cell_input blast_s inp = BoolInp inp' /\
- cell_input_lt inp out /\ out <= tmpnum /\
- (!var inps. lookup var_cmp var blast_s.si = SOME (ArrayInp inps) ==> EVERY (\inp. cell_input_lt inp tmpnum) inps) ∧
- (!var inp. lookup var_cmp var blast_s.si = SOME (BoolInp inp) ==> cell_input_lt inp tmpnum) ⇒
- cell_input_lt inp' tmpnum
+Triviality Abbrev_cset_var_tmpvar_lem:
+ ∀s s' n v. Abbrev (s' = cset_var s (NetVar n) v) ⇒ (∀var. var_lt var n ⇒ cget_var s' var = cget_var s var)
 Proof
- Cases \\ rw [blast_cell_input_def]
- >- (Cases_on ‘v’ \\ fs [blast_cell_input_def] \\ rw [cell_input_lt_def])
- >- (every_case_tac \\ fs [] \\ rw [cell_input_lt_def])
- \\ every_case_tac \\ fs [] \\ rveq
- >- drule_strip cell_input_lt_le
- >- drule_first
- >- drule_strip cell_input_lt_le
- >- drule_first
- >- (drule_first \\ fs [revEL_def, EVERY_EL])
- >- simp [cell_input_lt_def]
- >- (fs [cell_input_lt_def] \\ drule_strip var_lt_le)
- >- drule_first
+ rw [markerTheory.Abbrev_def, cget_var_cset_var] \\ rw [] \\ fs [var_lt_def]
 QED
-
-Theorem blast_cell_input_bool_bsi_cell_input_ok:
- !inp inp' blast_s out tmpnum.
- blast_cell_input blast_s inp = BoolInp inp' /\
- cell_input_lt inp out /\
- (!var inps. lookup var_cmp var blast_s.si = SOME (ArrayInp inps) ==> EVERY (bsi_cell_input_ok out tmpnum) inps) ∧
- (!var inp. lookup var_cmp var blast_s.si = SOME (BoolInp inp) ==> bsi_cell_input_ok out tmpnum inp) ==>
- bsi_cell_input_ok out tmpnum inp'
-Proof
- Cases \\ rpt gen_tac
- >- (Cases_on ‘v’ \\ rw [blast_cell_input_def] \\ simp [bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def])
- >- (simp [blast_cell_input_def] \\ every_case_tac \\ rw [] \\ simp [bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def])
- \\ simp [blast_cell_input_def] \\ every_case_tac \\ rw [] \\ TRY drule_first \\ 
-    fs [revEL_def, EVERY_EL, bsi_cell_input_ok_def, cell_input_lt_def]
-QED
-
-(* should be merged with above... blasterstate_ok unrolled... *)
-Theorem blast_cell_input_array_cell_input_lt:
- !inp inps blast_s out tmpnum.
- blast_cell_input blast_s inp = ArrayInp inps /\
- cell_input_lt inp out /\ out <= tmpnum /\
- (!var inps. lookup var_cmp var blast_s.si = SOME (ArrayInp inps) ==> EVERY (\inp. cell_input_lt inp tmpnum) inps) ⇒
- EVERY (\inp. cell_input_lt inp tmpnum) inps
-Proof
- Cases \\ rw [blast_cell_input_def]
- >- (Cases_on ‘v’ \\ fs [blast_cell_input_def] \\ rw [cell_input_lt_def, EVERY_MAP])
- >- (every_case_tac \\ fs [] \\ rw [cell_input_lt_def, EVERY_GENLIST])
- \\ every_case_tac \\ fs [] \\ Cases_on ‘v’ \\ rveq \\
-    fs [cell_input_lt_def, var_lt_def] \\ drule_first \\ fs [revEL_def, EVERY_EL] \\
-    rw [rev_slice_def, EL_TAKE, EL_DROP, LENGTH_TAKE_EQ]
-QED
-
-Theorem blast_cell_input_array_bsi_cell_input_ok:
- !inp inps blast_s out tmpnum.
- blast_cell_input blast_s inp = ArrayInp inps /\
- (!var inps. lookup var_cmp var blast_s.si = SOME (ArrayInp inps) ==> EVERY (bsi_cell_input_ok out tmpnum) inps) ==>
- EVERY (bsi_cell_input_ok out tmpnum) inps
-Proof
- Cases \\ rpt gen_tac
- >- (Cases_on ‘v’ \\ rw [blast_cell_input_def] \\ simp [EVERY_MAP, bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def])
- >- (simp [blast_cell_input_def] \\ every_case_tac \\ rw [] \\ simp [EVERY_GENLIST, bsi_cell_input_ok_def, cell_input_lt_def, cell_input_ge_def])
- \\ simp [blast_cell_input_def] \\ every_case_tac \\ rw [] \\ drule_first \\ simp [EVERY_rev_slice]
-QED*)
 
 Theorem cell_inp_run_lt_cget_var_cong:
  ∀inp fext s s' n m.
@@ -870,6 +840,22 @@ Theorem cell_inp_run_lt_cget_var_cong:
  cell_inp_run fext s' inp = cell_inp_run fext s inp
 Proof
  Cases \\ rw [cell_inp_run_def, cell_input_lt_def] \\ drule_strip var_lt_le \\ simp []
+QED
+
+(*Theorem cell_inp_run_cell_input_lt_cong:
+ ∀inp fext s s' n m.
+ (∀inp. cell_input_lt inp n ⇒ cell_inp_run fext s' inp = cell_inp_run fext s inp) ∧ cell_input_lt inp m ∧ m ≤ n ⇒
+ cell_inp_run fext s' inp = cell_inp_run fext s inp
+Proof
+ rpt strip_tac \\ first_x_assum match_mp_tac \\ match_mp_tac cell_input_lt_le \\ rpt asm_exists_tac
+QED*)
+
+Theorem EVERY_cell_inp_run_lt_cget_var_cong:
+ ∀inps fext s s' n m.
+ (∀var. var_lt var n ⇒ cget_var s' var = cget_var s var) ∧ EVERY (λinp. cell_input_lt inp m) inps ∧ m ≤ n ⇒
+ ∀i. i < LENGTH inps ⇒ cell_inp_run fext s' (EL i inps) = cell_inp_run fext s (EL i inps)
+Proof
+ rw [EVERY_EL] \\ drule_first \\ match_mp_tac cell_inp_run_lt_cget_var_cong \\ rpt asm_exists_tac
 QED
                                                                                                
 Definition inps2n_def:
@@ -1599,6 +1585,82 @@ Proof
  \\ fs [blast_rel_def, var_lt_def] \\ first_x_assum (qspec_then ‘n’ mp_tac) \\ simp [blast_rel_array_def]
 QED
 
+Theorem cells_run_gol_mux:
+ ∀out inpc inpt inpf tmpnum fext s vc vt vf.
+ cell_inp_run fext s inpc = INR (CBool vc) ∧
+ cell_inp_run fext s inpt = INR (CBool vt) ∧
+ cell_inp_run fext s inpf = INR (CBool vf) ∧
+ cell_input_lt inpc tmpnum ∧
+ cell_input_lt inpt tmpnum ∧
+ cell_input_lt inpf tmpnum ⇒
+ sum_foldM (cell_run fext) s (gol_mux tmpnum out inpc inpt inpf) = 
+ INR $ cset_var (cset_var (cset_var (cset_var s
+        (NetVar tmpnum) (CBool (vc ∧ vt)))
+        (NetVar (tmpnum + 1)) (CBool (¬vc)))
+        (NetVar (tmpnum + 2)) (CBool (¬vc ∧ vf)))
+        (NetVar (tmpnum + 3)) (CBool (if vc then vt else vf))
+Proof
+ rw [gol_mux_def, sum_foldM_def,
+     cell_input_lt_cell_inp_run_cset_var_plus, cell_inp_run_cset_var,
+     cell_run_def, cell1_run_def, cell2_run_def, sum_bind_def]
+QED
+
+Theorem blast_rel_insert_bool:
+ ∀fext si globalmax tmpnum s bs bs' var inp regs out b.
+ blast_rel fext si globalmax s bs ∧
+ blasterstate_ok regs si out globalmax tmpnum ∧
+ cell_inp_run fext bs' inp = INR (CBool b) ∧
+ (∀var. var_lt var tmpnum ⇒ cget_var bs' var = cget_var bs var) ∧
+ bs'.fbits = bs.fbits ⇒
+ blast_rel fext (insert var_cmp var (MBoolInp (GoodInp inp)) si) globalmax (cset_var s var (CBool b)) bs'
+Proof
+ rw [blast_rel_def, cget_var_cset_var] \\ rw []
+ >- fs [blasterstate_ok_def, blast_rel_bool_def, lookup_insert_var_cmp] \\
+ drule_first \\ every_case_tac
+ >- (fs [blasterstate_ok_def, blast_rel_bool_def, lookup_insert_var_cmp] \\ every_case_tac
+     >- (first_x_assum (qspec_then ‘NetVar n’ mp_tac) \\ simp [var_lt_def]) \\
+     rpt drule_first \\ fs [blast_cell_input_marked_ok_def] \\
+     drule_strip blast_cell_input_ok_cell_input_lt \\
+     drule_strip cell_inp_run_lt_cget_var_cong \\ simp [])
+ >- (gs [blasterstate_ok_def, blast_rel_array_def, lookup_insert_var_cmp] \\ rpt strip_tac \\
+     rpt drule_first \\ every_case_tac \\ gs [EVERY_EL] \\ rpt drule_first \\
+     gs [blast_cell_input_marked_ok_def] \\
+     drule_strip blast_cell_input_ok_cell_input_lt \\
+     drule_strip cell_inp_run_lt_cget_var_cong \\ simp [])
+QED
+
+(* TODO
+Theorem blast_rel_insert_array:
+ ∀fext si globalmax tmpnum s bs bs' var inps vs regs out finp.
+ blast_rel fext si globalmax s bs ∧
+ blasterstate_ok regs si out globalmax tmpnum ∧
+ (∀i. i < LENGTH inps ⇒ cell_inp_run fext bs' (finp i tmpnum) = INR (CBool (EL i vs))) ∧
+ (∀var. var_lt var tmpnum ⇒ cget_var bs' var = cget_var bs var) ∧
+ LENGTH vs = LENGTH inps ∧
+ bs'.fbits = bs.fbits ⇒
+ blast_rel fext (insert var_cmp (NetVar out) (MArrayInp (GENLIST (λi. GoodInp (finp i tmpnum)) (LENGTH vs))) si) globalmax (cset_var s var (CArray vs)) bs'
+Proof
+ rw [blast_rel_def, blasterstate_ok_def, cget_var_cset_var] \\
+ IF_CASES_TAC
+ >- (simp [blast_rel_array_def, lookup_insert_var_cmp] \\ rw [] \\ simp [cell_inp_run
+
+ drule_last \\ rpt TOP_CASE_TAC
+  >- (fs [blast_rel_bool_def, lookup_insert_var_cmp]
+      >- (first_assum (qspec_then `VarInp (NetVar n) NoIndexing` mp_tac) \\ 
+          impl_tac >- simp [cell_input_lt_def, var_lt_def] \\ strip_tac \\
+          fs [cell_inp_run_def])
+      >- (TOP_CASE_TAC \\ drule_last \\ fs [blast_cell_input_marked_ok_def] \\
+          drule_strip blast_cell_input_ok_cell_input_lt \\
+          drule_first \\ fs [])) \\
+
+  fs [blast_rel_array_def, lookup_insert_var_cmp, EVERY_EL] \\
+  rpt strip_tac \\ TOP_CASE_TAC \\ gs [] \\ drule_first \\ gs [] \\
+  drule_last \\ disch_then (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\
+  simp [blast_cell_input_marked_ok_def] \\ strip_tac \\
+  drule_strip blast_cell_input_ok_cell_input_lt \\
+  drule_first \\ fs []
+QED*)
+
 Theorem blast_cell_correct:
  !cell blast_s blast_s' nl globalmax.
  blast_cell blast_s cell = INR (blast_s', nl) /\
@@ -1849,9 +1911,14 @@ Proof
 
   >- (* array, array *)
   (rpt conj_tac
-   >- (match_mp_tac blasterstate_ok_insert_cell1 \\ asm_exists_tac \\ simp [])
-   >- simp [deterministic_netlist_def, EVERY_EL, indexedListsTheory.EL_MAP2i, deterministic_cell_def]
-   >- simp [EVERY_EL, indexedListsTheory.EL_MAP2i, blast_cell_output_ok_def, cell_output_def]
+   >- (match_mp_tac blasterstate_ok_insert \\ asm_exists_tac \\
+       fs [blasterstate_ok_def, EVERY_GENLIST,
+           blast_cell_input_marked_ok_def, blast_cell_input_ok_def,
+           cell_input_marked_not_pseudo_def, cell_input_not_pseudo_def])
+   THEN3 (simp [deterministic_netlist_def, blast_cell_output_ok_def, cell_output_def,
+                gol_mux_array_def, lt3,
+                EVERY_FLAT, EVERY_EL, indexedListsTheory.EL_MAP2i] \\
+          rw [] \\ fs [deterministic_cell_def, cell_output_def])
    >- fs [blasterstate_ok_def, lookup_insert_var_cmp, cell_output_def] \\
 
   simp [sum_foldM_def, cell_run_def, sum_bind_INR] \\ rpt strip_tac' \\
@@ -1865,7 +1932,19 @@ Proof
   qspec_then ‘in2’ assume_tac blast_cell_input_cell_input_lt_array \\ drule_first \\
   qspec_then ‘in3’ assume_tac blast_cell_input_cell_input_lt_array \\ drule_first \\
 
-  qspecl_then [‘inps1’, ‘inps2’] assume_tac blast_cellMux_correct \\ drule_first \\ simp [] \\
+  simp [cell1_run_def] \\
+  qmatch_goalsub_abbrev_tac ‘gol_mux_array _ _ not_inp1 _ _’ \\
+  qmatch_goalsub_abbrev_tac ‘sum_foldM _ bs' _’ \\
+  drule_strip Abbrev_cset_var_tmpvar_lem \\ strip_tac \\
+  drule_strip cell_inp_run_lt_cget_var_cong \\
+  qspec_then ‘inps1’ assume_tac EVERY_cell_inp_run_lt_cget_var_cong \\ drule_first \\ 
+  qspec_then ‘inps2’ assume_tac EVERY_cell_inp_run_lt_cget_var_cong \\ drule_first \\
+  simp [] \\ rpt strip_tac \\
+
+  qspecl_then [‘inps1’, ‘inps2’, ‘inp1’, ‘not_inp1’, ‘bs'’] assume_tac blast_cellMux_correct \\ drule_first \\
+  gs [] \\ disch_then drule_strip \\
+  unabbrev_all_tac \\ impl_tac >- simp [cell_inp_run_cset_var] \\ strip_tac \\
+  asm_exists_tac \\
 
   fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var] \\ rpt strip_tac \\
   IF_CASES_TAC >- (fs [blast_rel_bool_def, blast_rel_array_def, lookup_insert_var_cmp] \\ rw []) \\
@@ -1874,22 +1953,52 @@ Proof
   >- (fs [blast_rel_bool_def, lookup_insert_var_cmp]
       >- (first_assum (qspec_then `VarInp (NetVar n) NoIndexing` mp_tac) \\ 
           impl_tac >- simp [cell_input_lt_def, var_lt_def] \\ strip_tac \\
-          fs [cell_inp_run_def])
+          fs [cell_inp_run_def, cget_var_cset_var])
       >- (TOP_CASE_TAC \\ drule_last \\ fs [blast_cell_input_marked_ok_def] \\
           drule_strip blast_cell_input_ok_cell_input_lt \\
-          drule_first \\ fs [])) \\
+          drule_first \\ fs [cell_input_lt_cell_inp_run_cset_var])) \\
 
   fs [blast_rel_array_def, lookup_insert_var_cmp, EVERY_EL] \\
   rpt strip_tac \\ TOP_CASE_TAC \\ gs [] \\ drule_first \\ gs [] \\
   drule_last \\ disch_then (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\
   simp [blast_cell_input_marked_ok_def] \\ strip_tac \\
   drule_strip blast_cell_input_ok_cell_input_lt \\
-  drule_first \\ fs []) \\
+  drule_first \\ fs [cell_input_lt_cell_inp_run_cset_var]) \\
+
+  (* bool, bool *)
+  TRY (
+  rename1 ‘blast_cell_input blast_s in2 = INR (BoolInp _)’ \\
+  rename1 ‘blast_cell_input blast_s in3 = INR (BoolInp _)’ \\
+
+  rpt conj_tac
+  >- (match_mp_tac blasterstate_ok_insert \\ asm_exists_tac \\ simp [] \\ conj_tac
+       >- (simp [blast_cell_input_marked_ok_def, blast_cell_input_ok_def] \\
+           fs [blasterstate_ok_def, gol_mux_out_def, gol_mux_length_def])
+       >- (simp [cell_input_marked_not_pseudo_def, cell_input_not_pseudo_def]))
+   >- simp [gol_mux_def, deterministic_netlist_def, deterministic_cell_def]
+   >- simp [gol_mux_def, blast_cell_output_ok_def, cell_output_def]
+   >- fs [blasterstate_ok_def, lookup_insert_var_cmp] \\
+
+   simp [cell_run_def, sum_bind_INR, sum_foldM_def] \\ rpt strip_tac' \\
+  
+   qspec_then ‘in1’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
+   qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
+   qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
+   qspec_then ‘in1’ assume_tac blast_cell_input_cell_input_lt_bool \\ drule_first \\
+   qspec_then ‘in2’ assume_tac blast_cell_input_cell_input_lt_bool \\ drule_first \\
+   qspec_then ‘in3’ assume_tac blast_cell_input_cell_input_lt_bool \\ drule_first \\
+   ‘out ≤ blast_s.tmpnum’ by fs [blasterstate_ok_def] \\
+   simp [] \\ rpt strip_tac \\ rveq \\ fs [cellMux_run_def] \\ rveq \\
+   qspecl_then [‘out’, ‘inp1’, ‘inp2’, ‘inp3’, ‘blast_s.tmpnum’] assume_tac cells_run_gol_mux \\ drule_first \\
+   asm_exists_tac \\
+
+   match_mp_tac blast_rel_insert_bool \\ rpt asm_exists_tac \\
+   simp [cell_inp_run_def, cget_var_cset_var, gol_mux_out_def] \\
+   Cases \\ simp [var_lt_def]) \\
 
   (rpt conj_tac
-   >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp [])
-   >- simp [deterministic_netlist_def, deterministic_cell_def]
-   \\ simp [blast_cell_output_ok_def, cell_output_def]) \\
+  >- (match_mp_tac blasterstate_ok_le \\ asm_exists_tac \\ simp [])
+  >- simp [deterministic_netlist_def, deterministic_cell_def]) \\
 
   simp [cell_run_def, sum_bind_INR, sum_foldM_def] \\ rpt strip_tac' \\
   rev_drule_strip blast_cell_inp_run_correct_bool \\ (impl_tac >- simp []) \\ strip_tac
@@ -1902,13 +2011,7 @@ Proof
   >- (* bool, array *)
   (qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
    qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_array \\ drule_first \\
-   simp [] \\ rpt strip_tac \\ fs [cellMux_run_def])
-
-  >- (* bool, bool *)
-  (qspec_then ‘in2’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-   qspec_then ‘in3’ assume_tac blast_cell_inp_run_correct_bool \\ drule_first \\
-   simp [] \\ rpt strip_tac \\ fs [cellMux_run_def] \\
-   drule_strip blast_rel_cset_var_cset_var_bool \\ simp []))
+   simp [] \\ rpt strip_tac \\ fs [cellMux_run_def]))
 
  \\ (* CellArrayWrite *)
  rename1 ‘CellArrayWrite out arr idx e’ \\

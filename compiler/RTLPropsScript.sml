@@ -657,6 +657,18 @@ Proof
  Cases_on `v` \\ fs [var_lt_def, cget_var_cset_var]
 QED
 
+Theorem cell_input_lt_cell_inp_run_cset_var_plus:
+ !inp fext s n v.
+ cell_input_lt inp n ==>
+ (cell_inp_run fext (cset_var s (NetVar n) v) inp = cell_inp_run fext s inp) ∧
+ (cell_inp_run fext (cset_var s (NetVar (n + 1)) v) inp = cell_inp_run fext s inp) ∧
+ (cell_inp_run fext (cset_var s (NetVar (n + 2)) v) inp = cell_inp_run fext s inp) ∧
+ (cell_inp_run fext (cset_var s (NetVar (n + 3)) v) inp = cell_inp_run fext s inp)
+Proof
+ Cases \\ rw [cell_inp_run_def, cell_input_lt_def] \\
+ Cases_on `v` \\ fs [var_lt_def, cget_var_cset_var]
+QED
+
 Theorem netlist_ok_mem_cell_output:
  !nl EEv min max ml out.
  netlist_ok EEv min max nl /\ MEM out (FLAT (MAP cell_output nl)) ==> min <= out /\ out < max

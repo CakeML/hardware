@@ -274,6 +274,30 @@ Definition blast_cell_equal_def:
  od
 End
 
+Definition gol_mux_length_def:
+ gol_mux_length = 4
+End
+
+Definition gol_mux_out_def:
+ gol_mux_out = 3
+End
+
+Definition gol_mux_def:
+ gol_mux tmpnum inpc inpt inpf =
+  [Cell2 CAnd tmpnum inpc inpt;
+   Cell1 CNot (tmpnum + 1) inpc;
+   Cell2 CAnd (tmpnum + 2) (VarInp (NetVar (tmpnum + 1)) NoIndexing) inpf;
+   Cell2 COr (tmpnum + 3) (VarInp (NetVar tmpnum) NoIndexing) (VarInp (NetVar (tmpnum + 2)) NoIndexing)]
+End
+
+(* variant for array *)
+Definition gol_mux_array_def:
+ gol_mux_array tmpnum inpc not_inpc inpt inpf =
+  [Cell2 CAnd tmpnum inpc inpt;
+   Cell2 CAnd (tmpnum + 1) not_inpc inpf;
+   Cell2 COr (tmpnum + 2) (VarInp (NetVar tmpnum) NoIndexing) (VarInp (NetVar (tmpnum + 1)) NoIndexing)]
+End
+
 Definition blast_cell_def:
  (blast_cell s (Cell1 CNot out inp1) = blast_cell_bitwise s (Cell1 CNot out inp1)) ∧
 
@@ -289,12 +313,17 @@ Definition blast_cell_def:
   inp2 <- blast_cell_input s inp2;
   inp3 <- blast_cell_input s inp3;
   return $ case (inp1, inp2, inp3) of
-    (BoolInp inp1, BoolInp inp2, BoolInp inp3) => (s, [CellMux out inp1 inp2 inp3])
+    (BoolInp inp1, BoolInp inp2, BoolInp inp3) => 
+     let (s, tmpnum) = blaster_new_names s gol_mux_length;
+         s = s with si := insert var_cmp (NetVar out) (MBoolInp $ GoodInp $ VarInp (NetVar (tmpnum + gol_mux_out)) NoIndexing) s.si in
+     (s, gol_mux tmpnum inp1 inp2 inp3)
   | (BoolInp inp1, ArrayInp inps1, ArrayInp inps2) =>
-     let (s, tmpnum) = blaster_new_names s (LENGTH inps1);
-         outs = GENLIST (\i. GoodInp (VarInp (NetVar (i + tmpnum)) NoIndexing)) (LENGTH inps1);
-         s = s with si := insert var_cmp (NetVar out) (MArrayInp outs) s.si in
-      (s, MAP2i (\i inp2 inp3. CellMux (tmpnum + i) inp1 inp2 inp3) inps1 inps2)
+     let (s, tmpnum) = blaster_new_names s (1 + 3*(LENGTH inps1));
+         outs = GENLIST (\i. GoodInp (VarInp (NetVar (tmpnum + 3*i + 2)) NoIndexing)) (LENGTH inps1);
+         s = s with si := insert var_cmp (NetVar out) (MArrayInp outs) s.si;
+         not_inp1_cell = Cell1 CNot tmpnum inp1;
+         not_inp1 = VarInp (NetVar tmpnum) NoIndexing in
+      (s, not_inp1_cell :: (FLAT $ MAP2i (\i inp2 inp3. gol_mux_array (tmpnum + 3*i) inp1 not_inp1 inp2 inp3) inps1 inps2))
   | _ => (* does not happen on well-typed netlists: *) (s, [])
  od) ∧
 
@@ -416,20 +445,6 @@ Definition blast_pseudoreg_inp_def:
            | ArrayInp inps => MArrayInp $ MAP GoodInp inps
  od
 End
-
- (*  case lookup var_cmp var s.si of
-    NONE => MBoolInp (GoodInp (VarInp var idx))
-  | SOME (MBoolInp minp) => MBoolInp minp (* idx must be NoIndexing here, so can ignore it *)
-  | SOME (MArrayInp inps) =>
-      case idx of
-        NoIndexing => GoodInp (MArrayInp inps)
-      | Indexing idx =>
-          if idx < LENGTH inps then
-            sum_map BoolInp (inp_marked_get (revEL idx inps))
-          else INR (BoolInp (ConstInp (CBool F)))
-      | SliceIndexing i1 i2 =>
-          sum_map ArrayInp (sum_mapM inp_marked_get (rev_slice inps i1 i2))) ∧
- (blast_pseudoreg_inp s inp = GoodInp (blast_cell_input s inp))*)
 
 Definition build_ffs_si_reg_entry_def:
  build_ffs_si_reg_entry s ((reg, i), rdata) =
