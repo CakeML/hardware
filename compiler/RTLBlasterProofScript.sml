@@ -785,12 +785,12 @@ Theorem blast_cellMux_correct:
  LENGTH lhs' = LENGTH lhs ∧
  LENGTH rhs' = LENGTH rhs ∧
  cell_input_lt c tmpnum ∧
- cell_input_lt not_c tmpnum ∧
  EVERY (\inp. cell_input_lt inp tmpnum) lhs ∧
  EVERY (\inp. cell_input_lt inp tmpnum) rhs ∧
  (!i. i < LENGTH lhs ==> cell_inp_run fext s (EL i lhs) = INR (CBool (EL i lhs'))) ∧
  (!i. i < LENGTH rhs ==> cell_inp_run fext s (EL i rhs) = INR (CBool (EL i rhs'))) ∧
  cell_inp_run fext s c = INR (CBool c') ∧
+ cell_input_lt not_c tmpnum ∧
  cell_inp_run fext s not_c = INR (CBool ~c') ⇒
  ∃s'. sum_foldM (cell_run fext) s (FLAT (MAP2i (λi inp2 inp3. gol_mux_array (3*i + tmpnum) c not_c inp2 inp3) lhs rhs)) = INR s' /\
       s'.fbits = s.fbits /\ (* <-- follows from general determinism thm... *)
@@ -810,10 +810,10 @@ Proof
  
  first_x_assum (qspecl_then [‘t'’, ‘c’, ‘not_c’, ‘s'’, ‘t’, ‘t''’, ‘c'’, ‘tmpnum + 3’, ‘fext’] mp_tac) \\
  impl_tac >- (rw [cell_input_lt_cell_inp_run_cset_var]
- THEN2 (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
+ >- (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
  THEN2 (match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp [])
- THEN2 (rpt (first_x_assum (qspec_then ‘SUC i’ mp_tac)) \\ fs [EVERY_EL, cell_input_lt_cell_inp_run_cset_var])) \\
- strip_tac \\
+ THEN2 (rpt (first_x_assum (qspec_then ‘SUC i’ mp_tac)) \\ fs [EVERY_EL, cell_input_lt_cell_inp_run_cset_var])
+ >- (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])) \\ strip_tac \\
 
  ‘((λi inp2 inp3. gol_mux_array (3 * i + tmpnum) c not_c inp2 inp3) ∘ SUC) =
   (λi inp2 inp3. gol_mux_array (3 * i + (tmpnum + 3)) c not_c inp2 inp3)’
@@ -1593,7 +1593,7 @@ Theorem cells_run_gol_mux:
  cell_input_lt inpc tmpnum ∧
  cell_input_lt inpt tmpnum ∧
  cell_input_lt inpf tmpnum ⇒
- sum_foldM (cell_run fext) s (gol_mux tmpnum out inpc inpt inpf) = 
+ sum_foldM (cell_run fext) s (gol_mux tmpnum inpc inpt inpf) = 
  INR $ cset_var (cset_var (cset_var (cset_var s
         (NetVar tmpnum) (CBool (vc ∧ vt)))
         (NetVar (tmpnum + 1)) (CBool (¬vc)))
@@ -1941,10 +1941,12 @@ Proof
   qspec_then ‘inps2’ assume_tac EVERY_cell_inp_run_lt_cget_var_cong \\ drule_first \\
   simp [] \\ rpt strip_tac \\
 
+  imp_res_tac cell_input_lt_SUC \\
+  imp_res_tac EVERY_cell_input_lt_SUC \\
   qspecl_then [‘inps1’, ‘inps2’, ‘inp1’, ‘not_inp1’, ‘bs'’] assume_tac blast_cellMux_correct \\ drule_first \\
   gs [] \\ disch_then drule_strip \\
-  unabbrev_all_tac \\ impl_tac >- simp [cell_inp_run_cset_var] \\ strip_tac \\
-  asm_exists_tac \\
+  unabbrev_all_tac \\ impl_tac >- simp [cell_inp_run_cset_var, cell_input_lt_def, var_lt_def] \\ strip_tac \\
+  fs [arithmeticTheory.ADD1] \\
 
   fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var] \\ rpt strip_tac \\
   IF_CASES_TAC >- (fs [blast_rel_bool_def, blast_rel_array_def, lookup_insert_var_cmp] \\ rw []) \\
@@ -1956,13 +1958,15 @@ Proof
           fs [cell_inp_run_def, cget_var_cset_var])
       >- (TOP_CASE_TAC \\ drule_last \\ fs [blast_cell_input_marked_ok_def] \\
           drule_strip blast_cell_input_ok_cell_input_lt \\
-          drule_first \\ fs [cell_input_lt_cell_inp_run_cset_var])) \\
+          drule_strip cell_input_lt_SUC \\ fs [arithmeticTheory.ADD1] \\
+          rpt drule_first \\ fs [cell_input_lt_cell_inp_run_cset_var])) \\
 
   fs [blast_rel_array_def, lookup_insert_var_cmp, EVERY_EL] \\
   rpt strip_tac \\ TOP_CASE_TAC \\ gs [] \\ drule_first \\ gs [] \\
   drule_last \\ disch_then (qspec_then ‘i’ mp_tac) \\ impl_tac >- simp [] \\
   simp [blast_cell_input_marked_ok_def] \\ strip_tac \\
   drule_strip blast_cell_input_ok_cell_input_lt \\
+  drule_strip cell_input_lt_SUC \\ fs [arithmeticTheory.ADD1] \\
   drule_first \\ fs [cell_input_lt_cell_inp_run_cset_var]) \\
 
   (* bool, bool *)

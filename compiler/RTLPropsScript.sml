@@ -618,6 +618,12 @@ Proof
  match_mp_tac cell_input_lt_le \\ rpt asm_exists_tac
 QED
 
+Theorem EVERY_cell_input_lt_SUC:
+ !l n. EVERY (λinp. cell_input_lt inp n) l ==> EVERY (λinp. cell_input_lt inp (SUC n)) l
+Proof
+ rpt strip_tac \\ match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp []
+QED
+
 Theorem cell_ok_le:
  !cell min min' max max'.
   cell_ok min' max' cell /\ min <= min' /\ max' <= max ==> cell_ok min max cell

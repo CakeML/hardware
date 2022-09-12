@@ -319,11 +319,11 @@ Definition blast_cell_def:
      (s, gol_mux tmpnum inp1 inp2 inp3)
   | (BoolInp inp1, ArrayInp inps1, ArrayInp inps2) =>
      let (s, tmpnum) = blaster_new_names s (1 + 3*(LENGTH inps1));
-         outs = GENLIST (\i. GoodInp (VarInp (NetVar (tmpnum + 3*i + 2)) NoIndexing)) (LENGTH inps1);
+         outs = GENLIST (\i. GoodInp (VarInp (NetVar (tmpnum + 1 + 3*i + 2)) NoIndexing)) (LENGTH inps1);
          s = s with si := insert var_cmp (NetVar out) (MArrayInp outs) s.si;
          not_inp1_cell = Cell1 CNot tmpnum inp1;
          not_inp1 = VarInp (NetVar tmpnum) NoIndexing in
-      (s, not_inp1_cell :: (FLAT $ MAP2i (\i inp2 inp3. gol_mux_array (tmpnum + 3*i) inp1 not_inp1 inp2 inp3) inps1 inps2))
+      (s, not_inp1_cell :: (FLAT $ MAP2i (\i inp2 inp3. gol_mux_array (tmpnum + 1 + 3*i) inp1 not_inp1 inp2 inp3) inps1 inps2))
   | _ => (* does not happen on well-typed netlists: *) (s, [])
  od) ∧
 
