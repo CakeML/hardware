@@ -38,7 +38,7 @@ end
 val (circuit, circuit_correct) = compile (definition "avg_v_def")
 
 (*
-print_Circuit (circuit |> concl |> rhs) |> print
+print_Circuit (circuit |> concl |> boolSyntax.rhs) |> print
 writeFile "avg.sv"
 *)
 
@@ -147,14 +147,14 @@ Theorem avg_circuit_correct:
  (*fext_rel_n fextv_rel vfext fext ∧ same_fext vfext nfext ⇒*)
  nfext_rel nfext fext ⇒
  ?s fbits'.
-  circuit_run_no_pseudos nfext fbits avg_v_tech_circuit n = INR (s, fbits') ∧
+  circuit_run_no_pseudos nfext fbits avg_v_circuit n = INR (s, fbits') ∧
   ALOOKUP s "avg" = SOME (w2net (avg_spec fext n))
 Proof
  rewrite_tac [nfext_rel_vfext_lem] \\
  rpt strip_tac \\
  drule_strip avg_fextv_rel_vertype_fext \\
  drule_strip circuit_correct \\
- first_x_assum (qspecl_then [‘fbits’, ‘n’] strip_assume_tac) \\
+ first_x_assum (qspecl_then [‘n’, ‘fbits’] strip_assume_tac) \\
  simp [] \\
 
  qspec_then ‘avg_v’ mp_tac verilogSortTheory.already_sorted_sort_run \\

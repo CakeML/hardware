@@ -61,6 +61,11 @@ sig
   val is_OutInps : term -> bool
   val mk_OutInps : term -> term
 
+  (* Cell2 *)
+  val CAnd_tm : term
+  val COr_tm : term
+  val CEqual_tm : term
+                               
   (* Cells *)
   val NDetCell_tm : term
   val dest_NDetCell : term -> term * term

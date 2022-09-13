@@ -43,6 +43,11 @@ val cell_input_ty = mk_type ("cell_input", []);
 val (OutInp_tm, mk_OutInp, dest_OutInp, is_OutInp) = op1 "OutInp";
 val (OutInps_tm, mk_OutInps, dest_OutInps, is_OutInps) = op1 "OutInps";
 
+(* Cell2 *)
+val CAnd_tm = “CAnd”;
+val COr_tm = “COr”;
+val CEqual_tm = “CEqual”;
+
 (* Cells *)
 val (NDetCell_tm, mk_NDetCell, dest_NDetCell, is_NDetCell) = op2 "NDetCell";
 val (Cell1_tm, mk_Cell1, dest_Cell1, is_Cell1) = op3 "Cell1";

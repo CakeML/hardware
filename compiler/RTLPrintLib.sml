@@ -7,8 +7,10 @@ open RTLSyntax;
 
 open SMLRTLLib;
 
-datatype cell = CellLUT of (int * cell_input list * bool list list)
-              | Carry4 of (int * int * cell_input * cell_input list * cell_input list);
+datatype cell2 = CAnd | COr | CEqual;
+
+datatype cell = CellNot of (int * cell_input)
+              | Cell2 of (cell2 * int * cell_input * cell_input);
 
 fun extract_bool tm =
  if tm ~~ T then
@@ -18,25 +20,31 @@ fun extract_bool tm =
  else
   failwith "Not a constant bool?";
 
+fun extract_cell2 tm =
+ if tm ~~ CAnd_tm then
+  CAnd
+ else if tm ~~ COr_tm then
+  COr
+ else if tm ~~ CEqual_tm then
+  CEqual
+ else
+  failwith "Not a cell2?";
+
 fun extract_cell cell =
- if is_CellLUT cell then let
-  val (out, ins, tb) = dest_CellLUT cell
+ if is_Cell1 cell then let
+  val (_, out, inp) = dest_Cell1 cell
   val out = int_of_term out
-  val ins = ins |> dest_list |> fst
-  val ins = map extract_cell_input ins
-  val extract_tb_entry = (map extract_bool) o fst o dest_list
-  val tb = tb |> dest_list |> fst |> map extract_tb_entry
+  val inp = extract_cell_input inp
  in
-  CellLUT (out, ins, tb)
- end else if is_Carry4 cell then let
-  val (out, cout, cin, lhs, rhs) = dest_Carry4 cell
+  CellNot (out, inp)
+ end else if is_Cell2 cell then let
+  val (cellt, out, lhs, rhs) = dest_Cell2 cell
+  val cellt = extract_cell2 cellt
   val out = int_of_term out
-  val cout = int_of_term cout
-  val cin = extract_cell_input cin
-  val lhs = lhs |> dest_list |> fst |> map extract_cell_input
-  val rhs = rhs |> dest_list |> fst |> map extract_cell_input
+  val lhs = extract_cell_input lhs
+  val rhs = extract_cell_input rhs
  in
-  Carry4 (out, cout, cin, lhs, rhs)
+  Cell2 (cellt, out, lhs, rhs)
  end else
   failwith ("Illegal cell: " ^ term_to_string cell);
 
@@ -114,21 +122,12 @@ in
 end;
 
 fun print_wires nl = let
- fun print_wires' (CellLUT (out, _, _)) = "logic w" ^ Int.toString out ^ ";\n"
-   | print_wires' (Carry4 (out, cout, _, _, _)) = "logic[3:0] w" ^ Int.toString out ^ ";\nlogic[3:0] w" ^ Int.toString cout ^ ";\n"
+ fun print_wires' (CellNot (out, _)) = "logic w" ^ Int.toString out ^ ";\n"
+   | print_wires' (Cell2 (_, out, _, _)) = "logic w" ^ Int.toString out ^ ";\n"
 in
  map print_wires' nl |> concat
 end;
 
-(*
-FDCE #(.INIT(INIT)) FDCE_inst (
- .Q(Q),     // 1-bit Data output
- .C(C),     // 1-bit Clock input
- .CE(CE),   // 1-bit Clock enable input
- .CLR(CLR), // 1-bit Asynchronous clear input
- .D(D)      // 1-bit Data input
-);
-*)
 fun print_regs regs = let
  fun print_reg (regi, rdata) = let
   val (reg, i) = pairSyntax.dest_pair regi
@@ -138,15 +137,12 @@ fun print_regs regs = let
   val v = lookup "init" rdata |> optionSyntax.dest_some |> print_CBool
   val inp = lookup "inp" rdata;
  in
-  "logic " ^ reg ^ ";\n" ^
-  "FDCE #(.INIT(" ^ v ^ ")) FDCE_" ^ reg ^ " (\n" ^
-  " .Q(" ^ reg ^ ")," ^
-  " .C(clk)," ^
-  " .CLR(1'b0)," ^
+  "logic " ^ reg ^ " = " ^ v ^ ";\n" ^
+  "always_ff @(posedge clk) " ^ reg ^ " <= " ^
   (if optionSyntax.is_some inp then
-   " .CE(1'b1), .D(" ^ (inp |> optionSyntax.dest_some |> extract_cell_input |> print_cell_input) ^ "));\n\n"
+   inp |> optionSyntax.dest_some |> extract_cell_input |> print_cell_input
   else
-   " .CE(1'b0), .D(1'b0));\n\n")
+   "1'b0") ^ ";\n\n"
  end
  val regs = regs |> dest_list |> fst |> map pairSyntax.dest_pair
 in
@@ -159,49 +155,26 @@ fun pow n m =
  else
   n * pow n (m - 1);
 
-(*
-LUT2 #(.INIT(4'h0) // Specify LUT Contents
-) LUT2_inst (
- .O(O),   // LUT general output
- .I0(I0), // LUT input
- .I1(I1)  // LUT input
-);
-*)
-fun print_cell (CellLUT (out, ins, tb)) = let
-     val wire = "w" ^ Int.toString out
-     val len = length ins
-     val ins = ins |> rev
-                   |> mapi (fn i => fn inp => ".I" ^ Int.toString i ^ "(" ^ print_cell_input inp ^ ")")
-                   |> String.concatWith ", "
-     val tb' = all_binary_numbers len
-               |> rev
-               |> map (fn e => if mem e tb then "1" else "0")
-               |> concat
-               |> (fn tb' => Int.toString (pow 2 len) ^ "'b" ^ tb')
-    in
-     "LUT" ^ Int.toString len ^ " #(.INIT(" ^ tb' ^ ")) LUT_" ^ wire ^ " (\n" ^
-     " .O(" ^ wire ^ "), "  ^ ins ^ ");\n\n"
-    end
-(*
-CARRY4 CARRY4_inst (
- .CO(CO),         // 4-bit carry out
- .O(O),           // 4-bit carry chain XOR data out
- .CI(CI),         // 1-bit carry cascade input
- .CYINIT(CYINIT), // 1-bit carry initialization
- .DI(DI),         // 4-bit carry-MUX data in
- .S(S)            // 4-bit carry-MUX select input
-);
-*)
-  | print_cell (Carry4 (out, cout, cin, di, s)) = let
-    val ci_cyinit = case cin of
-                      ConstInp b => ".CI(1'b0), .CYINIT(" ^ print_bool b ^ "),"
-                    | cin => ".CI(" ^ print_cell_input cin ^ "), .CYINIT(1'b0),"
-    in
-     "CARRY4 CARRY4_" ^ Int.toString out ^ " (\n" ^
-     " .CO(w" ^ Int.toString cout ^ "), .O(w" ^ Int.toString out ^ "), " ^
-     ci_cyinit ^
-     " .DI({" ^ (di |> map print_cell_input |> String.concatWith ", ")^ "})," ^
-     " .S({" ^ (s |> map print_cell_input |> String.concatWith ", ")^ "}));\n\n"
+fun print_cell2 cell2 =
+ case cell2 of
+   CAnd => "and"
+ | COr => "or"
+ | CEqual => "xnor" (* note! called xnor! *)
+
+fun print_cell (CellNot (out, inp)) = let
+  val wire = "w" ^ Int.toString out
+  val inp = print_cell_input inp
+ in
+  "not not_" ^ wire ^ "(" ^ wire ^ ", "  ^ inp ^ ");\n"
+ end
+
+| print_cell (Cell2 (cell2, out, lhs, rhs)) = let
+   val cell2 = print_cell2 cell2
+   val wire = "w" ^ Int.toString out
+   val lhs = print_cell_input lhs
+   val rhs = print_cell_input rhs
+  in
+   cell2 ^ " " ^ cell2 ^ "_" ^ Int.toString out ^ "(" ^ wire ^ ", " ^ lhs ^ ", " ^ rhs ^ ");\n"
   end;
 
 val print_nl = concat o map print_cell;

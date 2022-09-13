@@ -5,7 +5,7 @@ open hardwarePreamble;
 
 open fullCompilerTheory compileTheory;
 
-open GreedyTechMapLib LECLib;
+(*open GreedyTechMapLib LECLib;*)
 
 fun compile module_def = let
  val module = module_def |> concl |> lhs
@@ -50,7 +50,7 @@ fun compile module_def = let
                         (REWRITE_CONV (map SYM [extenv_def, outs_def, regs_def, nl_def]))
                     |> REWRITE_RULE [SYM circuit_def]
  
- (** Tech map **)
+ (*(** Tech map **)
  val _ = print "Running technology mapping..."
  val timer = Timer.startRealTimer ();
  val tech_nl = greedy_tech_map circuit
@@ -68,15 +68,18 @@ fun compile module_def = let
  val tech_circuit_def = new_circuit_definition "tech_circuit"
                                                (lec_result |> concl |> strip_forall |> snd |> dest_imp |> snd
                                                            |> lhs |> strip_comb |> snd |> el 3)
- val lec_result = REWRITE_RULE (map SYM [circuit_def, tech_circuit_def]) lec_result
+ val lec_result = REWRITE_RULE (map SYM [circuit_def, tech_circuit_def]) lec_result*)
 
  (** Glue everything together **)
  val compile_correct_inst = MATCH_MP compile_correct compile_result
 
- val th = MATCH_MP compile_glue_thm compile_correct_inst
- val th = MATCH_MP th lec_result
+ (* hack: this is bad, might change order of foralls + lhs *)
+ val th = compile_correct_inst |> SPEC_ALL |> UNDISCH_ALL |> CONJUNCTS |> last |> DISCH_ALL |> GEN_ALL
+
+ (*val th = MATCH_MP compile_glue_thm compile_correct_inst
+ val th = MATCH_MP th lec_result*)
 in
- (REWRITE_RULE [extenv_def, outs_def, regs_def, tech_nl_def] tech_circuit_def,
+ (REWRITE_RULE [extenv_def, outs_def, regs_def, nl_def] circuit_def,
   th)
 end
 
