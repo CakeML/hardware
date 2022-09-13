@@ -136,40 +136,30 @@ Definition blast_cell_bitwise_def:
  od)
 End
 
-Definition xor_lut_table_def:
- xor_lut_table = [[F; T]; [T; F]]
+Definition blast_cell_add1_def:
+ blast_cell_add1 tmpnum cin l r =
+  let tmpinp offset = VarInp (NetVar (tmpnum + offset)) NoIndexing;
+  cells = [
+   (* xor *)
+   Cell2 CEqual tmpnum l r;
+   Cell1 CNot (tmpnum + 1) (tmpinp 0);
+   (* xor *)
+   Cell2 CEqual (tmpnum + 2) (tmpinp 1) cin;
+   Cell1 CNot (tmpnum + 3) (tmpinp 2);
+   (* the rest *)
+   Cell2 CAnd (tmpnum + 4) cin (tmpinp 1);
+   Cell2 CAnd (tmpnum + 5) l r;
+   Cell2 COr (tmpnum + 6) (tmpinp 4) (tmpinp 5)] in
+  (tmpnum + 7, tmpinp 3, tmpinp 6, cells)
 End
 
-Definition blast_cell_add4_def:
- blast_cell_add4 tmpnum cin lhs rhs = let
-  di = PAD_LEFT (ConstInp (CBool F)) 4 $ (*if inps1t = [] then FRONT inps1h else*) lhs;
-  xor_cells = MAP2i (λi inp1 inp2. CellLUT (tmpnum + i) [inp1; inp2] xor_lut_table) lhs rhs;
-  s = PAD_LEFT (ConstInp (CBool F)) 4 $ GENLIST (λi. VarInp (NetVar (tmpnum + i)) NoIndexing) (LENGTH lhs);
-  tmpnum = tmpnum + LENGTH lhs;
-  cell = Carry4 tmpnum (tmpnum + 1) cin di s;
-  outs = REVERSE $ GENLIST (λi. VarInp (NetVar tmpnum) (Indexing i)) (LENGTH lhs) in
-   (tmpnum + 2, outs, VarInp (NetVar $ tmpnum + 1) (Indexing (LENGTH lhs - 1)), xor_cells ++ [cell])
-End
-
-(* Other synthesizers seem to have special cases for very short additions, where no carry chain is needed --
-   such adders are compiled into LUTs directly without any carry4 involved.
-   Also, the a bit in the input can be skipped in the last adder if we don't care about
-   the carry output of that adder... Not sure why this is considered an optimization... *)
 Definition blast_cell_addarray_def:
- blast_cell_addarray tmpnum cin inps1 inps2 =
-  if inps1 = [] then (tmpnum, [], cin, []) else (* only relevant if top-level input is empty? *)
-  let inps1h = REVERSE (TAKE 4 inps1);
-      inps2h = REVERSE (TAKE 4 inps2);
-      inps1t = DROP 4 inps1;
-      inps2t = DROP 4 inps2;
-      (tmpnum, outs4, cout, cells4) = blast_cell_add4 tmpnum cin inps1h inps2h in
-  if inps1t = [] then
-   (tmpnum, outs4, cout, cells4)
-  else
-   let (tmpnum, cells_outs, cout, cells) = blast_cell_addarray tmpnum cout inps1t inps2t in
-   (tmpnum, cells_outs ++ outs4, cout, cells4 ++ cells)
-Termination
- WF_REL_TAC `measure (LENGTH o (λ(_, _, inps1, _). inps1))` \\ rw [] \\ Cases_on ‘inps1’ \\ fs []
+ (blast_cell_addarray tmpnum cin (l::ls) (r::rs) =
+  let (tmpnum, out, cout, cells1) = blast_cell_add1 tmpnum cin l r in
+  let (tmpnum, outs, cout, cells) = blast_cell_addarray tmpnum cout ls rs in
+   (tmpnum, out :: outs, cout, cells1 ++ cells)) ∧
+ (* empty and remaining nonsense cases *)
+ (blast_cell_addarray tmpnum cin _ _ = (tmpnum, [], cin, []))
 End
 
 Definition blast_cell_add_def:
@@ -180,7 +170,7 @@ Definition blast_cell_add_def:
    (ArrayInp inps1, ArrayInp inps2) =>
     (let (tmpnum, outs, cout, cells) =
           blast_cell_addarray s.tmpnum (ConstInp (CBool F)) (REVERSE inps1) (REVERSE inps2) in
-     (s with <| tmpnum := tmpnum; si := insert var_cmp (NetVar out) (MArrayInp (MAP GoodInp outs)) s.si |>, cells))
+     (s with <| tmpnum := tmpnum; si := insert var_cmp (NetVar out) (MArrayInp (MAP GoodInp (REVERSE outs))) s.si |>, cells))
   | _ => (s, []) (* does not happen on well-typed netlists *)
  od
 End

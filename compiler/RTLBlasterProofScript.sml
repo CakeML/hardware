@@ -937,6 +937,14 @@ Proof
  rw [EVERY_EL] \\ drule_strip el_inps2n_lem \\ simp []
 QED
 
+(* hack: *)
+Theorem inps2n_sing_INR:
+ ∀inp s fext n. inps2n fext s [inp] = INR n ⇔ ∃b. cell_inp_run fext s inp = INR $ CBool b ∧ n = v2n [b]
+Proof
+ rw [inps2n_def, sum_mapM_def] \\ CASE_TAC \\ rw [sum_map_def, sum_bind_def] \\
+ gvs [sum_bind_def, get_bool_def, sum_bind_INR, v2n_sing, get_bool_INR] \\ rw []
+QED
+
 Triviality inps2n_v2n_lem:
  ∀l s fext bs.
  (∀i. i < LENGTH l ⇒ cell_inp_run fext s (EL i l) = INR (CBool (EL i bs))) ∧ LENGTH bs = LENGTH l ⇒
@@ -993,15 +1001,6 @@ Proof
  simp [LENGTH_EQ_NUM_compute, PULL_EXISTS]
 QED
 
-Theorem cellLUT_run_xor_lut_table:
- ∀in1 in2 in1' in2' fext s v.
- cell_inp_run fext s in1 = INR (CBool in1') ∧
- cell_inp_run fext s in2 = INR (CBool in2') ⇒
- cellLUT_run fext s [in1; in2] xor_lut_table = INR (CBool (in1' ≠ in2'))
-Proof
- rw [cellLUT_run_def, sum_mapM_def, sum_map_def, sum_bind_def, get_bool_def, xor_lut_table_def] \\ metis_tac []
-QED
-
 Triviality EVERY_cell_inp_run_bool_lt_cset_var:
  ∀inps v fext s tmpnum.
  EVERY (λinp. ∃b. cell_inp_run fext s inp = INR (CBool b)) inps ∧
@@ -1011,46 +1010,6 @@ Proof
  rw [EVERY_MEM] \\ rpt drule_first \\
  Cases_on ‘inp’ \\ fs [cell_inp_run_def, cell_input_lt_def, cget_var_cset_var] \\
  Cases_on ‘v'’ \\ fs [var_lt_def]
-QED
-
-Theorem run_cells_xor:
- ∀inps1 inps2 fext bs tmpnum.
- LENGTH inps2 = LENGTH inps1 ∧
- EVERY (λinp. ∃b. cell_inp_run fext bs inp = INR (CBool b)) inps1 ∧
- EVERY (λinp. ∃b. cell_inp_run fext bs inp = INR (CBool b)) inps2 ∧
- EVERY (λinp. cell_input_lt inp tmpnum) inps1 ∧
- EVERY (λinp. cell_input_lt inp tmpnum) inps2 ⇒
- ∃bs'. sum_foldM (cell_run fext) bs (MAP2i (λi inp1 inp2. CellLUT (i + tmpnum) [inp1; inp2] xor_lut_table) inps1 inps2) = INR bs' ∧
-       bs'.fbits = bs.fbits ∧
-       (∀n. cget_var bs' (NetVar n) = if tmpnum ≤ n ∧ n < tmpnum + LENGTH inps1 then
-                                       INR (CBool ((OUTR (get_bool (OUTR (cell_inp_run fext bs (EL (n - tmpnum) inps1)))))
-                                            ≠
-                                            (OUTR (get_bool (OUTR (cell_inp_run fext bs (EL (n - tmpnum) inps2)))))))
-
-                                      else
-                                       cget_var bs (NetVar n))
-Proof
- Induct >- (Cases \\ simp [sum_foldM_def]) \\ gen_tac \\ Cases \\ simp [] \\ rpt strip_tac' \\
- qspecl_then [‘h’, ‘h'’] assume_tac cellLUT_run_xor_lut_table \\ drule_first \\
- simp [sum_foldM_def, sum_bind_def, cell_run_def] \\
- qmatch_goalsub_abbrev_tac ‘cset_var _ _ res’ \\
- qspecl_then [‘inps1’, ‘res’] assume_tac EVERY_cell_inp_run_bool_lt_cset_var \\ drule_first \\
- qspecl_then [‘t’, ‘res’] assume_tac EVERY_cell_inp_run_bool_lt_cset_var \\ drule_first \\
- unabbrev_all_tac \\
- qspecl_then [‘inps1’] assume_tac EVERY_cell_input_lt_le \\ drule_first \\
- disch_then (qspec_then ‘tmpnum + 1’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
- qspecl_then [‘t’] assume_tac EVERY_cell_input_lt_le \\ drule_first \\
- disch_then (qspec_then ‘tmpnum + 1’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
- drule_first \\ simp [combinTheory.o_DEF] \\
- ‘∀n. tmpnum + SUC n = n + (tmpnum + 1)’ by decide_tac \\ pop_assum (rewrite_tac o sing) \\
- simp [cset_var_fbits] \\ gen_tac \\
- ‘n < tmpnum ∨ n = tmpnum ∨ (tmpnum < n ∧ n < tmpnum + LENGTH inps1 + 1) ∨ tmpnum + LENGTH inps1 + 1 ≤ n’ by decide_tac
- >- simp [cget_var_cset_var]
- >- simp [cget_var_cset_var, get_bool_def]
- >- (simp [EL_CONS] \\ ‘PRE (n - tmpnum) = n - (tmpnum + 1)’ by decide_tac \\ simp [] \\
-     fs [EVERY_EL] \\ ‘n − (tmpnum + 1) < LENGTH inps1 ∧ n - (tmpnum + 1) < LENGTH t’ by fs [] \\
-     rpt drule_first \\ fs [cell_input_lt_cell_inp_run_cset_var])
- >- simp [cget_var_cset_var]
 QED
 
 Triviality EVERY_cell_input_lt_unchanged:
@@ -1064,35 +1023,33 @@ QED
 
 (* Separate out proof of "static properties" in adder case, "dynamic properties" depends on the input lists being
    of equal length... *)
-Theorem blast_cell_add4_correct_static_part:
- ∀n r tmpnum tmpnum' cin inps1 inps2 outs cout cells regs.
- blast_cell_add4 tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
- LENGTH inps1 ≤ 4 ∧
+Theorem blast_cell_add1_correct_static_part:
+ ∀tmpnum tmpnum' cin l r out cout cells regs.
+ blast_cell_add1 tmpnum cin l r = (tmpnum', out, cout, cells) ∧
  cell_input_lt cin tmpnum ∧
- EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧
- EVERY (\inp. cell_input_lt inp tmpnum) inps2 ⇒
+ cell_input_lt l tmpnum ∧
+ cell_input_lt r tmpnum ⇒
  tmpnum ≤ tmpnum' ∧
- EVERY (λinp. cell_input_ge inp tmpnum) outs ∧
- EVERY (λinp. cell_input_lt inp tmpnum') outs ∧
- EVERY (λc. cell_input_not_pseudo regs c) outs ∧
+ cell_input_ge out tmpnum ∧
+ cell_input_lt out tmpnum' ∧
+ cell_input_not_pseudo regs out ∧
  cell_input_lt cout tmpnum' ∧
  deterministic_netlist cells ∧
  (* added afterwards: *)
  (∀processed globalmax.
-  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) inps1 ∧
-  EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) inps2 ⇒
+  blast_cell_input_ok l processed globalmax tmpnum ∧
+  blast_cell_input_ok r processed globalmax tmpnum ⇒
   EVERY (λc. blast_cell_output_ok c processed globalmax tmpnum) cells)
 Proof
- simp [Once blast_cell_add4_def, le4] \\ rpt strip_tac' \\ fs [length_le4_lem] \\ rveq \\ fs [] \\
+ simp [Once blast_cell_add1_def, le4] \\ rpt strip_tac' \\ fs [length_le4_lem] \\ rveq \\ fs [] \\
  simp [EVERY_DEF, cell_input_ge_def, cell_input_lt_def, var_lt_def] \\
  simp [EVERY_EL, deterministic_netlist_def, deterministic_cell_def, indexedListsTheory.EL_MAP2i,
        cell_input_not_pseudo_def, blast_cell_output_ok_def, cell_output_def]
 QED
 
 Theorem blast_cell_addarray_correct_static_part:
- ∀regs n r tmpnum tmpnum' cin inps1 inps2 outs cout cells.
+ ∀regs inps1 inps2 tmpnum tmpnum' cin outs cout cells.
  blast_cell_addarray tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
- LENGTH inps1 = n*4 + r ∧ r < 4 ∧
  cell_input_lt cin tmpnum ∧
  EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧
  EVERY (\inp. cell_input_lt inp tmpnum) inps2 ⇒
@@ -1107,115 +1064,71 @@ Theorem blast_cell_addarray_correct_static_part:
   EVERY (λinp. blast_cell_input_ok inp processed globalmax tmpnum) inps2 ⇒
   EVERY (λc. blast_cell_output_ok c processed globalmax tmpnum) cells)
 Proof
- gen_tac \\ Induct
- >- (* base *)
- (simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt gen_tac \\
-  IF_CASES_TAC >- simp [deterministic_netlist_def] \\
-  rpt strip_tac' \\ fs [DROP_LENGTH_TOO_LONG, TAKE_LENGTH_TOO_LONG] \\
-  pairarg_tac \\ fs [] \\ rveq \\
-  drule_strip blast_cell_add4_correct_static_part \\ simp [EVERY_REVERSE, EVERY_TAKE])
- \\ (* step *)
- simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt strip_tac' \\
- qpat_x_assum ‘LENGTH _ = _’ mp_tac \\ ‘r + 4 * SUC n = 4 + (4 * n + r)’ by decide_tac \\
- pop_assum (rewrite_tac o sing) \\ once_rewrite_tac [LENGTH_EQ_SUM] \\ strip_tac \\ rveq \\
+ gen_tac \\ Induct >- simp [blast_cell_addarray_def, deterministic_netlist_def] \\
+ gen_tac \\ Cases >- simp [blast_cell_addarray_def, deterministic_netlist_def] \\
+ rpt gen_tac \\ rename1 ‘blast_cell_addarray _ _ (l::ls) (r::rs)’ \\
+ simp [blast_cell_addarray_def] \\ rpt strip_tac' \\ rpt (pairarg_tac \\ fs []) \\ rveq \\
 
- Cases_on ‘l1 = []’ \\ fs [] \\ Cases_on ‘l2 = []’ \\ fs []
- >- (* length 4... *)
- (fs [length_le4_lem, blast_cell_add4_def] \\ rveq \\ fs [] \\
-  simp [cell_input_ge_def, cell_input_lt_def, var_lt_def] \\
-  simp [EVERY_EL, deterministic_netlist_def, deterministic_cell_def, indexedListsTheory.EL_MAP2i,
-        cell_input_not_pseudo_def, blast_cell_output_ok_def, cell_output_def])
- \\ (* all other lengths *)
- fs [DROP_APPEND, DROP_LENGTH_TOO_LONG, TAKE_APPEND, TAKE_LENGTH_TOO_LONG] \\
- pairarg_tac \\ drule_strip blast_cell_add4_correct_static_part \\ simp [EVERY_REVERSE, EVERY_TAKE] \\
- disch_then (qspec_then ‘regs’ strip_assume_tac) \\
- every_case_tac >- (‘n = 0 ∧ r = 0’ by decide_tac \\ fs []) \\ fs [] \\
- pairarg_tac \\ drule_first \\ impl_tac >- (rpt conj_tac
- >- (match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp [])
- >- (qspec_then ‘inps2’ assume_tac EVERY_cell_input_lt_le \\ drule_first \\ simp [EVERY_DROP])) \\ strip_tac \\
- fs [] \\ rveq \\ simp [EVERY_APPEND, deterministic_netlist_append] \\ rpt strip_tac
+ drule_strip blast_cell_add1_correct_static_part \\ first_x_assum (qspec_then ‘regs’ strip_assume_tac) \\
+ imp_res_tac EVERY_cell_input_lt_le \\
+ drule_last \\
+
+ rw [deterministic_netlist_append]
  >- (match_mp_tac EVERY_cell_input_ge_le \\ asm_exists_tac \\ simp [])
- >- (match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp [])
- >- metis_tac [EVERY_TAKE]
- >- metis_tac [EVERY_DROP, EVERY_blast_cell_output_ok_le, EVERY_blast_cell_input_ok_le,
-               arithmeticTheory.LESS_EQ_REFL]
+ >- (match_mp_tac cell_input_lt_le \\ asm_exists_tac \\ simp [])
+ >- metis_tac [EVERY_blast_cell_output_ok_le, EVERY_blast_cell_input_ok_le, arithmeticTheory.LESS_EQ_REFL]
 QED
 
-(* Works if only bool vars are present in goal *)        
-fun Cases_on_all (asm, g) =
- (MAP_EVERY (REPEAT_TCL STRIP_THM_THEN SUBST_ALL_TAC o flip SPEC BOOL_CASES_AX) (free_vars g)) (asm, g);
-
-Theorem blast_cell_add4_correct:
- ∀inps1 inps2 inps1' inps2' tmpnum tmpnum' cin cin' cout outs cells fext bs.
- blast_cell_add4 tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
- inps2n fext bs inps1 = INR inps1' ∧ inps2n fext bs inps2 = INR inps2' ∧ inps2n fext bs [cin] = INR cin' ∧
- EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧ EVERY (\inp. cell_input_lt inp tmpnum) inps2 ∧ cell_input_lt cin tmpnum ∧
- inps1 ≠ [] ∧ LENGTH inps1 <= 4 ∧ LENGTH inps2 = LENGTH inps1 ⇒
- tmpnum' = tmpnum + LENGTH inps1 + 2 ∧
- LENGTH outs = LENGTH inps1 ∧
- EVERY (\inp. cell_input_lt inp tmpnum') outs ∧ cell_input_lt cout tmpnum' ∧
- ∃bs' outs' cout'. sum_foldM (cell_run fext) bs cells = INR bs' ∧
-                   bs'.fbits = bs.fbits ∧
-                   (∀var. var_lt var tmpnum ⇒ cget_var bs' var = cget_var bs var) ∧
-                   inps2n fext bs' outs = INR outs' ∧
-                   inps2n fext bs' [cout] = INR cout' ∧
-                   outs' + 2**(LENGTH inps1)*cout' = inps1' + inps2' + cin'
+Theorem blast_cell_add1_correct:
+ ∀l r l' r' tmpnum tmpnum' cin cin' cout out cells fext bs.
+ blast_cell_add1 tmpnum cin l r = (tmpnum', out, cout, cells) ∧
+ inps2n fext bs [l] = INR l' ∧
+ inps2n fext bs [r] = INR r' ∧
+ inps2n fext bs [cin] = INR cin' ∧
+ cell_input_lt l tmpnum ∧
+ cell_input_lt r tmpnum ∧
+ cell_input_lt cin tmpnum ⇒
+ tmpnum ≤ tmpnum' ∧
+ cell_input_lt out tmpnum' ∧
+ cell_input_lt cout tmpnum' ∧
+ ∃bs' out' cout'. sum_foldM (cell_run fext) bs cells = INR bs' ∧
+                  bs'.fbits = bs.fbits ∧
+                  (∀var. var_lt var tmpnum ⇒ cget_var bs' var = cget_var bs var) ∧
+                  inps2n fext bs' [out] = INR out' ∧
+                  inps2n fext bs' [cout] = INR cout' ∧
+                  out' + 2*cout' = l' + r' + cin'
 Proof
- simp [Once blast_cell_add4_def, sum_foldM_append] \\ rpt strip_tac' \\
+ simp [blast_cell_add1_def, cell_input_lt_def, var_lt_def, sum_foldM_def] \\ rpt strip_tac' \\
 
- imp_res_tac inps2n_INR \\
- drule_strip run_cells_xor \\ simp [sum_bind_def] \\
+ gvs [inps2n_sing_INR] \\
 
- ‘∀inp. cell_input_lt inp tmpnum ⇒ cell_inp_run fext bs' inp = cell_inp_run fext bs inp’ by
-  (Cases \\ simp [cell_inp_run_def] \\ Cases_on ‘v’ >- (drule_strip cells_run_cget_var_RegVar \\ simp []) \\
-   simp [cell_input_lt_def, var_lt_def]) \\
+ simp [cell_run_def, sum_bind_def, cell2_run_def, cell1_run_def,
+       cell_inp_run_cset_var, cell_input_lt_cell_inp_run_cset_var_plus] \\
 
- qspec_then ‘inps1’ assume_tac EVERY_cell_input_lt_unchanged \\ drule_first \\
- qspec_then ‘inps2’ drule_strip EVERY_cell_input_lt_unchanged \\ drule_first \\
-
- rpt conj_tac
- >- simp [EVERY_REVERSE, EVERY_GENLIST, cell_input_lt_def, var_lt_def]
- >- simp [cell_input_lt_def, var_lt_def] \\
-
- fs [le4, length_le4_lem] \\ rfs [length_le4_lem] \\ rveq \\ fs [EVERY_DEF] \\
-
- simp [sum_foldM_def, cell_run_def, PAD_LEFT, sum_bind_def, sum_map_def, sum_mapM_def, cell_inp_run_ConstInp] \\
- simp [cell_inp_run_def, cget_fext_var_def, sum_bind_def, sum_map_def] \\
- simp [cellCarry4_run_def, get_bool_def, sum_bind_def, sum_map_def, sum_mapM_def, cset_var_fbits] \\
- simp [GSYM PULL_EXISTS] \\
- (conj_tac >- (rw [var_lt_def, cget_var_cset_var] \\
-               Cases_on ‘var’ >- (drule_strip cells_run_cget_var_RegVar \\ simp []) \\ fs [var_lt_def])) \\
- simp [carry4_xor_def, carry4_muxcy_def, inps2n_def, sum_mapM_def, sum_map_def, sum_bind_def] \\
- simp [cell_inp_run_cset_var, cget_fext_var_def, sum_revEL_def, sum_EL_EL, get_bool_def, sum_map_def, sum_bind_def] \\
-
- fs [inps2n_def, sum_map_INR, sum_mapM_INR] \\ fs [sum_mapM_def] \\ fs [sum_bind_def, get_bool_def] \\ rveq \\
-    
- EVAL_TAC \\ once_rewrite_tac [bitify_reverse_map] \\ EVAL_TAC \\
- Cases_on_all \\ EVAL_TAC
- (* CONV_TAC (LHS_CONV EVAL) \\ CONV_TAC (RHS_CONV EVAL) *)
+ conj_tac >- rw [cget_var_cset_var, var_lt_def] \\ simp [v2n_sing] \\ rw []
 QED
 
 Triviality inps2n_cong:
- ∀inps fext s s' n.
- EVERY (λinp. cell_inp_run fext s' inp = cell_inp_run fext s inp) inps ∧
- inps2n fext s inps = INR n ⇒
- inps2n fext s' inps = INR n
+ ∀inps fext s s' n tmpnum.
+ EVERY (λinp. cell_input_lt inp tmpnum) inps ∧
+ (∀inp fext. cell_input_lt inp tmpnum ⇒ cell_inp_run fext s' inp = cell_inp_run fext s inp) ∧
+ inps2n fext s inps = INR n ⇒ inps2n fext s' inps = INR n
 Proof
- rw [EVERY_EL, inps2n_def, sum_map_INR, sum_mapM_EL]
+ rw [EVERY_EL, inps2n_def, sum_map_INR, sum_mapM_EL] \\ metis_tac []
 QED
                   
 Triviality inps2n_cong_REVERSE:
- ∀inps fext s s' n.
- EVERY (λinp. cell_inp_run fext s' inp = cell_inp_run fext s inp) inps ∧
+ ∀inps fext s s' n tmpnum.
+ EVERY (λinp. cell_input_lt inp tmpnum) inps ∧
+ (∀inp fext. cell_input_lt inp tmpnum ⇒ cell_inp_run fext s' inp = cell_inp_run fext s inp) ∧
  inps2n fext s (REVERSE inps) = INR n ⇒
  inps2n fext s' (REVERSE inps) = INR n
 Proof
  metis_tac [EVERY_REVERSE, inps2n_cong]
 QED
 
-(* Well... cute induction by simply complete induction would have probably worked here... *)
 Theorem blast_cell_addarray_correct:
- ∀n tmpnum tmpnum' cin cin' inps1 inps1' inps2 inps2' outs cout cells fext bs r.
+ ∀inps1 inps2 inps1' inps2' cin cin' tmpnum tmpnum' outs cout cells fext bs.
  blast_cell_addarray tmpnum cin inps1 inps2 = (tmpnum', outs, cout, cells) ∧
  inps2n fext bs (REVERSE inps1) = INR inps1' ∧
  inps2n fext bs (REVERSE inps2) = INR inps2' ∧
@@ -1223,70 +1136,36 @@ Theorem blast_cell_addarray_correct:
  cell_input_lt cin tmpnum ∧
  EVERY (\inp. cell_input_lt inp tmpnum) inps1 ∧
  EVERY (\inp. cell_input_lt inp tmpnum) inps2 ∧
- LENGTH inps1 = 4*n + r ∧ LENGTH inps2 = 4*n + r ∧ r < 4 ⇒
+ LENGTH inps1 = LENGTH inps2 ⇒
  tmpnum ≤ tmpnum' ∧
  LENGTH outs = LENGTH inps1 ∧
  ∃bs' outs' cout'. sum_foldM (cell_run fext) bs cells = INR bs' ∧
                    bs'.fbits = bs.fbits ∧
                    (∀var. var_lt var tmpnum ⇒ cget_var bs' var = cget_var bs var) ∧
-                   inps2n fext bs' outs = INR outs' ∧
+                   inps2n fext bs' (REVERSE outs) = INR outs' ∧
                    inps2n fext bs' [cout] = INR cout' ∧
                    outs' + 2**(LENGTH inps1)*cout' = inps1' + inps2' + cin'
 Proof
  Induct
- >- (* Base *)
- (simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt gen_tac \\ IF_CASES_TAC
- >- (* len = 0 *)
- (rw [] \\ fs [inps2n_nil, REVERSE_DEF] \\ rw [sum_foldM_def])
- \\ (* len = 1, 2, 3 *)
- pairarg_tac \\ simp [] \\ reverse IF_CASES_TAC >- simp [] \\ rpt strip_tac' \\ fs [] \\ rveq \\
- fs [TAKE_LENGTH_TOO_LONG] \\ drule_strip blast_cell_add4_correct \\ simp [EVERY_REVERSE])
+ >- (Cases \\ simp [blast_cell_addarray_def] \\ rpt strip_tac' \\ fs [inps2n_nil, sum_foldM_def]) \\
+ gen_tac \\ Cases >- simp [] \\
+ rpt gen_tac \\ rename1 ‘blast_cell_addarray _ _ (in1::inps1) (in2::inps2)’ \\ rpt strip_tac' \\
+ fs [blast_cell_addarray_def] \\ rpt (pairarg_tac \\ fs []) \\ rveq \\
+ fs [inps2n_append] \\ rveq \\ 
+ drule_strip blast_cell_add1_correct \\
+ drule cell_inp_run_cong_lt \\ strip_tac \\
+ qspec_then ‘inps1’ assume_tac inps2n_cong_REVERSE \\ drule_first \\
+ qspec_then ‘inps2’ assume_tac inps2n_cong_REVERSE \\ drule_first \\
+ imp_res_tac EVERY_cell_input_lt_le \\
+ drule_last \\ simp [] \\ strip_tac \\
 
- \\ (* Step *)  
- simp [Once blast_cell_addarray_def, DROP_EQ_NIL] \\ rpt gen_tac \\ IF_CASES_TAC >- simp [] \\
- pairarg_tac \\ simp [] \\ IF_CASES_TAC
- >- (* len = 4 *)
- (last_x_assum kall_tac \\ rpt strip_tac' \\ fs [] \\ rveq \\
- ‘n = 0 ∧ r = 0’ by decide_tac \\ rveq \\ fs [TAKE_LENGTH_TOO_LONG] \\
- drule_strip blast_cell_add4_correct \\ simp [EVERY_REVERSE])
+ simp [sum_foldM_append, sum_bind_def] \\
+ simp [GSYM PULL_EXISTS] \\ conj_tac >- metis_tac [var_lt_le] \\
 
- \\ (* len > 4 *)
- rpt strip_tac' \\ qpat_x_assum ‘LENGTH inps1 = _’ mp_tac \\ qpat_x_assum ‘LENGTH inps2 = _’ mp_tac \\
- ‘r + 4 * SUC n = 4 + (4 * n + r)’ by decide_tac \\ pop_assum (rewrite_tac o sing) \\
- ntac 2 (disch_then (strip_assume_tac o ONCE_REWRITE_RULE [LENGTH_EQ_SUM])) \\
- rveq \\ qpat_x_assum ‘_ ≠ []’ kall_tac \\
+ drule cell_inp_run_cong_lt \\ strip_tac \\
+ qspec_then ‘[out]’ assume_tac inps2n_cong \\ fs [] \\ drule_first \\ simp [] \\
 
- fs [REVERSE_APPEND, inps2n_append] \\
- fs [DROP_APPEND, DROP_LENGTH_NIL_rwt, TAKE_APPEND, TAKE_LENGTH_TOO_LONG] \\
- 
- drule_strip blast_cell_add4_correct \\ simp [EVERY_REVERSE, NOT_NIL_EQ_LENGTH_NOT_0] \\ strip_tac \\
- pairarg_tac \\ fs [] \\ rveq \\
-
- (* copied... *)
- ‘∀inp. cell_input_lt inp tmpnum ⇒ cell_inp_run fext bs' inp = cell_inp_run fext bs inp’ by
-  (Cases \\ simp [cell_inp_run_def] \\ Cases_on ‘v’ >- (drule_strip cells_run_cget_var_RegVar \\ simp []) \\
-   simp [cell_input_lt_def, var_lt_def]) \\
- (* end copy... *)
-
- qspec_then ‘l2’ assume_tac EVERY_cell_input_lt_unchanged \\ drule_first \\
- qspec_then ‘l2'’ assume_tac EVERY_cell_input_lt_unchanged \\ drule_first \\
- drule_first \\
- qspec_then ‘l2’ assume_tac inps2n_cong_REVERSE \\ drule_first \\
- qspec_then ‘l2'’ assume_tac inps2n_cong_REVERSE \\ drule_first \\
- drule_first \\ disch_then (qspec_then ‘r’ mp_tac) \\
- impl_tac >- (simp [] \\ rpt conj_tac \\ match_mp_tac EVERY_cell_input_lt_le \\ asm_exists_tac \\ simp []) \\ strip_tac \\
-
- simp [sum_foldM_append, sum_bind_def, inps2n_append] \\
- (* copied again... *)
- ‘∀inp. cell_input_lt inp (tmpnum + 6) ⇒ cell_inp_run fext bs'' inp = cell_inp_run fext bs' inp’ by
-  (Cases \\ simp [cell_inp_run_def] \\ Cases_on ‘v’ >- (drule_strip cells_run_cget_var_RegVar \\ simp []) \\
-   simp [cell_input_lt_def, var_lt_def]) \\
- (* end copy... *)
- qspec_then ‘outs4’ assume_tac EVERY_cell_input_lt_unchanged \\ drule_first \\
- drule_strip inps2n_cong \\ simp [] \\ conj_tac
- >- (rpt strip_tac \\ drule var_lt_le \\ disch_then (qspec_then ‘tmpnum + 6’ mp_tac) \\ simp [])
- >- (‘4 * n + (r + 4) = 4 + (4 * n + r)’ by decide_tac \\ pop_assum (rewrite_tac o sing) \\
-    once_rewrite_tac [arithmeticTheory.EXP_ADD] \\ simp [])
+ simp [arithmeticTheory.ADD1, arithmeticTheory.EXP_ADD]
 QED
 
 Theorem blast_cell_equal12_correct_static:
@@ -1840,7 +1719,6 @@ Proof
       fs [cell2_run_bad_types] \\ NO_TAC) \\
 
  pairarg_tac \\ gvs [] \\
- qspecl_then [‘LENGTH inps1’, ‘4’] mp_tac arithmeticTheory.DA \\ impl_tac >- simp [] \\ strip_tac \\
 
  qspec_then ‘in1’ assume_tac blast_cell_input_cell_input_marked_ok \\ drule_first \\
  impl_tac >- fs [blasterstate_ok_def] \\ disch_then (assume_tac o SIMP_RULE (srw_ss()) []) \\
@@ -1851,7 +1729,7 @@ Proof
  drule_strip EVERY_blast_cell_input_ok_cell_input_lt \\
 
  drule_strip blast_cell_addarray_correct_static_part \\
- rewrite_tac [LENGTH_REVERSE, cell_input_lt_def, EVERY_REVERSE] \\
+ rewrite_tac [cell_input_lt_def, EVERY_REVERSE] \\
  disch_then drule_strip \\ pop_assum (qspec_then ‘regs’ strip_assume_tac) \\
 
  rw []
@@ -1872,15 +1750,16 @@ Proof
  qspecl_then [‘fext’, ‘bs’] assume_tac inps2n_F \\ gs [] \\
 
  drule_strip blast_cell_addarray_correct \\
- rewrite_tac [REVERSE_REVERSE, EVERY_REVERSE, LENGTH_REVERSE, cell_input_lt_def] \\
+ rewrite_tac [REVERSE_REVERSE, EVERY_REVERSE, cell_input_lt_def] \\
  disch_then drule_strip \\ simp [] \\
 
- fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var] \\ rpt strip_tac \\ IF_CASES_TAC
+ fs [blast_rel_def, blasterstate_ok_def, cset_var_fbits, cget_var_cset_var] \\
+ rpt strip_tac \\ simp [] \\ rpt strip_tac \\ IF_CASES_TAC
 
  >- (rw [lookup_insert_var_cmp, blast_rel_array_def, EL_MAP] \\
-    qspec_then ‘outs’ assume_tac el_inps2n_lem \\ drule_first \\ disch_then (qspec_then ‘i’ mp_tac) \\
+    qspec_then ‘REVERSE outs’ assume_tac el_inps2n_lem \\ drule_first \\ disch_then (qspec_then ‘i’ mp_tac) \\
     simp [] \\ strip_tac \\
-    drule_strip inps2n_lt \\ qspec_then ‘outs’ assume_tac inps2n_lt \\ drule_first \\ fs [] \\
+    drule_strip inps2n_lt \\ qspec_then ‘REVERSE outs’ assume_tac inps2n_lt \\ drule_first \\ fs [] \\
     drule_strip fixwidth_sum_2pow \\ rfs [])
 
  \\ fs [] \\ drule_first \\ rpt TOP_CASE_TAC

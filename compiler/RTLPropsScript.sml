@@ -669,7 +669,10 @@ Theorem cell_input_lt_cell_inp_run_cset_var_plus:
  (cell_inp_run fext (cset_var s (NetVar n) v) inp = cell_inp_run fext s inp) ∧
  (cell_inp_run fext (cset_var s (NetVar (n + 1)) v) inp = cell_inp_run fext s inp) ∧
  (cell_inp_run fext (cset_var s (NetVar (n + 2)) v) inp = cell_inp_run fext s inp) ∧
- (cell_inp_run fext (cset_var s (NetVar (n + 3)) v) inp = cell_inp_run fext s inp)
+ (cell_inp_run fext (cset_var s (NetVar (n + 3)) v) inp = cell_inp_run fext s inp) ∧
+ (cell_inp_run fext (cset_var s (NetVar (n + 4)) v) inp = cell_inp_run fext s inp) ∧
+ (cell_inp_run fext (cset_var s (NetVar (n + 5)) v) inp = cell_inp_run fext s inp) ∧
+ (cell_inp_run fext (cset_var s (NetVar (n + 6)) v) inp = cell_inp_run fext s inp)
 Proof
  Cases \\ rw [cell_inp_run_def, cell_input_lt_def] \\
  Cases_on `v` \\ fs [var_lt_def, cget_var_cset_var]
