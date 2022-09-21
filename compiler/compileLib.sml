@@ -5,6 +5,8 @@ open hardwarePreamble;
 
 open fullCompilerTheory compileTheory;
 
+open RTLSyntax;
+
 (*open GreedyTechMapLib LECLib;*)
 
 fun compile module_def = let

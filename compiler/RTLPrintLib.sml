@@ -7,11 +7,6 @@ open RTLSyntax;
 
 open SMLRTLLib;
 
-datatype cell2 = CAnd | COr | CEqual;
-
-datatype cell = CellNot of (int * cell_input)
-              | Cell2 of (cell2 * int * cell_input * cell_input);
-
 fun extract_bool tm =
  if tm ~~ T then
   true
@@ -19,40 +14,6 @@ fun extract_bool tm =
   false
  else
   failwith "Not a constant bool?";
-
-fun extract_cell2 tm =
- if tm ~~ CAnd_tm then
-  CAnd
- else if tm ~~ COr_tm then
-  COr
- else if tm ~~ CEqual_tm then
-  CEqual
- else
-  failwith "Not a cell2?";
-
-fun extract_cell cell =
- if is_Cell1 cell then let
-  val (_, out, inp) = dest_Cell1 cell
-  val out = int_of_term out
-  val inp = extract_cell_input inp
- in
-  CellNot (out, inp)
- end else if is_Cell2 cell then let
-  val (cellt, out, lhs, rhs) = dest_Cell2 cell
-  val cellt = extract_cell2 cellt
-  val out = int_of_term out
-  val lhs = extract_cell_input lhs
-  val rhs = extract_cell_input rhs
- in
-  Cell2 (cellt, out, lhs, rhs)
- end else
-  failwith ("Illegal cell: " ^ term_to_string cell);
-
-fun extract_netlist nl = let
- val nl = fst (dest_list nl)
-in
- map extract_cell nl
-end;
 
 fun print_type tm =
  if is_CBool_t tm then
