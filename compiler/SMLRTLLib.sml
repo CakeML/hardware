@@ -15,9 +15,7 @@ datatype cell_input = ConstInp of bool (* <-- we know that we only have bool inp
 datatype cell2 = CAnd | COr | CEqual;
 
 datatype cell = CellNot of (int * cell_input)
-              | Cell2 of (cell2 * int * cell_input * cell_input)
-              | CellDuplicate_Left2DownAndRight
-              | CellRotate_Down2Right;
+              | Cell2 of (cell2 * int * cell_input * cell_input);
 
 (*datatype cell2 = CAnd | COr | CEqual;
 
