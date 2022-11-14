@@ -17,6 +17,8 @@ datatype cell2 = CAnd | COr | CEqual;
 datatype cell = CellNot of (int * cell_input)
               | Cell2 of (cell2 * int * cell_input * cell_input);
 
+datatype vertype = VBool_t | VArray_t of int;
+
 (*datatype cell2 = CAnd | COr | CEqual;
 
 datatype cell = Cell1 of (int * cell_input) (* <-- no "cell1" type currently, only have inv currently *)
@@ -69,6 +71,24 @@ fun flatMap f [] = []
      | SOME x' => x' :: flatMap f xs;
 
 (** Extract (non-tech.-mapped) HOL netlist to SML netlist **)
+
+fun extract_bool tm =
+ if tm ~~ T then
+  true
+ else if tm ~~ F then
+  false
+ else
+  failwith "Not a constant bool?";
+
+fun extract_type tm =
+ if is_CBool_t tm then
+  VBool_t
+ else if is_CArray_t tm then let
+  val dim = tm |> dest_CArray_t |> int_of_term
+ in
+  VArray_t dim
+ end else
+  failwith ("Unknown type: " ^ term_to_string tm);
 
 fun extract_var t =
  if is_RegVar t then let

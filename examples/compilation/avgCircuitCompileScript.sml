@@ -2,7 +2,7 @@ open hardwarePreamble;
 
 open avgCircuitTheory;
 
-open translatorLib compileLib RTLPrintLib;
+open translatorLib compileLib RTLPrintLib RTLPlacerLib;
 
 val _ = new_theory "avgCircuitCompile";
 

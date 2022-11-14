@@ -7,14 +7,6 @@ open RTLSyntax;
 
 open SMLRTLLib;
 
-fun extract_bool tm =
- if tm ~~ T then
-  true
- else if tm ~~ F then
-  false
- else
-  failwith "Not a constant bool?";
-
 fun print_type tm =
  if is_CBool_t tm then
   "logic"
