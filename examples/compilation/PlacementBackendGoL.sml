@@ -1,6 +1,6 @@
 use "PlacementBackend.sml";
 
-structure PlacementBackendGoL :> PlacementBackend = struct
+structure PlacementBackendGoL (*:> PlacementBackend*) = struct
 
 open hardwarePreamble;
 
@@ -15,92 +15,45 @@ fun abbrev_dir dir =
  | DEast => "e"
  | DSouth => "s"
 
-val world = ref(Array2.array (1, 1, false));
+(* "placed cell" *)
+datatype pcell = PCell of cell
+               | PReg of int
+               | PRot of (dir * dir) (* input, output *)
+               | PDup of (dir* dir); (* input, duplicate output *)
+
+fun pcell_width pcell =
+ case pcell of
+   PCell _ => 1
+ | PReg _ => 6
+ | PRot _ => 1
+ | PDup _ => 1;
+
+val world = ref([]:((int * int) * pcell) list);
 (* map: cell output -> (x, y) *)
 val cells = ref([]:(int * (int * int)) list);
 
-val width = 300;
-val height = 300;
-val cellsize = 150;
-
-val cell_dir = "/Users/aloow/dev/game-of-life/java/v2/";
-
 fun placement_init () = let
- val _ = world := Array2.array (cellsize*width, cellsize*height, false)
+ val _ = world := [];
  val _ = cells := [];
 in () end;
 
-local
- val cell_not = gol_import (cell_dir ^ "lwss-not-ready.rle")
- val cell_and = gol_import (cell_dir ^ "lwss-and-ready.rle")
- val cell_or = gol_import (cell_dir ^ "lwss-or-ready.rle")
-in
-fun get_cell_impl cell =
- case cell of
-   CellNot _ => cell_not
- | Cell2 (t, _, _, _) =>
-   case t of
-     CAnd => cell_and
-   | COr => cell_or
-   | CEqual => cell_or (* TODO: we don't have any eq cell yet *)
-end;
-
 fun add_cell cell (x, y) = let
- val () = cells := (cell_output cell, (x, y)) :: !cells;
- val cell_impl = get_cell_impl cell
- val () = gol_place (!world) cell_impl (x*cellsize, y*cellsize)
+ val () = cells := (cell_output cell, (x, y)) :: !cells
+ val () = world := ((x, y), PCell cell) :: !world
+in () end;
+
+fun add_rot indir outdir (x, y) = let
+ val () = world := ((x, y), PRot (indir, outdir)) :: !world
+in () end;
+
+fun add_dup indir outdir (x, y) = let
+ val () = world := ((x, y), PDup (indir, outdir)) :: !world
 in () end;
 
 fun lookup_cell_inp n = lookup n (!cells);
 
-local
- fun abbrev_rot_dir indir outdir =
-  abbrev_dir indir ^ abbrev_dir outdir;
-    
- val rots = [(DEast, DNorth), (DEast, DSouth),
-             (DNorth, DEast), (* (DNorth, DWest), *)
-             (DSouth, DEast), (DSouth, DWest),
-             (DWest, DNorth), (DWest, DSouth)]
-         |> map (fn (indir, outdir) => let
-                 val k = abbrev_rot_dir indir outdir
-                 in
-                  (k, gol_import (cell_dir ^ "lwss-rotate-" ^ k ^ ".rle"))
-                 end)
-         |> Redblackmap.fromList String.compare
-in
-fun add_rot indir outdir (x, y) = let
- val k = abbrev_rot_dir indir outdir
- val cell_impl = Redblackmap.find (rots, k)
-in
- gol_place (!world) cell_impl (x*cellsize, y*cellsize)
-end
-end;
-
-local
- fun abbrev_dup_dir indir outdir =
-  abbrev_dir indir ^ "-" ^ abbrev_dir indir ^ abbrev_dir outdir;
-    
- val dups = [(DEast, DNorth), (DEast, DSouth),
-             (DNorth, DEast), (DNorth, DWest),
-             (DSouth, DEast), (DSouth, DWest),
-             (DWest, DNorth), (DWest, DSouth)]
-         |> map (fn (indir, outdir) => let
-                 val k = abbrev_dup_dir indir outdir
-                 in
-                  (k, gol_import (cell_dir ^ "lwss-dup-" ^ k ^ ".rle"))
-                 end)
-         |> Redblackmap.fromList String.compare
-in
-fun add_dup indir outdir (x, y) = let
- val k = abbrev_dup_dir indir outdir
- val cell_impl = Redblackmap.find (dups, k)
-in
- gol_place (!world) cell_impl (x*cellsize, y*cellsize)
-end
-end;
-
-(* TODO *)
-fun add_reg regty (x, y) = ();
+fun add_reg _ (x, y) = ();
+ (*world := [((x, y), PReg 0), ((x, y+1), PReg 1), ((x, y+2), PReg 2)] @ !world;*)
 
 (* fake for now *)
 val exts_locs = ref([]:(cell_input * int) list);
@@ -109,7 +62,173 @@ fun add_exts inps_y = exts_locs := inps_y @ !exts_locs;
 fun lookup_ext_inp inp = lookup inp (!exts_locs);
 fun lookup_exts_last_y () = let val (_, y) =  hd (!exts_locs) in y end;
 
-fun export filename = gol_export (!world) filename;
+val cell_dir = "/Users/aloow/dev/game-of-life/java/v2/";
+
+local
+ val cell_not = gol_import (cell_dir ^ "lwss-not-ready.rle") (1, 1)
+ val cell_and = gol_import (cell_dir ^ "lwss-and-ready.rle") (1, 1)
+ val cell_or = gol_import (cell_dir ^ "lwss-or-ready.rle") (1, 1)
+ (*val cell_xor = gol_import (cell_dir ^ "lwss-xor-ready.rle") (1, 1)*)
+in
+fun get_cell_gcell cell =
+ case cell of
+   CellNot _ => cell_not
+ | Cell2 (t, _, _, _) =>
+   case t of
+     CAnd => cell_and
+   | COr => cell_or
+   | CXOr => failwith "xor not implemented yet" (*cell_xor*)
+end;
+
+(*val preg_gcell = gol_import (cell_dir ^ "lwss-latch-2x2.rle") (1, 1)*)
+
+fun dir_toString dir =
+ case dir of
+   DWest => "west"
+ | DNorth => "north"
+ | DEast => "east"
+ | DSouth => "south";
+
+local
+ fun abbrev_rot_dir indir outdir =
+  abbrev_dir indir ^ abbrev_dir outdir;
+
+ val rots = [(DEast, DNorth), (DEast, DSouth),
+             (DNorth, DEast), (DNorth, DWest),
+             (DSouth, DEast), (DSouth, DWest),
+             (DWest, DNorth), (DWest, DSouth)]
+         |> map (fn (indir, outdir) => let
+                 val k = abbrev_rot_dir indir outdir
+                 in
+                  (k, gol_import (cell_dir ^ "lwss-rotate-" ^ k ^ ".rle") (1, 1))
+                 end)
+         |> Redblackmap.fromList String.compare
+in
+fun get_rot_gcell indir outdir = let
+ val k = abbrev_rot_dir indir outdir
+in
+ case Redblackmap.peek (rots, k) of
+   NONE => failwith ("missing rot cell: " ^ dir_toString indir ^ " -> " ^ dir_toString outdir)
+ | SOME cell_impl => cell_impl
+end
+end;
+
+local
+ fun abbrev_dup_dir indir outdir =
+  abbrev_dir indir ^ "-" ^ abbrev_dir indir ^ abbrev_dir outdir;
+
+ val dups = [(DEast, DNorth), (DEast, DSouth),
+             (DNorth, DEast), (DNorth, DWest),
+             (DSouth, DEast), (DSouth, DWest),
+             (DWest, DNorth), (DWest, DSouth)]
+         |> map (fn (indir, outdir) => let
+                 val k = abbrev_dup_dir indir outdir
+                 in
+                  (k, gol_import (cell_dir ^ "lwss-dup-" ^ k ^ ".rle") (1, 1))
+                 end)
+         |> Redblackmap.fromList String.compare
+in
+fun get_dup_gcell indir outdir = let
+ val k = abbrev_dup_dir indir outdir
+in
+ case Redblackmap.peek (dups, k) of
+   NONE => failwith ("missing dup cell: " ^ dir_toString indir ^ " -> " ^ dir_toString outdir)
+ | SOME cell_impl => cell_impl
+end
+end;
+
+fun max_x_cell world = let
+ fun max_x_cell_row g_max_x = foldl (fn ((x, cell), g_max_x) => Int.max (x + pcell_width cell - 1, g_max_x)) g_max_x
+in
+ foldl (fn ((y, xs), g_max_x) => max_x_cell_row g_max_x xs) 0 world
+end;
+
+(* is this not part of the stdlib? *)
+fun iterate (f : int -> unit) (i:int) (limit:int) =
+ if i = limit then
+  ()
+ else
+  (f i; iterate f (i+1) limit);
+
+datatype 'a map_entry = ME_first of int * 'a
+                      | ME_item of (int * 'a) * (int * 'a)
+                      | ME_last of int * 'a;
+
+(* f : outer coords -> inner y -> cell *)
+fun approws (f: int -> int -> 'a map_entry -> unit) rows = let
+ fun appcols' cols y y_inner =
+  case cols of
+    [] => failwith "impossible" (* <-- just to silence warning *)
+  | [xc] => f y y_inner (ME_last xc)
+  | (xc1::xc2::cols) => (f y y_inner (ME_item (xc1, xc2)); appcols' (xc2::cols) y y_inner)
+
+ fun appcols cols y y_inner =
+  case cols of
+    [] => failwith "impossible: empty row?"
+  | (xc::cols) => (f y y_inner (ME_first xc); appcols' (xc::cols) y y_inner)
+in
+ app (fn (y, cols) => iterate (appcols cols y) 0 cellsize) rows
+end;
+
+fun export_gcell out y gcell =
+ iterate (fn x => out (if Array2.sub (gcell, x, y) then "o" else "b")) 0 cellsize;
+
+fun get_gcell pcell =
+ case pcell of
+   PCell cell => get_cell_gcell cell
+ | PReg _ => (*preg_gcell: *) failwith "not implemented yet"
+ | PRot (indir, outdir) => get_rot_gcell indir outdir
+ | PDup (indir, outdir) => get_dup_gcell indir outdir;
+
+fun export_pcell out y_inner pcell = let
+ val gcell = get_gcell pcell
+in
+ export_gcell out y_inner gcell
+end;
+
+fun export_pcells out max_x y y_inner e =
+ case e of
+   ME_first (x, pcell) => let
+    val () = out (Int.toString (cellsize*x) ^ "b")
+   in
+    export_pcell out y_inner pcell
+   end
+ | ME_item ((xprev, pcellprev), (x, pcell)) => let
+    val w = x - (xprev + pcell_width pcellprev)
+    val () = out (Int.toString (cellsize*w) ^ "b")
+   in
+    export_pcell out y_inner pcell
+   end
+ | ME_last (x, pcell) =>
+   let
+    val w = max_x - (x + pcell_width pcell)
+    val () = out (Int.toString (cellsize*w) ^ "b$\n")
+   in () end;
+
+fun rowify_world world = let
+ fun update_entry ycell prev =
+  case prev of
+    NONE => [ycell]
+  | SOME prev => ycell :: prev
+in
+ world
+ |> foldl (fn (((x, y), cell), acc) => Redblackmap.update (acc, y, update_entry (x, cell)))
+          (Redblackmap.mkDict Int.compare)
+ |> Redblackmap.transform (sort (fn (y1, _) => fn (y2, _) => y1 <= y2))
+ |> Redblackmap.listItems
+end;
+
+(* val filename = "world.rle" *)
+
+fun export filename = let
+ val rows = rowify_world (!world)
+ val max_x = max_x_cell rows
+ val f = TextIO.openOut filename
+ val out = fn s => TextIO.output (f, s)
+ val () = out "x = 0, y = 0, rule = B3/S23\n"
+ val () = approws (export_pcells out max_x) rows
+ val () = TextIO.closeOut f
+in () end;
 
 (* for visualisation, does nothing in the GoL backend *)
 fun add_route (_ : string) (_ : int * int) = ();

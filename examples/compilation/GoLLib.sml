@@ -9,7 +9,8 @@ fun span p xs =
  | (x::xs') => if p x then let val (ys, zs) = span p xs' in (x::ys, zs) end else ([], xs);
 
 fun array2_set_true arr i j len =
- Array2.modifyi Array2.RowMajor (fn _ => true) {base = arr, col = i, row = j, nrows = SOME 1, ncols = SOME len};
+ Array2.modifyi Array2.RowMajor (fn _ => true) {base = arr, col = i, row = j, nrows = SOME 1, ncols = SOME len}
+ handle Subscript => failwith ("Cell outside bounding box: (x, y) = (" ^ Int.toString i ^ ", " ^ Int.toString j ^ ")");
 
 fun consume_line arr i j line = let
  val (ds, line) = span Char.isDigit line
@@ -31,14 +32,16 @@ fun consume_lines f arr i j =
  case TextIO.inputLine f of
    NONE => arr
  | SOME line => let val (i, j) = consume_line arr i j (String.explode line) in consume_lines f arr i j end;
-                   
-fun gol_import filename = let
+
+val cellsize = 150;
+
+fun gol_import filename (width, height) = let
  val f = TextIO.openIn filename
  (* consume header/comment *)
  val l = TextIO.inputLine f
  (* consume another line (i.e., header) if first line was comment *)
  val _ = if String.sub (Option.valOf l, 0) = #"#" then TextIO.inputLine f else NONE
- val arr = Array2.array (150, 150, false)
+ val arr = Array2.array (width*cellsize, height*cellsize, false)
  val _ = consume_lines f arr 0 0
 in
  arr

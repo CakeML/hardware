@@ -58,7 +58,7 @@ end;
 fun place_exts extenv = let
  val y = lookup_exts_last_y ()
  (* todo: these should be removed *)
- val _ = add_exts [(ConstInp false, y + 1), (ConstInp true, y + 2)]
+ (*val _ = add_exts [(ConstInp false, y + 1), (ConstInp true, y + 2)]*)
  val _ = add_hline (!xoffset, y + 1) (3000, y + 1)
  val _ = add_hline (!xoffset, y + 2) (3000, y + 2)
 
@@ -90,7 +90,8 @@ in () end;
 
 fun route_lhs inp =
  case inp of
-   VarInp (NetVar n, _) => route_lhs_net n
+   ConstInp _ => failwith "constant inputs not allowed"
+ | VarInp (NetVar n, _) => route_lhs_net n
  | _ => route_lhs_ext inp;
 
 fun route_rhs_ext inp = let
@@ -113,7 +114,8 @@ in () end;
 
 fun route_rhs inp =
  case inp of
-  VarInp (NetVar n, _) => route_rhs_net n
+   ConstInp _ => failwith "constant inputs not allowed"
+ | VarInp (NetVar n, _) => route_rhs_net n
  | _ => route_rhs_ext inp;
 
 fun place_cell cell =
@@ -212,22 +214,11 @@ fun place_circuit tm = let
 
  val _ = yoffset := !yoffset - 1 + length nl
  (* TODO: remove printout *)
- val _ = List.app (fn cell => (print (Int.toString (cell_output cell)); place_cell cell)) nl
+ (*val _ = List.app (fn cell => (print (Int.toString (cell_output cell)); place_cell cell)) nl*)
+ val _ = List.app place_cell nl
 
  val _ = yoffset := length regs
  val _ = place_regs_inps regs
 in () end;
-
-(*
-
-val tm = circuit |> concl |> rhs;
-place_circuit tm
--- gol
-export "world.rle"
-
--- js
-export "data.js"
-
-*)
 
 end
