@@ -140,17 +140,12 @@ Definition blast_cell_add1_def:
  blast_cell_add1 tmpnum cin l r =
   let tmpinp offset = VarInp (NetVar (tmpnum + offset)) NoIndexing;
   cells = [
-   (* xor *)
-   Cell2 CEqual tmpnum l r;
-   Cell1 CNot (tmpnum + 1) (tmpinp 0);
-   (* xor *)
-   Cell2 CEqual (tmpnum + 2) (tmpinp 1) cin;
-   Cell1 CNot (tmpnum + 3) (tmpinp 2);
-   (* the rest *)
-   Cell2 CAnd (tmpnum + 4) cin (tmpinp 1);
-   Cell2 CAnd (tmpnum + 5) l r;
-   Cell2 COr (tmpnum + 6) (tmpinp 4) (tmpinp 5)] in
-  (tmpnum + 7, tmpinp 3, tmpinp 6, cells)
+   Cell2 CXOr tmpnum l r;
+   Cell2 CXOr (tmpnum + 1) (tmpinp 0) cin;
+   Cell2 CAnd (tmpnum + 2) cin (tmpinp 0);
+   Cell2 CAnd (tmpnum + 3) l r;
+   Cell2 COr (tmpnum + 4) (tmpinp 2) (tmpinp 3)] in
+  (tmpnum + 5, tmpinp 1, tmpinp 4, cells)
 End
 
 Definition blast_cell_addarray_def:
@@ -295,6 +290,7 @@ Definition blast_cell_def:
   case cell2 of
     CAnd => blast_cell_bitwise s (Cell2 cell2 out inp1 inp2)
   | COr => blast_cell_bitwise s (Cell2 cell2 out inp1 inp2)
+  | CXOr => blast_cell_bitwise s (Cell2 cell2 out inp1 inp2)
   | CEqual => blast_cell_equal s out inp1 inp2
   | CAdd => blast_cell_add s out inp1 inp2) ∧
 

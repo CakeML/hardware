@@ -46,6 +46,7 @@ val (OutInps_tm, mk_OutInps, dest_OutInps, is_OutInps) = op1 "OutInps";
 (* Cell2 *)
 val CAnd_tm = “CAnd”;
 val COr_tm = “COr”;
+val CXOr_tm = “CXOr”;
 val CEqual_tm = “CEqual”;
 
 (* Cells *)

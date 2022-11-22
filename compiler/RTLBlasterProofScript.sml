@@ -1405,6 +1405,8 @@ Theorem cell2_run_bad_types:
  (∀v bs. cell2_run CAnd v (CArray bs) = INL TypeError) ∧
  (∀v bs. cell2_run COr (CArray bs) v = INL TypeError) ∧
  (∀v bs. cell2_run COr v (CArray bs) = INL TypeError) ∧
+ (∀v bs. cell2_run CXOr (CArray bs) v = INL TypeError) ∧
+ (∀v bs. cell2_run CXOr v (CArray bs) = INL TypeError) ∧
  (∀v b. cell2_run CAdd (CBool b) v = INL TypeError) ∧
  (∀v b. cell2_run CAdd v (CBool b) = INL TypeError)
 Proof
@@ -1617,7 +1619,7 @@ Proof
  >- (* Cell2 *)
  (rename1 `Cell2 t out in1 in2` \\ Cases_on `t`
 
- THEN2 (* CAnd and COr *) (
+ THEN3 (* CAnd, COr, and CXOr *) (
  simp [blast_cell_def, sum_bind_INR, blast_cell_bitwise_def] \\ rpt strip_tac' \\
  every_case_tac
  >- (* bool, bool *)

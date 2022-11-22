@@ -125,7 +125,7 @@ val _ = Datatype `
  cell1 = CNot`;
 
 val _ = Datatype `
- cell2 = CAnd | COr | CEqual | CAdd`;
+ cell2 = CAnd | COr | CXOr | CEqual | CAdd`;
 
 val _ = Datatype `
  (* output := op input0 input1 ... inputn <=> op output intput1 input2 ... inputn *)
@@ -294,6 +294,7 @@ val cell1_run_def = Define `
 Definition cell2_run_def:
  (cell2_run CAnd (CBool in1) (CBool in2) = (INR $ CBool (in1 ∧ in2))) ∧
  (cell2_run COr (CBool in1) (CBool in2) = (INR $ CBool (in1 ∨ in2))) ∧
+ (cell2_run CXOr (CBool in1) (CBool in2) = (INR $ CBool (in1 ≠ in2))) ∧
  (cell2_run CEqual (CBool in1) (CBool in2) = (INR $ CBool (in1 = in2))) ∧
  (cell2_run CEqual (CArray in1) (CArray in2) = do
   sum_check (LENGTH in1 = LENGTH in2) TypeError;

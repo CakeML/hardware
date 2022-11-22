@@ -12,19 +12,12 @@ datatype cell_input = ConstInp of bool (* <-- we know that we only have bool inp
                     | ExtInp of string * (int option)
                     | VarInp of var * (int option);
 
-datatype cell2 = CAnd | COr | CEqual;
+datatype cell2 = CAnd | COr | CXOr (*| CEqual*);
 
 datatype cell = CellNot of (int * cell_input)
               | Cell2 of (cell2 * int * cell_input * cell_input);
 
 datatype vertype = VBool_t | VArray_t of int;
-
-(*datatype cell2 = CAnd | COr | CEqual;
-
-datatype cell = Cell1 of (int * cell_input) (* <-- no "cell1" type currently, only have inv currently *)
-              | Cell2 of (cell2 * int * cell_input * cell_input)
-              | CellMux of (int * cell_input * cell_input * cell_input)
-              | AlreadyMappedCell of (int list) * (cell_input list) * term; (* <-- for cells mapped previously *)*)
 
 fun cell_output (CellNot (out, _)) = out
   | cell_output (Cell2 (_, out, _, _)) = out;
@@ -54,7 +47,7 @@ fun rtl_cell_sem env (CellNot (out, inp1)) = let
      val v = case ct of
                CAnd => inp1 andalso inp2
              | COr => inp1 orelse inp2
-             | CEqual => (inp1 = inp2)
+             | CXOr => (inp1 <> inp2)
     in
      Redblackmap.insert (env, VarInp (NetVar out, NONE), v)
     end;
@@ -131,8 +124,8 @@ fun extract_cell2 tm =
   CAnd
  else if tm ~~ COr_tm then
   COr
- else if tm ~~ CEqual_tm then
-  CEqual
+ else if tm ~~ CXOr_tm then
+  CXOr
  else
   failwith "Not a cell2?";
 

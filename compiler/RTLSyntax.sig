@@ -64,6 +64,7 @@ sig
   (* Cell2 *)
   val CAnd_tm : term
   val COr_tm : term
+  val CXOr_tm : term
   val CEqual_tm : term
                                
   (* Cells *)
