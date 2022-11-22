@@ -3,8 +3,8 @@ open hardwarePreamble;
 open sumExtraTheory RTLTheory RTLPropsTheory;
  
 open verilogSortTheory;
-open verilogWriteCheckerTheory verilogTypeCheckerTheory PreCompilerTheory RTLCompilerTheory RTLDeterminizerTheory RTLUnusedRegsTheory RTLBlasterTheory;
-open PreCompilerProofTheory RTLCompilerProofTheory RTLDeterminizerProofTheory RTLBlasterProofTheory;
+open verilogWriteCheckerTheory verilogTypeCheckerTheory PreCompilerTheory RTLCompilerTheory RTLDeterminizerTheory RTLUnusedRegsTheory RTLBlasterTheory RTLOptimizerTheory;
+open PreCompilerProofTheory RTLCompilerProofTheory RTLDeterminizerProofTheory RTLBlasterProofTheory RTLOptimizerProofTheory;
 
 val _ = new_theory "fullCompiler";
 
@@ -28,6 +28,7 @@ Definition compile_def:
   (circuit, blast_s) <- blast_circuit circuit tmpnum;
   (* Do another round of clean-up since the first round did not do element-level analysis *)
   circuit <<- rtl_rem_unused_regs circuit;
+  circuit <- opt_circuit circuit;
   return circuit
  od
 End
@@ -125,15 +126,18 @@ Proof
  drule_strip blasted_circuit_deterministic_distinct \\
  drule_strip rtl_rem_unused_regs_correct \\
 
+ drule_strip opt_circuit_correct \\
  simp [blasted_circuit_rtl_rem_unused_regs] \\
- conj_tac >- metis_tac [rtl_rem_unused_regs_mem_regs_lem, reg_type_distinct] \\
+ strip_tac \\ drule_first \\ simp [] \\
+ 
+ conj_tac >- metis_tac [opt_circuit_const] \\
+ conj_tac >- metis_tac [opt_circuit_const, rtl_rem_unused_regs_mem_regs_lem, reg_type_distinct] \\
  (*rpt strip_tac \\ rpt drule_first \\ gvs [] \\
    drule_strip alistTheory.ALOOKUP_MEM \\
    drule_strip MEM_pair \\
    rpt drule_first \\ gvs [verilogTheory.module_ok_def, verilogTheory.writes_overlap_ok_def]*)
  
- rename1 ‘rtl_rem_unused_regs circuit’ \\
- qspec_then ‘rtl_rem_unused_regs circuit’ (mp_tac o GSYM) circuit_run_circuit_run_no_pseudos \\
+ qspec_then ‘circuit’ (mp_tac o GSYM) circuit_run_circuit_run_no_pseudos \\
  impl_tac >- (Cases_on ‘circuit’ \\ fs [blasted_circuit_def, circuit_regs_def, circuit_nl_ffs_def] \\
              (* Little hack for now:*)
              simp [rtl_rem_unused_regs_def, circuit_regs_def, circuit_nl_ffs_def, EVERY_FILTER_IMP]) \\ strip_tac \\
