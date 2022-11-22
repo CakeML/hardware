@@ -1105,7 +1105,7 @@ Proof
  simp [cell_run_def, sum_bind_def, cell2_run_def, cell1_run_def,
        cell_inp_run_cset_var, cell_input_lt_cell_inp_run_cset_var_plus] \\
 
- conj_tac >- rw [cget_var_cset_var, var_lt_def] \\ simp [v2n_sing] \\ rw []
+ conj_tac >- rw [cget_var_cset_var, var_lt_def] \\ simp [v2n_sing] \\ rw [] \\ gvs []
 QED
 
 Triviality inps2n_cong:
