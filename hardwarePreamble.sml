@@ -109,4 +109,13 @@ fun writeFile filename content =
       val _ = TextIO.closeOut fd
   in () end;
 
-end
+(* is this not part of the stdlib? *)
+fun iterate (f : int -> unit) (limit:int) = let
+ fun iterate' (f : int -> unit) (i:int) (limit:int) =    
+  if i = limit then
+   ()
+  else
+   (f i; iterate' f (i+1) limit)
+in
+ iterate' f 0 limit
+end;

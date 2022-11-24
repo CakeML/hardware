@@ -17,6 +17,9 @@ datatype cell2 = CAnd | COr | CXOr (*| CEqual*);
 datatype cell = CellNot of (int * cell_input)
               | Cell2 of (cell2 * int * cell_input * cell_input);
 
+datatype out_spec = OutInp of cell_input
+                  | OutInps of (cell_input list);
+
 datatype vertype = VBool_t | VArray_t of int;
 
 fun cell_output (CellNot (out, _)) = out

@@ -17,6 +17,17 @@ in
  tm |> dest_list |> fst |> map (extract_extenv_entry o pairSyntax.dest_pair)
 end;
 
+fun extract_out tm = let
+ val (name, tm) = pairSyntax.dest_pair tm
+in
+ if is_OutInp tm then
+  tm |> dest_OutInp |> extract_cell_input |> OutInp
+ else
+  tm |> dest_OutInps |> dest_list |> fst |> map extract_cell_input |> OutInps
+end;
+
+fun extract_outs tm = tm |> dest_list |> fst |> map extract_out;
+
 fun extract_reg tm = let
  val (regi, metadata) = pairSyntax.dest_pair tm
 
@@ -174,6 +185,27 @@ fun get_inp_y inp =
    VarInp (NetVar n, _) => let val (_, y) = lookup_cell_inp n in y end
  | _ => lookup_ext_inp inp;
 
+fun out_get_inps (_, out) =
+ case out of
+   OutInp inp => [inp]
+ | OutInps inps => inps;
+
+fun is_false_inp inp =
+ case inp of
+   ConstInp false => true
+ | _ => false;
+
+fun place_out_dup inp = let
+ val _ = (if is_false_inp inp then
+           ()
+          else let
+           val y = get_inp_y inp
+           val _ = add_dup DEast DSouth (!xoffset, y)
+          in () end)
+ val _ = add_stop DSouth (!xoffset, !yoffset)
+ val _ = xoffset := !xoffset + 1
+in () end;
+
 fun place_reg_inps regslen i (regty, regi, inp) = let
  val y = get_inp_y inp
  val _ = add_rot DEast DNorth (!xoffset + i, y)
@@ -195,9 +227,15 @@ in () end;
 
 fun place_regs_inps regs = appi (place_reg_inps (length regs)) regs;
 
+fun place_right_stoppers yoffset_cell_start nllen reglen = let
+ val _ = iterate (fn y => add_stop DEast (!xoffset + reglen, yoffset_cell_start - y)) nllen
+ val _ = iterate (fn y => add_stop DEast (!xoffset + reglen, yoffset_cell_start + y + 1)) reglen
+in () end;
+
 fun place_circuit tm = let
  val (extenv, outs, regs, nl, _) = dest_Circuit tm
  val extenv = extract_extenv extenv
+ val outs = extract_outs outs
  val regs = extract_regs regs
  val nl = extract_netlist nl
 
@@ -213,12 +251,17 @@ fun place_circuit tm = let
  val _ = place_exts extenv
 
  val _ = yoffset := !yoffset - 1 + length nl
- (* TODO: remove printout *)
- (*val _ = List.app (fn cell => (print (Int.toString (cell_output cell)); place_cell cell)) nl*)
+ val yoffset_cell_start = !yoffset
  val _ = List.app place_cell nl
 
+ val _ = yoffset := lookup_exts_last_y () + 1
+ val _ = outs |> map out_get_inps |> flatten |> app place_out_dup
+                  
  val _ = yoffset := length regs
  val _ = place_regs_inps regs
+
+ (* stoppers to the right *)
+ val _ = place_right_stoppers yoffset_cell_start (length nl) (length regs);
 in () end;
 
 end

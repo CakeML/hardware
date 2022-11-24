@@ -19,14 +19,16 @@ fun abbrev_dir dir =
 datatype pcell = PCell of cell
                | PReg of int
                | PRot of (dir * dir) (* input, output *)
-               | PDup of (dir* dir); (* input, duplicate output *)
+               | PDup of (dir* dir) (* input, duplicate output *)
+               | PStop of dir (* stops streams in given direction*);
 
 fun pcell_width pcell =
  case pcell of
    PCell _ => 1
  | PReg _ => 1 (* TODO: 6 *)
  | PRot _ => 1
- | PDup _ => 1;
+ | PDup _ => 1
+ | PStop _ => 1;
 
 val world = ref([]:((int * int) * pcell) list);
 (* map: cell output -> (x, y) *)
@@ -50,18 +52,29 @@ fun add_dup indir outdir (x, y) = let
  val () = world := ((x, y), PDup (indir, outdir)) :: !world
 in () end;
 
+fun add_stop dir (x, y) = let
+ val () = world := ((x, y), PStop dir) :: !world
+in () end;
+
 fun lookup_cell_inp n = lookup n (!cells);
 
+fun cells_y () = !cells |> map (snd o snd);
+
+(* "Fake" constant 1 reg for now, until we have actual regs *)
 fun add_reg n (x, y) =
  (*world := [((x, y), PReg 0), ((x, y+1), PReg 1), ((x, y+2), PReg 2)] @ !world;*)
- world := [((x, y), PReg n)] @ !world;
+ world := [((x, y), PReg n), ((x, y + 1), PStop DWest)] @ !world;
 
 (* fake for now *)
 val exts_locs = ref([]:(cell_input * int) list);
 fun add_ext inp y = exts_locs := (inp, y) :: !exts_locs;
 fun add_exts inps_y = exts_locs := inps_y @ !exts_locs;
 fun lookup_ext_inp inp = lookup inp (!exts_locs);
-fun lookup_exts_last_y () = let val (_, y) =  hd (!exts_locs) in y end;
+
+fun exts_max [] = 0
+  | exts_max ((_, y)::ys) = let val max = exts_max ys in if y > max then y else max end;
+
+fun lookup_exts_last_y () = exts_max (!exts_locs);
 
 val cell_dir = "/Users/aloow/dev/game-of-life/java/v2/";
 
@@ -147,18 +160,23 @@ in
 end
 end;
 
+local
+ val west_north_gcell = gol_import (cell_dir ^ "lwss-and-wn-w.rle") (1, 1)
+ val east_south_gcell = gol_import (cell_dir ^ "lwss-and-es-e.rle") (1, 1)
+in
+fun get_stop_gcell dir =
+ case dir of
+   DWest => west_north_gcell
+ | DNorth => west_north_gcell
+ | DEast => east_south_gcell
+ | DSouth => east_south_gcell
+end;
+
 fun max_x_cell world = let
  fun max_x_cell_row g_max_x = foldl (fn ((x, cell), g_max_x) => Int.max (x + pcell_width cell - 1, g_max_x)) g_max_x
 in
  foldl (fn ((y, xs), g_max_x) => max_x_cell_row g_max_x xs) 0 world
 end;
-
-(* is this not part of the stdlib? *)
-fun iterate (f : int -> unit) (i:int) (limit:int) =
- if i = limit then
-  ()
- else
-  (f i; iterate f (i+1) limit);
 
 datatype 'a map_entry = ME_first of int * 'a
                       | ME_item of (int * 'a) * (int * 'a)
@@ -177,18 +195,19 @@ fun approws (f: int -> int -> 'a map_entry -> unit) rows = let
     [] => failwith "impossible: empty row?"
   | (xc::cols) => (f y y_inner (ME_first xc); appcols' (xc::cols) y y_inner)
 in
- app (fn (y, cols) => iterate (appcols cols y) 0 cellsize) rows
+ app (fn (y, cols) => iterate (appcols cols y) cellsize) rows
 end;
 
 fun export_gcell out y gcell =
- iterate (fn x => out (if Array2.sub (gcell, y, x) then "o" else "b")) 0 cellsize;
+ iterate (fn x => out (if Array2.sub (gcell, y, x) then "o" else "b")) cellsize;
 
 fun get_gcell pcell =
  case pcell of
    PCell cell => get_cell_gcell cell
  | PReg n => get_preg_gcell n (*failwith "not implemented yet"*)
  | PRot (indir, outdir) => get_rot_gcell indir outdir
- | PDup (indir, outdir) => get_dup_gcell indir outdir;
+ | PDup (indir, outdir) => get_dup_gcell indir outdir
+ | PStop dir => get_stop_gcell dir;
 
 fun export_pcell out y_inner pcell = let
  val gcell = get_gcell pcell
