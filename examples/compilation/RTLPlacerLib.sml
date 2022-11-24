@@ -147,7 +147,7 @@ fun place_reg nllen reglen i (regty, regi, _) = let
  val delays = List.tabulate (reglen - i, fn i => ("Delay", (1 + i, y)))
  val _ = List.app (uncurry add_route) delays
  val x = 1 + reglen
- val _ = add_reg regty (x, y);
+ val _ = add_reg 1 (x, y);
 
  (* todo, the direction here depends on if regs or cells are "taller", assume cells taller for now *)
  val oldx = x
@@ -208,7 +208,7 @@ fun place_circuit tm = let
  val _ = yoffset := !yoffset + 1
 
  val _ = place_regs (length nl) regs
- val _ = xoffset := 3*(length regs) + 2
+ val _ = xoffset := 3*(length regs) + 3
 
  val _ = place_exts extenv
 

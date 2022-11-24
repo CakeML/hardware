@@ -33,6 +33,13 @@ fun consume_lines f arr i j =
    NONE => arr
  | SOME line => let val (i, j) = consume_line arr i j (String.explode line) in consume_lines f arr i j end;
 
+(* will just crash if no myreen tag included *)
+fun find_myreen_tag arr y =
+ if Array2.sub (arr, y, 0) then
+  y
+ else
+  find_myreen_tag arr (y + 1);
+
 val cellsize = 150;
 
 fun gol_import filename (width, height) = let
@@ -43,9 +50,24 @@ fun gol_import filename (width, height) = let
  val _ = if String.sub (Option.valOf l, 0) = #"#" then TextIO.inputLine f else NONE
  val arr = Array2.array (width*cellsize, height*cellsize, false)
  val _ = consume_lines f arr 0 0
+ val myreen_actual = find_myreen_tag arr 0
+ val myreen_expected = (cellsize div 2) - 2
+ val myreen_diff = myreen_expected - myreen_actual
+ (*val () = print (Int.toString myreen_actual)*)
+ val () = if myreen_diff < 0 then failwith "myreen diff negative?" else ()
+ (* inefficient but simple: *)
+ val arr' = Array2.array (width*cellsize, height*cellsize, false)
+ val () = Array2.copy {
+         src = {base = arr, row = 0, col = 0, nrows = SOME (cellsize - myreen_diff + 1), ncols = NONE},
+         dst = arr',
+         dst_row = myreen_diff - 1,
+         dst_col = 0}
 in
- arr
+ arr'
 end
+
+fun empty_cell () =
+ Array2.array (cellsize, cellsize, false);
 
 fun gol_export arr filename = let
  val f = TextIO.openOut filename

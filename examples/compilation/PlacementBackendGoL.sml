@@ -24,7 +24,7 @@ datatype pcell = PCell of cell
 fun pcell_width pcell =
  case pcell of
    PCell _ => 1
- | PReg _ => 6
+ | PReg _ => 1 (* TODO: 6 *)
  | PRot _ => 1
  | PDup _ => 1;
 
@@ -52,8 +52,9 @@ in () end;
 
 fun lookup_cell_inp n = lookup n (!cells);
 
-fun add_reg _ (x, y) = ();
+fun add_reg n (x, y) =
  (*world := [((x, y), PReg 0), ((x, y+1), PReg 1), ((x, y+2), PReg 2)] @ !world;*)
+ world := [((x, y), PReg n)] @ !world;
 
 (* fake for now *)
 val exts_locs = ref([]:(cell_input * int) list);
@@ -80,7 +81,16 @@ fun get_cell_gcell cell =
    | CXOr => failwith "xor not implemented yet" (*cell_xor*)
 end;
 
-(*val preg_gcell = gol_import (cell_dir ^ "lwss-latch-2x2.rle") (1, 1)*)
+local
+ val preg_gcell = gol_import (cell_dir ^ "lwss-gun--e.rle") (1, 1)
+ val empty = empty_cell ()
+in
+fun get_preg_gcell n =
+ if n = 0 then
+  empty
+ else
+  preg_gcell
+end;
 
 fun dir_toString dir =
  case dir of
@@ -171,12 +181,12 @@ in
 end;
 
 fun export_gcell out y gcell =
- iterate (fn x => out (if Array2.sub (gcell, x, y) then "o" else "b")) 0 cellsize;
+ iterate (fn x => out (if Array2.sub (gcell, y, x) then "o" else "b")) 0 cellsize;
 
 fun get_gcell pcell =
  case pcell of
    PCell cell => get_cell_gcell cell
- | PReg _ => (*preg_gcell: *) failwith "not implemented yet"
+ | PReg n => get_preg_gcell n (*failwith "not implemented yet"*)
  | PRot (indir, outdir) => get_rot_gcell indir outdir
  | PDup (indir, outdir) => get_dup_gcell indir outdir;
 
@@ -189,20 +199,20 @@ end;
 fun export_pcells out max_x y y_inner e =
  case e of
    ME_first (x, pcell) => let
-    val () = out (Int.toString (cellsize*x) ^ "b")
+    val () = if x <> 0 then out (Int.toString (cellsize*x) ^ "b") else ()
    in
     export_pcell out y_inner pcell
    end
  | ME_item ((xprev, pcellprev), (x, pcell)) => let
     val w = x - (xprev + pcell_width pcellprev)
-    val () = out (Int.toString (cellsize*w) ^ "b")
+    val () = if w <> 0 then out (Int.toString (cellsize*w) ^ "b") else ()
    in
     export_pcell out y_inner pcell
    end
  | ME_last (x, pcell) =>
    let
-    val w = max_x - (x + pcell_width pcell)
-    val () = out (Int.toString (cellsize*w) ^ "b$\n")
+    val w = max_x - (x + pcell_width pcell - 1)
+    val () = if w <> 0 then out (Int.toString (cellsize*w) ^ "b$\n") else out "$\n"
    in () end;
 
 fun rowify_world world = let
