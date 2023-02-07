@@ -7,9 +7,4 @@ docker pull binghelisp/hol-dev:latest
 docker run -ti --rm -v /tmp:/hgfs binghelisp/hol-dev:latest
 ```
 
-OpenTheory commands:
-
-```
-opentheory info --theorems -o bool.art bool
-opentheory info --document -o bool.html bool
-```
+Note that the article files much include all dependencies, see the example articles in the articles directory.
