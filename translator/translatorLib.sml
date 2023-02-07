@@ -171,7 +171,7 @@ fun init_translator module_def abstract_fields comms = let
  |> map (build_state_rel_var comms)
  |> flatten
  |> list_mk_conj
- |> (fn tm => Define `state_rel hol_s hol_s' ver_s = ^tm`);
+ |> (fn tm => Define `state_rel (hol_s:^(ty_antiq state_ty)) (hol_s':^(ty_antiq state_ty)) ver_s = ^tm`);
 
  val is_state_rel_var_def =
  all_fields_of state_ty
