@@ -133,7 +133,7 @@ fun module2hardware module_def outputs comms = let
  TypeBase.fields_of state_ty
  |> map (build_state_rel_var comms)
  |> list_mk_conj
- |> (fn tm => Define `state_rel hol_s hol_s' ver_s = ^tm`);
+ |> (fn tm => Define `state_rel (hol_s:^(ty_antiq state_ty)) (hol_s':^(ty_antiq state_ty)) ver_s = ^tm`);
 
  (* TODO: Name... *)
  val module_state_rel_def =
