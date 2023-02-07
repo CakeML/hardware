@@ -455,8 +455,11 @@ Definition newvars_inv_def:
  newvars_inv extenv decls newvars tmps ⇔
  EVERY (λ(tmpnum,varlen,var,ilen,idx).
         decls_type (decls ++ tmpvardecls tmps) (tmpvar tmpnum) = INR VBool_t ∧
-        decls_type decls var = INR (VArray_t varlen) ∧
-        no_array_read_dyn_exp (Ev_from_decls decls) idx ∧
+        (case var of
+         | Var var => decls_type decls var = INR (VArray_t varlen)
+         | InputVar var => sum_alookup extenv var = INR (VArray_t varlen)
+         | _ => F) ∧
+        no_array_read_dyn_exp (Ev_from_decls decls) extenv idx ∧
         vertype_exp extenv (Ev_from_decls decls) idx (VArray_t ilen)) newvars
 End
 
@@ -473,8 +476,8 @@ Proof
  >- simp []
  >- fs [erun_get_var_def, vertype_env_filled_def]
  >- fs [erun_get_var_def, vertype_fext_n_def, sum_alookup_INR]
- >- (fs [erun_get_var_def, vertype_env_filled_def] \\ drule_first \\
-     fs [vertype_v_cases, sum_bind_def, get_array_slice_def])
+ THEN2 (fs [erun_get_var_def, vertype_env_filled_def, vertype_fext_n_def, sum_alookup_INR] \\
+        drule_first \\ fs [vertype_v_cases, sum_bind_def, get_array_slice_def])
  >- (rpt drule_first \\
      fs [sum_bind_def, sum_map_def, vertype_v_cases, ver_mapVArray_def, ver2n_def, ver2v_def,
          erun_arith_def, n2ver_def, v2ver_def, ver_liftVArray_def, ver_fixwidth_fixwidth])
@@ -487,13 +490,14 @@ Theorem newvars_inv_runtime_lengths:
  vertype_fext_n extenv fext ∧
  vertype_env_filled (Ev_from_decls decls) s ⇒
  EVERY (λ(tmpnum,varlen,var,ilen,idx).
-        (∃bs. get_var s var = INR (VArray bs) ∧ LENGTH bs = varlen) ∧
-        ∃bs. erun fext s idx = INR (VArray bs) ∧ LENGTH bs = ilen (*∧
-               ver2n (VArray bs) = INR i ∧ i < varlen*)) newvars
+        (∃bs. erun fext s var = INR (VArray bs) ∧ LENGTH bs = varlen) ∧
+        ∃bs. erun fext s idx = INR (VArray bs) ∧ LENGTH bs = ilen)
+       newvars
 Proof
  rw [newvars_inv_def] \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ PairCases \\ rw []
- >- (qspecl_then [‘fext’, ‘extenv’, ‘Ev_from_decls decls’, ‘s’, ‘x1’, ‘Var x2’, ‘VArray_t x1’]
+ >- (qspecl_then [‘fext’, ‘extenv’, ‘Ev_from_decls decls’, ‘s’, ‘x1’, ‘x2’, ‘VArray_t x1’]
                  mp_tac vertype_exp_wt_array_no_crash \\
+     Cases_on ‘x2’ \\ fs [sum_alookup_INR] \\
      simp [Once vertype_exp_cases, Ev_from_decls_decls_type,
            erun_def, erun_get_var_def, vertype_v_cases] \\ strip_tac \\ simp [])
  >- (drule_strip (SIMP_RULE (srw_ss()) [AND_IMP_INTRO] vertype_exp_wt_array_no_crash) \\
@@ -535,13 +539,13 @@ Proof
 QED
 
 Triviality vertype_exp_array_no_array_read_dyn_exp_lem:
- ∀extenv tenv len e t. vertype_exp extenv tenv e t ⇒ t = (VArray_t len) ⇒ no_array_read_dyn_exp tenv e
+ ∀extenv tenv len e t. vertype_exp extenv tenv e t ⇒ t = (VArray_t len) ⇒ no_array_read_dyn_exp tenv extenv e
 Proof
  ntac 3 gen_tac \\ ho_match_mp_tac vertype_exp_ind \\ simp [no_array_read_dyn_exp_def]
 QED
 
 Theorem vertype_exp_array_no_array_read_dyn_exp:
- ∀extenv tenv len e. vertype_exp extenv tenv e (VArray_t len) ⇒ no_array_read_dyn_exp tenv e
+ ∀extenv tenv len e. vertype_exp extenv tenv e (VArray_t len) ⇒ no_array_read_dyn_exp tenv extenv e
 Proof
  metis_tac [vertype_exp_array_no_array_read_dyn_exp_lem]
 QED
@@ -560,7 +564,7 @@ Definition array_read_exp_rel_def:
  vertype_env (Ev_from_decls decls) s1 ∧
  vertype_fext_n extenv fext ∧
  EVERY (λ(tmpnum,varlen,var,ilen,idx).
-        ∀v. erun fext s1 (ArrayIndex (Var var) ilen idx) = INR v ⇒
+        ∀v. erun fext s1 (ArrayIndex var ilen idx) = INR v ⇒
             get_var s2 (tmpvar tmpnum) = INR v) newvars ⇒
  erun fext s2 e' = INR v
 End
@@ -573,7 +577,7 @@ val compile_array_read_exp_unchanged_tac =
 
 Theorem compile_array_read_exp_correct:
  ∀e decls tmpnum tmps tmpnum' tmps' newvars e' extenv t tmpnumstart.
- compile_array_read_exp decls tmpnum tmps e = (tmpnum', tmps', newvars, e') ∧
+ compile_array_read_exp decls extenv tmpnum tmps e = (tmpnum', tmps', newvars, e') ∧
  vertype_exp extenv (Ev_from_decls decls) e t ∧
  fresh_tmpvar_decls tmpnumstart decls ∧
  tmpvars_distinct tmps ∧
@@ -584,7 +588,7 @@ Theorem compile_array_read_exp_correct:
  tmpvars_distinct tmps' ∧
  tmpvars_range tmpnumstart tmpnum' tmps' ∧
 
- no_array_read_dyn_exp (Ev_from_decls decls) e' ∧
+ no_array_read_dyn_exp (Ev_from_decls decls) extenv e' ∧
  vertype_exp extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) e' t ∧
 
  newvars_inv extenv decls newvars tmps' ∧
@@ -600,10 +604,10 @@ Proof
  >- (* InputVar *) compile_array_read_exp_unchanged_tac
  >- (* ArrayIndex *)
  (rpt strip_tac' \\
- qpat_x_assum ‘vertype_exp _ _ _ _’ (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_exp_cases]) \\
+  qpat_x_assum ‘vertype_exp _ _ _ _’ (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_exp_cases]) \\
 
- ntac 2 (last_x_assum kall_tac) \\
-  fs [compile_array_read_exp_def, get_arrayindex_var_def, Ev_from_decls_decls_type] \\ rveq \\
+  (ntac 2 (last_x_assum kall_tac) \\
+  fs [compile_array_read_exp_def, get_var_type_impl_def, Ev_from_decls_decls_type, GSYM sum_alookup_INR] \\ rveq \\
   last_x_assum mp_tac \\ TOP_CASE_TAC
   >- (rpt strip_tac' \\ rveq \\ simp [] \\
       conj_asm1_tac >- (match_mp_tac tmpvars_range_tmpvars_extend \\ asm_exists_tac) \\
@@ -624,31 +628,31 @@ Proof
   >- (fs [Once vertype_exp_cases, vertype_v_cases] \\
       simp [is_ok_idx_const_def] \\ IF_CASES_TAC
       >- simp [no_array_read_dyn_exp_def, get_const_def, sum_bind_def, sum_map_def, ver2n_def, ver2v_def,
-               tenv_type_Ev_from_decls_decls_type]
+               tenv_type_Ev_from_decls_decls_type, get_var_type_def]
       \\ simp [no_array_read_dyn_exp_def])
   >- (IF_CASES_TAC
       >- (simp [Once vertype_exp_cases, Ev_from_decls_decls_type, decls_type_append] \\
-          fs [Ev_from_decls_def, vertype_exp_extend])
-      \\ simp [Once vertype_exp_cases, vertype_v_cases])
+          fs [Ev_from_decls_def, vertype_exp_extend, sum_alookup_INR])
+      \\ simp [Once vertype_exp_cases, vertype_v_cases]) 
   >- simp [newvars_inv_def] \\
   simp [erun_def, erun_get_var_def, sum_bind_INR, get_array_index_INR] \\ rpt strip_tac' \\
-  rveq \\ fs [vertype_env_def] \\ drule_first \\
+  rveq \\ fs [vertype_env_def, vertype_fext_n_def] \\ drule_first \\
   fs [Ev_from_decls_decls_type, vertype_v_cases, ver2n_INR] \\ rveq \\
   simp [is_ok_idx_const_def, erun_def, erun_get_var_def] \\
-  fs [array_rel_def] \\ drule_first \\
-  simp [sum_bind_def, ver2n_def, ver2v_def, sum_map_def, get_array_index_def, sum_revEL_revEL])
+  fs [array_rel_def, erun_def] \\ TRY drule_first \\
+  simp [sum_bind_def, ver2n_def, ver2v_def, sum_map_def, get_array_index_def, erun_get_var_def, sum_revEL_revEL]))
  >- (* ArraySlice *) compile_array_read_exp_unchanged_tac \\
  rpt strip_tac' \\
  qpat_x_assum ‘vertype_exp _ _ _ _’ (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_exp_cases])
  >- (* BUOp *)
- (qpat_x_assum ‘compile_array_read_exp _ _ _ _ = _’
+ (qpat_x_assum ‘compile_array_read_exp _ _ _ _ _ = _’
                (mp_tac o SIMP_RULE (srw_ss()) [compile_array_read_exp_def,LET_THM]) \\
   pairarg_tac \\ drule_first \\ rw [] \\ simp []
   >- simp [no_array_read_dyn_exp_def]
   >- simp [Once vertype_exp_cases]
   \\ fs [erun_def, sum_bind_INR, ver_liftVBool_INR] \\ TRY strip_tac \\ rveq \\ rpt drule_first)
  \\ (* Binops *)
- (qpat_x_assum ‘compile_array_read_exp _ _ _ _ = _’
+ (qpat_x_assum ‘compile_array_read_exp _ _ _ _ _ = _’
                (mp_tac o SIMP_RULE (srw_ss()) [compile_array_read_exp_def,LET_THM]) \\
   pairarg_tac \\ drule_first \\
   asm_rewrite_tac [] \\ CONV_TAC (DEPTH_CONV PairedLambda.PAIRED_BETA_CONV) \\
@@ -666,7 +670,7 @@ QED
 
 Theorem compile_array_read_exp_opt_correct:
  ∀e decls tmpnum tmps tmpnum' tmps' newvars e' extenv t tmpnumstart.
- compile_array_read_exp_opt decls tmpnum tmps e = (tmpnum', tmps', newvars, e') ∧
+ compile_array_read_exp_opt decls extenv tmpnum tmps e = (tmpnum', tmps', newvars, e') ∧
  OPTION_ALL (λe. vertype_exp extenv (Ev_from_decls decls) e t) e ∧
  fresh_tmpvar_decls tmpnumstart decls ∧
  tmpvars_distinct tmps ∧
@@ -677,7 +681,7 @@ Theorem compile_array_read_exp_opt_correct:
  tmpvars_distinct tmps' ∧
  tmpvars_range tmpnumstart tmpnum' tmps' ∧
 
- OPTION_ALL (no_array_read_dyn_exp (Ev_from_decls decls)) e' ∧
+ OPTION_ALL (no_array_read_dyn_exp (Ev_from_decls decls) extenv) e' ∧
  OPTION_ALL (λe. vertype_exp extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) e t) e' ∧
 
  newvars_inv extenv decls newvars tmps' ∧
@@ -704,8 +708,8 @@ Proof
 QED
 
 Theorem vwrites_compile_array_read_newvars:
- ∀newvars decls p.
- set (vwrites (compile_array_read_newvars decls newvars p)) ⊆
+ ∀newvars p.
+ set (vwrites (compile_array_read_newvars newvars p)) ⊆
  set (vwrites p) ∪ set (MAP (tmpvar o FST) newvars)
 Proof
  Induct \\ TRY PairCases \\ simp [compile_array_read_newvars_def] \\
@@ -715,9 +719,9 @@ Proof
 QED
 
 Theorem vwrites_compile_array_read_newvars_preserve_lem:
- ∀newvars decls p p'.
+ ∀newvars p p'.
  set (vwrites p) ⊆ set (vwrites p') ⇒
- set (vwrites p) ⊆ set (vwrites (compile_array_read_newvars decls newvars p'))
+ set (vwrites p) ⊆ set (vwrites (compile_array_read_newvars newvars p'))
 Proof
  Induct \\ TRY PairCases \\ simp [compile_array_read_newvars_def] \\
  fs [vwrites_def, evwrites_def, MAP_GENLIST, combinTheory.o_DEF, pred_setTheory.SUBSET_DEF] \\
@@ -725,7 +729,7 @@ Proof
 QED
 
 Theorem vnwrites_compile_array_read_newvars:
- ∀newvars decls p. vnwrites (compile_array_read_newvars decls newvars p) = vnwrites p
+ ∀newvars p. vnwrites (compile_array_read_newvars newvars p) = vnwrites p
 Proof
  Induct \\ TRY PairCases \\ simp [compile_array_read_newvars_def] \\
  simp [vnwrites_def, MAP_GENLIST, combinTheory.o_DEF, FLAT_EQ_NIL, EVERY_GENLIST]
@@ -742,11 +746,12 @@ QED
 Theorem no_array_read_dyn_compile_array_read_newvars:
  ∀extenv tmps newvars decls p.
  newvars_inv extenv decls newvars tmps ⇒
- no_array_read_dyn (Ev_from_decls decls) (compile_array_read_newvars decls newvars p) =
- no_array_read_dyn (Ev_from_decls decls) p
+ no_array_read_dyn (Ev_from_decls decls) extenv (compile_array_read_newvars newvars p) =
+ no_array_read_dyn (Ev_from_decls decls) extenv p
 Proof
  ntac 2 gen_tac \\ Induct \\ TRY PairCases \\ fs [compile_array_read_newvars_def, newvars_inv_def] \\
- rw [no_array_read_dyn_def, EVERY_GENLIST, no_array_read_dyn_exp_def,
+ rpt gen_tac \\ TOP_CASE_TAC \\ simp [] \\
+ rw [no_array_read_dyn_def, EVERY_GENLIST, no_array_read_dyn_exp_def, get_var_type_def,
      get_const_def, sum_bind_def, ver2n_n2VArray_lem, tenv_type_Ev_from_decls_decls_type]
 QED
 
@@ -755,7 +760,7 @@ Theorem vertype_stmt_compile_array_read_newvars:
  vertype_stmt extenv (Ev_from_decls (decls ⧺ tmpvardecls tmps)) p ∧
  newvars_inv extenv decls newvars tmps ∧
  set (MAP FST newvars) ⊆ set (MAP FST tmps) ⇒
- vertype_stmt extenv (Ev_from_decls (decls ⧺ tmpvardecls tmps)) (compile_array_read_newvars decls newvars p)
+ vertype_stmt extenv (Ev_from_decls (decls ⧺ tmpvardecls tmps)) (compile_array_read_newvars newvars p)
 Proof
  gen_tac \\ Induct \\ TRY PairCases \\ rw [compile_array_read_newvars_def] \\
  simp [Once vertype_stmt_cases] \\ simp [Once vertype_stmt_cases] \\ fs [newvars_inv_def] \\
@@ -763,6 +768,7 @@ Proof
  rw [EVERY_GENLIST] >- simp [Once vertype_exp_cases, vertype_v_n2VArray] \\
  simp [Once vertype_stmt_cases] \\
  fs [newvars_inv_def, Ev_from_decls_def, alist_to_map_alookup, decls_type_sum_alookup, sum_alookup_INR] \\
+ every_case_tac \\ fs [] \\
  simp [Once vertype_exp_cases] \\
  simp [alist_to_map_alookup, alistTheory.ALOOKUP_APPEND] \\
  simp [Once vertype_exp_cases, vertype_v_n2VArray]
@@ -789,6 +795,22 @@ Proof
  asm_exists_any_tac \\ simp []
 QED
 
+Triviality erun_erun_get_var_HACK1:
+ newvars_inv ignore1 ignore2 ((ignore3,ignore4,e,ignore5,ignore6)::ignore7) ignore8 ∧
+ erun fext s e = INR v ⇒
+ erun_get_var fext s e = INR v
+Proof
+ rw [newvars_inv_def] \\ every_case_tac \\ fs [erun_def]
+QED
+
+Triviality erun_erun_get_var_HACK2:
+ erun_get_var fext s e = INR v ∧
+ erun fext s e = INR v' ⇒
+ v = v' 
+Proof
+ Cases_on ‘e’ \\ rw [erun_get_var_def, erun_def] \\ fs []
+QED
+
 Theorem prun_compile_array_read_newvars:
  ∀s s1 tmpnumstart tmpnum extenv tmps decls fext newvars p.
  newvars_inv extenv decls newvars tmps ∧
@@ -799,13 +821,13 @@ Theorem prun_compile_array_read_newvars:
  array_rel s1 s ∧
  vertype_env (Ev_from_decls decls) s1 ∧
  EVERY (λ(tmpnum,varlen,var,ilen,idx).
-        (∃bs. get_var s1 var = INR (VArray bs) ∧ LENGTH bs = varlen) ∧
+        (∃bs. erun fext s1 var = INR (VArray bs) ∧ LENGTH bs = varlen) ∧
         ∃bs. erun fext s1 idx = INR (VArray bs) ∧
                LENGTH bs = ilen (*∧ ver2n (VArray bs) = INR i ∧ i < varlen*)) newvars ⇒
- ∃s'. prun fext s (compile_array_read_newvars decls newvars p) = prun fext s' p ∧
+ ∃s'. prun fext s (compile_array_read_newvars newvars p) = prun fext s' p ∧
       array_rel s1 s' ∧
       EVERY (λ(tmpnum,varlen,var,ilen,idx).
-             ∀v. erun fext s1 (ArrayIndex (Var var) ilen idx) = INR v ⇒
+             ∀v. erun fext s1 (ArrayIndex var ilen idx) = INR v ⇒
                  get_var s' (tmpvar tmpnum) = INR v) newvars ∧
       (∀n. ~MEM n (MAP FST newvars) ⇒ get_var s' (tmpvar n) = get_var s (tmpvar n))
 Proof
@@ -816,9 +838,11 @@ Proof
  conj_tac >- drule_strip array_rel_erun \\
  simp [bitstringTheory.v2n_lt] \\ reverse IF_CASES_TAC
  >- (fs [sum_bind_def, newvars_inv_def] \\ drule_first \\ simp [] \\
-     qexists_tac ‘s'’ \\ simp [erun_def, erun_get_var_def, sum_bind_def, sum_map_def,
-                               ver2n_VArray, get_array_index_def, sum_revEL_def]) \\
- drule_strip array_rel_get_var \\
+     qexists_tac ‘s'’ \\ every_case_tac \\ fs [] \\
+     fs [erun_def, erun_get_var_def, sum_bind_def, sum_map_def,
+         ver2n_VArray, get_array_index_def, sum_revEL_def]) \\
+ rev_drule_strip array_rel_erun \\
+ drule_strip erun_erun_get_var_HACK1 \\
  CONV_TAC (STRIP_QUANT_CONV (RATOR_CONV (SIMP_CONV (srw_ss()) [prun_def, prun_assn_rhs_def, erun_def]))) \\
  simp [erun_get_var_def, ver2n_n2VArray_lem, bitstringTheory.v2n_lt, get_array_index_def,
        sum_bind_def, sum_map_def, sum_for_def, sum_revEL_revEL, prun_bassn_def, assn_def] \\
@@ -830,7 +854,8 @@ Proof
               rpt drule_first \\ pairarg_tac \\ fs [] \\ rveq \\ drule_first \\
               fs [Ev_from_decls_def, alist_to_map_alookup, decls_type_sum_alookup, sum_alookup_INL]) \\
  strip_tac \\ simp [] \\ qexists_tac ‘s'’ \\ rw []
- >- rfs [get_var_set_var, erun_def, erun_get_var_def, sum_bind_def, get_array_index_def, sum_revEL_revEL, sum_map_def, sum_bind_INR, sum_map_INR, ver2n_INR, sum_revEL_INR]
+ >- (fs [erun_def, sum_bind_INR, get_var_set_var, get_array_index_INR] \\
+     drule_strip erun_erun_get_var_HACK2 \\ gvs [ver2n_INR])
  \\ simp [get_var_set_var, tmpvar_bij]
 QED
 
@@ -885,23 +910,23 @@ Proof
 QED
 
 Theorem compile_array_read_newvars_append:
- ∀newvars newvars' decls p.
- compile_array_read_newvars decls (newvars ++ newvars') p =
- compile_array_read_newvars decls newvars (compile_array_read_newvars decls newvars' p)
+ ∀newvars newvars' p.
+ compile_array_read_newvars (newvars ++ newvars') p =
+ compile_array_read_newvars newvars (compile_array_read_newvars newvars' p)
 Proof
  Induct \\ TRY PairCases \\ simp [compile_array_read_newvars_def]
 QED
 
 Theorem prun_Case_cong_array_read:
  ∀t m m' ps ps' d d' s1 s1' s2 fext extenv (decls : declty)
-  (newvars1 newvars2 : (num # num # string # num # exp) list).
+  (newvars1 newvars2 : (num # num # exp # num # exp) list).
  prun fext s1 (Case t m ps d) = INR s1' ∧
  array_rel s1 s2 ∧
  vertype_env (Ev_from_decls decls) s1 ∧
  vertype_env_filled (Ev_from_decls decls) s1 ∧
  vertype_fext_n extenv fext ∧
  EVERY (λ(tmpnum,varlen,var,ilen,idx).
-        ∀v. erun fext s1 (ArrayIndex (Var var) ilen idx) = INR v ⇒
+        ∀v. erun fext s1 (ArrayIndex var ilen idx) = INR v ⇒
             get_var s2 (tmpvar tmpnum) = INR v) (newvars2 ++ newvars1) ∧
  array_read_exp_rel extenv decls newvars1 m m' ∧
  LIST_REL (array_read_exp_rel extenv decls newvars2) (MAP FST ps) (MAP FST ps') ∧
@@ -929,7 +954,7 @@ Theorem array_read_exp_rel_prun_assn_rhs:
  vertype_env (Ev_from_decls decls) s1 ∧
  vertype_fext_n extenv fext ∧
  EVERY (λ(tmpnum,varlen,var,ilen,idx).
-        ∀v. erun fext s1 (ArrayIndex (Var var) ilen idx) = INR v ⇒
+        ∀v. erun fext s1 (ArrayIndex var ilen idx) = INR v ⇒
             get_var s2 (tmpvar tmpnum) = INR v) newvars ∧
  prun_assn_rhs fext s1 wc rhs = INR (s1', v)  ⇒
  ∃s2'. prun_assn_rhs fext s2 wc rhs' = INR (s2', v) ∧ array_rel s1' s2'
@@ -948,8 +973,8 @@ val vwrites_compile_array_read_newvars_subset_trans_lem =
  |> GEN_ALL;
 
 Theorem compile_array_read_correct:
- (!decls tmpnum tmps p tmpnumstart extenv tmpnum' tmps' p'.
- compile_array_read decls tmpnum tmps p = (tmpnum', tmps', p') ∧
+ (!decls extenv tmpnum tmps p tmpnumstart tmpnum' tmps' p'.
+ compile_array_read decls extenv tmpnum tmps p = (tmpnum', tmps', p') ∧
  vertype_stmt extenv (Ev_from_decls decls) p ∧
  fresh_tmpvar_decls tmpnumstart decls ∧
  tmpvars_distinct tmps ∧
@@ -959,15 +984,15 @@ Theorem compile_array_read_correct:
  set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps' ∧
  set (vwrites p) ⊆ set (vwrites p') ∧
  vnwrites p' = vnwrites p ∧
- no_array_read_dyn (Ev_from_decls decls) p' ∧
+ no_array_read_dyn (Ev_from_decls decls) extenv p' ∧
  vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) p' ∧
  tmpvars_distinct tmps' ∧
  tmpvars_range tmpnumstart tmpnum' tmps' ∧
  tmpvars_extend tmps' tmps ∧
  array_rel_filled_prun extenv decls p p')
  ∧
- (!decls tmpnum tmps p tmpnumstart extenv tmpnum' tmps' p'.
- compile_array_read_opt decls tmpnum tmps p = (tmpnum', tmps', p') ∧
+ (!decls extenv tmpnum tmps p tmpnumstart tmpnum' tmps' p'.
+ compile_array_read_opt decls extenv tmpnum tmps p = (tmpnum', tmps', p') ∧
  OPTION_ALL (vertype_stmt extenv (Ev_from_decls decls)) p ∧
  fresh_tmpvar_decls tmpnumstart decls ∧
  tmpvars_distinct tmps ∧
@@ -977,15 +1002,15 @@ Theorem compile_array_read_correct:
  OPTREL (λp p'. set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') p p' ∧
  OPTREL (λp p'. set (vwrites p) ⊆ set (vwrites p')) p p' ∧
  OPTREL (λp p'. vnwrites p' = vnwrites p) p p' ∧
- OPTION_ALL (no_array_read_dyn (Ev_from_decls decls)) p' ∧
+ OPTION_ALL (no_array_read_dyn (Ev_from_decls decls) extenv) p' ∧
  OPTION_ALL (vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps'))) p' ∧
  tmpvars_distinct tmps' ∧
  tmpvars_range tmpnumstart tmpnum' tmps' ∧
  tmpvars_extend tmps' tmps ∧
  OPTREL (array_rel_filled_prun extenv decls) p p')
  ∧
- (!decls tmpnum tmps ps tmpnumstart extenv tmpnum' tmps' ps' newvars t.
- compile_array_read_case_list decls tmpnum tmps ps = (tmpnum', tmps', newvars, ps') ∧
+ (!decls extenv tmpnum tmps ps tmpnumstart tmpnum' tmps' ps' newvars t.
+ compile_array_read_case_list decls extenv tmpnum tmps ps = (tmpnum', tmps', newvars, ps') ∧
  EVERY (λ(e, p). vertype_exp extenv (Ev_from_decls decls) e t ∧
                  vertype_stmt extenv (Ev_from_decls decls) p) ps ∧
  fresh_tmpvar_decls tmpnumstart decls ∧
@@ -996,8 +1021,8 @@ Theorem compile_array_read_correct:
  LIST_REL (λ(_, p) (_, p'). set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') ps ps' ∧
  LIST_REL (λ(_, p) (_, p'). set (vwrites p) ⊆ set (vwrites p')) ps ps' ∧
  LIST_REL (λ(_, p) (_, p'). vnwrites p' = vnwrites p) ps ps' ∧
- EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) e ∧
-                 no_array_read_dyn (Ev_from_decls decls) p) ps' ∧
+ EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) extenv e ∧
+                 no_array_read_dyn (Ev_from_decls decls) extenv p) ps' ∧
  EVERY (λ(e, p). vertype_exp extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) e t ∧
                  vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) p) ps' ∧
  tmpvars_distinct tmps' ∧
@@ -1023,7 +1048,7 @@ Proof
   rpt (pairarg_tac \\ asm_rewrite_tac [] \\ simp_tac (srw_ss()) []) \\ rpt strip_tac' \\ rveq \\
   qpat_x_assum ‘vertype_stmt _ _ _’ (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_stmt_cases]) \\
   last_x_assum strip_assume_tac \\ drule_first \\
-  qpat_x_assum ‘compile_array_read _ _ _ p = _’ (assume_tac o GSYM) \\
+  qpat_x_assum ‘compile_array_read _ _ _ _ p = _’ (assume_tac o GSYM) \\
   drule_first \\ simp [] \\ strip_tac \\ rpt strip_tac
   THEN2 (fs [vwrites_def, pred_setTheory.SUBSET_DEF] \\ metis_tac [tmpvarwrites_tmpvars_extend])
   >- simp [vnwrites_def]
@@ -1038,10 +1063,10 @@ Proof
   rpt (pairarg_tac \\ asm_rewrite_tac [] \\ simp_tac (srw_ss()) []) \\ rpt strip_tac' \\ rveq \\
   qpat_x_assum ‘vertype_stmt _ _ _’ (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_stmt_cases]) \\
   drule_strip (REWRITE_RULE [array_read_exp_rel_def] compile_array_read_exp_correct) \\
-  qpat_x_assum ‘compile_array_read_exp _ _ _ _ = _’ (assume_tac o SYM) \\
+  qpat_x_assum ‘compile_array_read_exp _ _ _ _ _ = _’ (assume_tac o SYM) \\
   last_x_assum strip_assume_tac \\
   drule_first \\ impl_tac >- decide_tac \\ strip_tac \\
-  qpat_x_assum ‘compile_array_read _ _ _ p = _’ (assume_tac o SYM) \\
+  qpat_x_assum ‘compile_array_read _ _ _ _ p = _’ (assume_tac o SYM) \\
   drule_first \\ impl_tac >- decide_tac \\ strip_tac \\ rw []
   >- (match_mp_tac vwrites_compile_array_read_newvars_subset_trans_lem \\
       rw [pred_setTheory.UNION_SUBSET]
@@ -1073,11 +1098,11 @@ Proof
   rewrite_tac [LET_THM] \\ pairarg_tac \\ drule_strip compile_array_read_exp_correct \\
 
   asm_rewrite_tac [] \\ CONV_TAC (DEPTH_CONV PairedLambda.PAIRED_BETA_CONV) \\
-  pairarg_tac \\ qpat_x_assum ‘compile_array_read_exp _ _ _ _ = _’ (assume_tac o SYM) \\
+  pairarg_tac \\ qpat_x_assum ‘compile_array_read_exp _ _ _ _ _ = _’ (assume_tac o SYM) \\
   drule_first \\ impl_tac >- simp [] \\ strip_tac \\
 
   asm_rewrite_tac [] \\ CONV_TAC (DEPTH_CONV PairedLambda.PAIRED_BETA_CONV) \\
-  pairarg_tac \\ qpat_x_assum ‘compile_array_read_case_list _ _ _ _ = _’ (assume_tac o SYM) \\
+  pairarg_tac \\ qpat_x_assum ‘compile_array_read_case_list _ _ _ _ _ = _’ (assume_tac o SYM) \\
   drule_first \\ impl_tac >- simp [] \\ strip_tac \\
 
   rw [] \\ simp []
@@ -1144,7 +1169,7 @@ Proof
   simp [array_rel_filled_prun_def] \\ rpt strip_tac' \\
   drule_strip newvars_inv_runtime_lengths \\
   drule_strip prun_compile_array_read_newvars \\
-  qmatch_goalsub_abbrev_tac ‘compile_array_read_newvars _ _ e’ \\
+  qmatch_goalsub_abbrev_tac ‘compile_array_read_newvars _ e’ \\
   first_x_assum (qspec_then ‘e’ strip_assume_tac) \\
   unabbrev_all_tac \\ fs [prun_def, sum_bind_INR] \\
   rename1 ‘prun_assn_rhs _ _ _ rhs = INR v’ \\ PairCases_on ‘v’ \\ fs [] \\
@@ -1167,11 +1192,11 @@ Proof
   qpat_x_assum ‘LET _ _ = _’ mp_tac \\ simp_tac (srw_ss()) [LET_THM] \\ pairarg_tac \\
   drule_strip compile_array_read_exp_correct \\
   asm_rewrite_tac [] \\
-  qpat_x_assum ‘compile_array_read_exp _ _ _ _ = _’ (assume_tac o SYM) \\
+  qpat_x_assum ‘compile_array_read_exp _ _ _ _ _ = _’ (assume_tac o SYM) \\
   simp_tac (srw_ss()) [] \\ pairarg_tac \\
   drule_first \\ impl_tac >- simp [] \\ strip_tac \\
   asm_rewrite_tac [] \\
-  qpat_x_assum ‘compile_array_read _ _ _ _ = _’ (assume_tac o SYM) \\
+  qpat_x_assum ‘compile_array_read _ _ _ _ _ = _’ (assume_tac o SYM) \\
   simp_tac (srw_ss()) [] \\ pairarg_tac \\
   drule_first \\ impl_tac >- simp [] \\ rw [] \\ simp []
   >- (fs [pred_setTheory.SUBSET_DEF] \\ metis_tac [tmpvarwrites_tmpvars_extend])
@@ -1263,7 +1288,7 @@ QED
 
 Theorem compile_array_read_list_correct:
  !ps ps' decls extenv tmpnum tmpnum' tmpnumstart tmps tmps'.
- compile_array_read_list decls tmpnum tmps ps = (tmpnum', tmps', ps') ∧
+ compile_array_read_list decls extenv tmpnum tmps ps = (tmpnum', tmps', ps') ∧
  fresh_tmpvar_decls tmpnumstart decls ∧
  tmpvars_distinct tmps ∧
  tmpvars_range tmpnumstart tmpnum tmps ∧
@@ -1278,7 +1303,7 @@ Theorem compile_array_read_list_correct:
  tmpvars_range tmpnumstart tmpnum' tmps' ∧
  tmpvars_extend tmps' tmps ∧
  EVERY (vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps'))) ps' ∧
- EVERY (no_array_read_dyn (Ev_from_decls decls)) ps' ∧
+ EVERY (no_array_read_dyn (Ev_from_decls decls) extenv) ps' ∧
  writes_ok ps' ∧
  (!fext s1 s1' s2.
   sum_foldM (prun fext) s1 ps = INR s1' ∧ array_rel s1 s2 ∧
@@ -1437,12 +1462,12 @@ Theorem compile_array_write_correct:
  tmpvars_distinct tmps ∧
  tmpvars_range tmpnumstart tmpnum tmps ∧
  tmpnumstart ≤ tmpnum ∧
- no_array_read_dyn (Ev_from_decls decls) p ⇒
+ no_array_read_dyn (Ev_from_decls decls) extenv p ⇒
  tmpnum ≤ tmpnum' ∧
  set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps' ∧
  (*set (vwrites p) ⊆ set (vwrites p') ∧*)
  set (vnwrites p') ⊆ set (vnwrites p) ∧
- no_array_read_dyn (Ev_from_decls decls) p' ∧
+ no_array_read_dyn (Ev_from_decls decls) extenv p' ∧
  no_array_write_dyn (Ev_from_decls decls) p' ∧
  vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) p' ∧
  tmpvars_distinct tmps' ∧
@@ -1457,12 +1482,12 @@ Theorem compile_array_write_correct:
  tmpvars_distinct tmps ∧
  tmpvars_range tmpnumstart tmpnum tmps ∧
  tmpnumstart ≤ tmpnum ∧
- OPTION_ALL (no_array_read_dyn (Ev_from_decls decls)) p ⇒
+ OPTION_ALL (no_array_read_dyn (Ev_from_decls decls) extenv) p ⇒
  tmpnum ≤ tmpnum' ∧
  OPTREL (λp p'. set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') p p' ∧
  (*OPTREL (λp p'. set (vwrites p) ⊆ set (vwrites p')) p p' ∧*)
  OPTREL (λp p'. set (vnwrites p') ⊆ set (vnwrites p)) p p' ∧
- OPTION_ALL (no_array_read_dyn (Ev_from_decls decls)) p' ∧
+ OPTION_ALL (no_array_read_dyn (Ev_from_decls decls) extenv) p' ∧
  OPTION_ALL (no_array_write_dyn (Ev_from_decls decls)) p' ∧
  OPTION_ALL (vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps'))) p' ∧
  tmpvars_distinct tmps' ∧
@@ -1478,14 +1503,14 @@ Theorem compile_array_write_correct:
  tmpvars_distinct tmps ∧
  tmpvars_range tmpnumstart tmpnum tmps ∧
  tmpnumstart ≤ tmpnum ∧
- EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) e ∧
-                 no_array_read_dyn (Ev_from_decls decls) p) ps ⇒
+ EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) extenv e ∧
+                 no_array_read_dyn (Ev_from_decls decls) extenv p) ps ⇒
  tmpnum ≤ tmpnum' ∧
  LIST_REL (λ(_, p) (_, p'). set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') ps ps' ∧
  (*LIST_REL (λ(_, p) (_, p'). set (vwrites p) ⊆ set (vwrites p')) ps ps' ∧*)
  LIST_REL (λ(_, p) (_, p'). set (vnwrites p') ⊆ set (vnwrites p)) ps ps' ∧
- EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) e ∧
-                 no_array_read_dyn (Ev_from_decls decls) p) ps' ∧
+ EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) extenv e ∧
+                 no_array_read_dyn (Ev_from_decls decls) extenv p) ps' ∧
  EVERY (no_array_write_dyn (Ev_from_decls decls)) (MAP SND ps') ∧
  EVERY (λ(e, p). vertype_exp extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) e t ∧
                  vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) p) ps' ∧
@@ -1690,7 +1715,7 @@ Theorem compile_array_write_list_correct:
  EVERY (vertype_stmt extenv (Ev_from_decls decls)) ps ∧
  writes_ok ps ∧
  tmpnumstart ≤ tmpnum ∧
- EVERY (no_array_read_dyn (Ev_from_decls decls)) ps ⇒
+ EVERY (no_array_read_dyn (Ev_from_decls decls) extenv) ps ⇒
  tmpnum ≤ tmpnum' ∧
  LIST_REL (λp p'. set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') ps ps' ∧
  (*LIST_REL (λp p'. set (vwrites p) ⊆ set (vwrites p')) ps ps' ∧*)
@@ -1699,7 +1724,7 @@ Theorem compile_array_write_list_correct:
  tmpvars_range tmpnumstart tmpnum' tmps' ∧
  tmpvars_extend tmps' tmps ∧
  EVERY (vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps'))) ps' ∧
- EVERY (no_array_read_dyn (Ev_from_decls decls)) ps' ∧
+ EVERY (no_array_read_dyn (Ev_from_decls decls) extenv) ps' ∧
  EVERY (no_array_write_dyn (Ev_from_decls decls)) ps' ∧
  writes_ok ps' ∧
  (!fext s1 s1' s2.
@@ -1753,18 +1778,18 @@ Proof
 QED
 
 Theorem no_array_read_dyn_exp_Case_to_IfElse_eq:
- ∀ty tenv lhs rhs.
- no_array_read_dyn_exp tenv (Case_to_IfElse_eq ty lhs rhs) ⇔
- no_array_read_dyn_exp tenv lhs ∧ no_array_read_dyn_exp tenv rhs
+ ∀ty tenv extenv lhs rhs.
+ no_array_read_dyn_exp tenv extenv (Case_to_IfElse_eq ty lhs rhs) ⇔
+ no_array_read_dyn_exp tenv extenv lhs ∧ no_array_read_dyn_exp tenv extenv rhs
 Proof
  Cases \\ simp [Case_to_IfElse_eq_def, no_array_read_dyn_exp_def]
 QED
 
 Theorem no_array_read_dyn_Case_to_IfElse:
- ∀ps d var t tenv.
- no_array_read_dyn tenv (Case_to_IfElse t (Var var) ps d) ⇔
- EVERY (λ(e,p). no_array_read_dyn_exp tenv e ∧ no_array_read_dyn tenv p) ps ∧
- OPTION_ALL (no_array_read_dyn tenv) d
+ ∀ps d var t tenv extenv.
+ no_array_read_dyn tenv extenv (Case_to_IfElse t (Var var) ps d) ⇔
+ EVERY (λ(e,p). no_array_read_dyn_exp tenv extenv e ∧ no_array_read_dyn tenv extenv p) ps ∧
+ OPTION_ALL (no_array_read_dyn tenv extenv) d
 Proof
  Induct \\ Cases \\
  simp [Case_to_IfElse_def, no_array_read_dyn_def, no_array_read_dyn_exp_def,
@@ -1772,7 +1797,7 @@ Proof
 QED
 
 Theorem no_array_write_dyn_Case_to_IfElse:
- ∀ps d var t tenv.
+ ∀ps d var t tenv extenv.
  no_array_write_dyn tenv (Case_to_IfElse t (Var var) ps d) ⇔
  EVERY (no_array_write_dyn tenv) (MAP SND ps) ∧
  OPTION_ALL (no_array_write_dyn tenv) d
@@ -1878,7 +1903,7 @@ Theorem compile_Case_correct:
  tmpvars_distinct tmps ∧
  tmpvars_range tmpnumstart tmpnum tmps ∧
  tmpnumstart ≤ tmpnum ∧
- no_array_read_dyn (Ev_from_decls decls) p ∧
+ no_array_read_dyn (Ev_from_decls decls) extenv p ∧
  no_array_write_dyn (Ev_from_decls decls) p ⇒
  tmpnum ≤ tmpnum' ∧
  tmpvars_extend tmps' tmps ∧
@@ -1887,7 +1912,7 @@ Theorem compile_Case_correct:
  set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps' ∧
  set (vwrites p) ⊆ set (vwrites p') ∧
  vnwrites p' = vnwrites p ∧
- no_array_read_dyn (Ev_from_decls decls) p' ∧
+ no_array_read_dyn (Ev_from_decls decls) extenv p' ∧
  no_array_write_dyn (Ev_from_decls decls) p' ∧
  no_Case p' ∧
  vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) p' ∧
@@ -1900,13 +1925,13 @@ Theorem compile_Case_correct:
  tmpvars_distinct tmps ∧
  tmpvars_range tmpnumstart tmpnum tmps ∧
  tmpnumstart ≤ tmpnum ∧
- OPTION_ALL (no_array_read_dyn (Ev_from_decls decls)) p ∧
+ OPTION_ALL (no_array_read_dyn (Ev_from_decls decls) extenv) p ∧
  OPTION_ALL (no_array_write_dyn (Ev_from_decls decls)) p ⇒
  tmpnum ≤ tmpnum' ∧
  OPTREL (λp p'. set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') p p' ∧
  OPTREL (λp p'. set (vwrites p) ⊆ set (vwrites p')) p p' ∧
  OPTREL (λp p'. vnwrites p' = vnwrites p) p p' ∧
- OPTION_ALL (no_array_read_dyn (Ev_from_decls decls)) p' ∧
+ OPTION_ALL (no_array_read_dyn (Ev_from_decls decls) extenv) p' ∧
  OPTION_ALL (no_array_write_dyn (Ev_from_decls decls)) p' ∧
  OPTION_ALL no_Case p' ∧
  OPTION_ALL (vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps'))) p' ∧
@@ -1923,15 +1948,15 @@ Theorem compile_Case_correct:
  tmpvars_distinct tmps ∧
  tmpvars_range tmpnumstart tmpnum tmps ∧
  tmpnumstart ≤ tmpnum ∧
- EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) e ∧
-                 no_array_read_dyn (Ev_from_decls decls) p) ps ∧
+ EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) extenv e ∧
+                 no_array_read_dyn (Ev_from_decls decls) extenv p) ps ∧
  EVERY (no_array_write_dyn (Ev_from_decls decls)) (MAP SND ps) ⇒
  tmpnum ≤ tmpnum' ∧
  LIST_REL (λ(_, p) (_, p'). set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') ps ps' ∧
  LIST_REL (λ(_, p) (_, p'). set (vwrites p) ⊆ set (vwrites p')) ps ps' ∧
  LIST_REL (λ(_, p) (_, p'). vnwrites p' = vnwrites p) ps ps' ∧
- EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) e ∧
-                 no_array_read_dyn (Ev_from_decls decls) p) ps' ∧
+ EVERY (λ(e, p). no_array_read_dyn_exp (Ev_from_decls decls) extenv e ∧
+                 no_array_read_dyn (Ev_from_decls decls) extenv p) ps' ∧
  EVERY (no_array_write_dyn (Ev_from_decls decls)) (MAP SND ps') ∧
  EVERY no_Case (MAP SND ps') ∧
  EVERY (λ(e, p). vertype_exp extenv (Ev_from_decls (decls ++ tmpvardecls tmps')) e t ∧
@@ -2071,7 +2096,7 @@ Theorem compile_Case_list_correct:
  EVERY (vertype_stmt extenv (Ev_from_decls decls)) ps ∧
  writes_ok ps ∧
  tmpnumstart ≤ tmpnum ∧
- EVERY (no_array_read_dyn (Ev_from_decls decls)) ps ∧
+ EVERY (no_array_read_dyn (Ev_from_decls decls) extenv) ps ∧
  EVERY (no_array_write_dyn (Ev_from_decls decls)) ps ⇒
  tmpnum ≤ tmpnum' ∧
  LIST_REL (λp p'. set (vwrites p') ⊆ set (vwrites p) ∪ tmpvarwrites tmps') ps ps' ∧
@@ -2081,7 +2106,7 @@ Theorem compile_Case_list_correct:
  tmpvars_range tmpnumstart tmpnum' tmps' ∧
  tmpvars_extend tmps' tmps ∧
  EVERY (vertype_stmt extenv (Ev_from_decls (decls ++ tmpvardecls tmps'))) ps' ∧
- EVERY (no_array_read_dyn (Ev_from_decls decls)) ps' ∧
+ EVERY (no_array_read_dyn (Ev_from_decls decls) extenv) ps' ∧
  EVERY (no_array_write_dyn (Ev_from_decls decls)) ps' ∧
  EVERY no_Case ps' ∧
  writes_ok ps' ∧
@@ -2258,19 +2283,28 @@ Proof
  simp [GSYM MAP_MAP_FST_lem, ALL_DISTINCT_MAP_tmpvar]
 QED
 
+Theorem get_var_type_cong:
+ ∀var tenv1 tenv2 extenv t.
+ get_var_type tenv1 extenv var = INR t ∧ (∀var t. tenv1 var = SOME t ⇒ tenv2 var = SOME t) ⇒
+ get_var_type tenv2 extenv var = INR t
+Proof
+ Cases \\ rw [get_var_type_def, tenv_type_def] \\ every_case_tac \\ fs [] \\ drule_first \\ fs []
+QED
+
 Theorem no_array_read_dyn_exp_cong:
- ∀tenv1 e tenv2.
- no_array_read_dyn_exp tenv1 e ∧ (∀var t. tenv1 var = SOME t ⇒ tenv2 var = SOME t) ⇒
- no_array_read_dyn_exp tenv2 e
+ ∀tenv1 extenv e tenv2.
+ no_array_read_dyn_exp tenv1 extenv e ∧ (∀var t. tenv1 var = SOME t ⇒ tenv2 var = SOME t) ⇒
+ no_array_read_dyn_exp tenv2 extenv e
 Proof
  recInduct no_array_read_dyn_exp_ind \\ rw [no_array_read_dyn_exp_def] \\
- every_case_tac \\ fs [sum_bind_INR, tenv_type_INR] \\ drule_first \\
- fs [tenv_type_def, sum_bind_def] \\ rfs []
+ every_case_tac \\ fs [sum_bind_INR] \\ gs [sum_bind_def] \\
+ drule_strip get_var_type_cong \\ fs [sum_bind_def]
 QED
 
 Theorem no_array_read_dyn_cong:
- ∀tenv1 p tenv2.
- no_array_read_dyn tenv1 p ∧ (∀var t. tenv1 var = SOME t ⇒ tenv2 var = SOME t) ⇒ no_array_read_dyn tenv2 p
+ ∀tenv1 extenv p tenv2.
+ no_array_read_dyn tenv1 extenv p ∧ (∀var t. tenv1 var = SOME t ⇒ tenv2 var = SOME t) ⇒
+ no_array_read_dyn tenv2 extenv p
 Proof
  recInduct no_array_read_dyn_ind \\ rw [no_array_read_dyn_def]
  >- (rpt drule_first \\ metis_tac [no_array_read_dyn_exp_cong])
@@ -2282,8 +2316,8 @@ Proof
 QED
 
 Theorem EVERY_no_array_read_dyn_extend_Ev_from_decls:
- ∀l1 l2 ps.
- EVERY (no_array_read_dyn (Ev_from_decls l1)) ps ⇒ EVERY (no_array_read_dyn (Ev_from_decls (l1 ++ l2))) ps
+ ∀l1 l2 ps extenv.
+ EVERY (no_array_read_dyn (Ev_from_decls l1) extenv) ps ⇒ EVERY (no_array_read_dyn (Ev_from_decls (l1 ++ l2)) extenv) ps
 Proof
  rpt strip_tac \\ irule EVERY_MONOTONIC \\ asm_exists_any_tac \\ rpt strip_tac \\
  match_mp_tac no_array_read_dyn_cong \\ asm_exists_tac \\
@@ -2492,7 +2526,8 @@ Theorem preprocess_correct:
  writes_overlap_ok m.combs m'.ffs ∧
  vertype_prog m' /\
  module_ok m' ∧
- EVERY (preprocessed (Ev_from_decls m'.decls)) m'.ffs /\ EVERY (preprocessed (Ev_from_decls m'.decls)) m'.combs /\
+ EVERY (preprocessed (Ev_from_decls m'.decls) m.fextty) m'.ffs /\
+ EVERY (preprocessed (Ev_from_decls m'.decls) m.fextty) m'.combs /\
  (!fext n vs fbits fbits'.
   run fext fbits m n = INR (vs, fbits') ∧ vertype_fext m.fextty fext ⇒
   ?vs'. run fext fbits m' n = INR (vs', fbits') /\
@@ -2503,15 +2538,14 @@ Proof
 
  (* array read: ffs *)
  fs [compile_array_read_module_def] \\ ntac 2 pairarg_tac \\
- drule_strip compile_array_read_list_correct \\ simp [] \\ disch_then drule_strip \\
+ drule_strip compile_array_read_list_correct \\ simp [] \\ strip_tac \\
  drule_strip EVERY_vertype_stmt_extend_Ev_from_decls \\
  
  (* array read: combs *)
  fs [] \\ rveq \\ pairarg_tac \\
  drule_strip fresh_tmpvar_decls_le \\ disch_then (qspec_then ‘tmpnum'’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
  drule_strip compile_array_read_list_correct \\ simp [] \\
- disch_then (qspec_then ‘m.fextty’ mp_tac) \\ impl_tac >- simp [] \\ strip_tac \\
- drule_strip EVERY_vertype_stmt_extend_ffs_tmps_lem \\
+ strip_tac \\ drule_strip EVERY_vertype_stmt_extend_ffs_tmps_lem \\
  first_x_assum (qspec_then ‘tmpvardecls combs_tmps’ assume_tac) \\
 
  (* array write: ffs *)

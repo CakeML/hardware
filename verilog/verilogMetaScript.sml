@@ -6,6 +6,8 @@ open oracleTheory sumExtraTheory verilogTheory verilogTypeTheory;
 
 val _ = new_theory "verilogMeta";
 
+infix THEN2;
+
 (** variables **)
 
 val get_var_set_var = Q.store_thm("get_var_set_var",
@@ -292,12 +294,11 @@ Triviality vertype_exp_erun_lem:
 Proof
  ntac 2 gen_tac \\ ho_match_mp_tac vertype_exp_ind \\
  rw [erun_def, sum_bind_INR, alist_to_map_alookup, GSYM sum_alookup_INR]
- >- (fs [erun_get_var_def, vertype_env_def] \\ drule_first \\ rfs [])
- >- (fs [erun_get_var_def, vertype_fext_n_def] \\ drule_first \\ rfs [])
- >- (rename1 ‘get_array_index _ vvar’ \\ Cases_on ‘vvar’ \\ fs [get_array_index_def, sum_map_INR] \\
-    rveq \\ simp [vertype_v_cases])
- >- (fs [erun_get_var_def, vertype_env_def] \\ drule_first \\
-     fs [] \\ rfs [vertype_v_cases] \\ fs [get_array_slice_def])
+ THEN2 (fs [erun_get_var_def, vertype_env_def, vertype_fext_n_def] \\ drule_first \\ rfs [])
+ THEN2 (rename1 ‘get_array_index _ vvar’ \\ Cases_on ‘vvar’ \\ fs [get_array_index_def, sum_map_INR] \\
+        rveq \\ simp [vertype_v_cases])
+ THEN2 (fs [erun_get_var_def, vertype_env_def, vertype_fext_n_def] \\ drule_first \\
+        fs [] \\ rfs [vertype_v_cases] \\ fs [get_array_slice_def])
  >- fs [ver_liftVBool_INR, vertype_v_cases]
  >- (every_case_tac \\ fs [] \\ rw [vertype_v_cases])
  >- (rpt drule_first \\ fs [ver_mapVArray_INR] \\ rveq \\

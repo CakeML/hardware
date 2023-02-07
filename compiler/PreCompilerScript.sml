@@ -85,16 +85,15 @@ Proof
  Cases \\ simp [is_ok_idx_const_def]
 QED
 
-Definition get_arrayindex_var_def:
- (* Partial function! *)
- (get_arrayindex_var (Var var) = var) ∧
- (get_arrayindex_var (InputVar var) = var)
+(* Partial function! *)
+Definition get_var_type_impl_def:
+ (get_var_type_impl tenv tfext (Var var) = decls_type tenv var) ∧
+ (get_var_type_impl tenv tfext (InputVar var) = sum_alookup tfext var)
 End
 
 Definition compile_array_read_exp_def:
- (compile_array_read_exp tenv tmpnum tmps (ArrayIndex var ilen idx) =
-  let varvar = get_arrayindex_var var in
-  case decls_type tenv varvar of
+ (compile_array_read_exp tenv tfext tmpnum tmps (ArrayIndex var ilen idx) =
+  case get_var_type_impl tenv tfext var of
     INR (VArray_t varlen) =>
      (case get_const idx of
         INR idx => (tmpnum, tmps, [], if is_ok_idx_const varlen idx then
@@ -104,138 +103,144 @@ Definition compile_array_read_exp_def:
       | _ => (*let (tmpnum, tmps, newvars, idx) = compile_array_read_exp tenv tmpnum tmps idx in*)
              (* ^-- actually, cannot have nested indexing because of the current limited type system... *)
               (SUC tmpnum, (tmpnum, VBool_t)::tmps,
-               [(tmpnum, varlen, varvar, ilen, idx)](*::newvars*), Var (tmpvar tmpnum)))
+               [(tmpnum, varlen, var, ilen, idx)](*::newvars*), Var (tmpvar tmpnum)))
   | _ => (* ill-typed program: *) (tmpnum, tmps, [], ArrayIndex var ilen idx)) ∧
- (compile_array_read_exp tenv tmpnum tmps (BUOp op e1) =
-  let (tmpnum, tmps, newvars, e1) = compile_array_read_exp tenv tmpnum tmps e1 in
+ (compile_array_read_exp tenv tfext tmpnum tmps (BUOp op e1) =
+  let (tmpnum, tmps, newvars, e1) = compile_array_read_exp tenv tfext tmpnum tmps e1 in
    (tmpnum, tmps, newvars, BUOp op e1)) /\
- (compile_array_read_exp tenv tmpnum tmps (BBOp e1 op e2) =
-  let (tmpnum, tmps, newvars1, e1) = compile_array_read_exp tenv tmpnum tmps e1;
-      (tmpnum, tmps, newvars2, e2) = compile_array_read_exp tenv tmpnum tmps e2 in
+ (compile_array_read_exp tenv tfext tmpnum tmps (BBOp e1 op e2) =
+  let (tmpnum, tmps, newvars1, e1) = compile_array_read_exp tenv tfext tmpnum tmps e1;
+      (tmpnum, tmps, newvars2, e2) = compile_array_read_exp tenv tfext tmpnum tmps e2 in
    (tmpnum, tmps, newvars1 ++ newvars2, BBOp e1 op e2)) /\
- (compile_array_read_exp tenv tmpnum tmps (Arith e1 op e2) =
-  let (tmpnum, tmps, newvars1, e1) = compile_array_read_exp tenv tmpnum tmps e1;
-      (tmpnum, tmps, newvars2, e2) = compile_array_read_exp tenv tmpnum tmps e2 in
+ (compile_array_read_exp tenv tfext tmpnum tmps (Arith e1 op e2) =
+  let (tmpnum, tmps, newvars1, e1) = compile_array_read_exp tenv tfext tmpnum tmps e1;
+      (tmpnum, tmps, newvars2, e2) = compile_array_read_exp tenv tfext tmpnum tmps e2 in
    (tmpnum, tmps, newvars1 ++ newvars2, Arith e1 op e2)) /\
- (compile_array_read_exp tenv tmpnum tmps (Cmp e1 op e2) =
-  let (tmpnum, tmps, newvars1, e1) = compile_array_read_exp tenv tmpnum tmps e1;
-      (tmpnum, tmps, newvars2, e2) = compile_array_read_exp tenv tmpnum tmps e2 in
+ (compile_array_read_exp tenv tfext tmpnum tmps (Cmp e1 op e2) =
+  let (tmpnum, tmps, newvars1, e1) = compile_array_read_exp tenv tfext tmpnum tmps e1;
+      (tmpnum, tmps, newvars2, e2) = compile_array_read_exp tenv tfext tmpnum tmps e2 in
    (tmpnum, tmps, newvars1 ++ newvars2, Cmp e1 op e2)) /\
- (compile_array_read_exp tenv tmpnum tmps e = (tmpnum, tmps, [], e))
+ (compile_array_read_exp tenv tfext tmpnum tmps e = (tmpnum, tmps, [], e))
 End
 
 Definition compile_array_read_exp_opt_def:
- (compile_array_read_exp_opt tenv tmpnum tmps NONE = (tmpnum, tmps, [], NONE)) ∧
- (compile_array_read_exp_opt tenv tmpnum tmps (SOME e) =
-  let (tmpnum, tmps, newvars, e) = compile_array_read_exp tenv tmpnum tmps e in
+ (compile_array_read_exp_opt tenv tfext tmpnum tmps NONE = (tmpnum, tmps, [], NONE)) ∧
+ (compile_array_read_exp_opt tenv tfext tmpnum tmps (SOME e) =
+  let (tmpnum, tmps, newvars, e) = compile_array_read_exp tenv tfext tmpnum tmps e in
    (tmpnum, tmps, newvars, SOME e))
 End
 
 Definition compile_array_read_newvars_def:
- (compile_array_read_newvars tenv [] p = p) ∧
- (compile_array_read_newvars tenv ((tmpnum, varlen, var, ilen, idx)::newvars) p = let
+ (compile_array_read_newvars [] p = p) ∧
+ (compile_array_read_newvars ((tmpnum, varlen, var, ilen, idx)::newvars) p = let
   newvar = tmpvar tmpnum;
   caselen = MIN varlen (2**ilen);
   cases = GENLIST (λi. let i = (Const $ n2VArray ilen i) in
-                        (i, BlockingAssign (NoIndexing newvar) (SOME $ ArrayIndex (Var var) ilen i))) caselen in
+                        (i, BlockingAssign (NoIndexing newvar) (SOME $ ArrayIndex var ilen i))) caselen in
    Seq (Case (VArray_t ilen) idx cases NONE)
-       (compile_array_read_newvars tenv newvars p))
+       (compile_array_read_newvars newvars p))
 End
 
 Definition compile_array_read_size_def:
- (compile_array_read_size (INL (_, _, _, p)) = vprog_size p) ∧
- (compile_array_read_size (INR (INL (_, _, _, p))) = vprog3_size p) ∧
- (compile_array_read_size (INR (INR (_, _, _, ps))) = vprog1_size ps)
+ (compile_array_read_size (INL (_, _, _, _, p)) = vprog_size p) ∧
+ (compile_array_read_size (INR (INL (_, _, _, _, p))) = vprog3_size p) ∧
+ (compile_array_read_size (INR (INR (_, _, _, _, ps))) = vprog1_size ps)
 End
 
 Definition compile_array_read_def:
- (compile_array_read tenv tmpnum tmps Skip = (tmpnum, tmps, Skip)) ∧
- (compile_array_read tenv tmpnum tmps (Seq l r) = let
-  (tmpnum, tmps, l) = compile_array_read tenv tmpnum tmps l;
-  (tmpnum, tmps, r) = compile_array_read tenv tmpnum tmps r in
+ (compile_array_read tenv tfext tmpnum tmps Skip = (tmpnum, tmps, Skip)) ∧
+ (compile_array_read tenv tfext tmpnum tmps (Seq l r) = let
+  (tmpnum, tmps, l) = compile_array_read tenv tfext tmpnum tmps l;
+  (tmpnum, tmps, r) = compile_array_read tenv tfext tmpnum tmps r in
    (tmpnum, tmps, Seq l r)) ∧
- (compile_array_read tenv tmpnum tmps (IfElse c l r) = let
-  (tmpnum, tmps, newvars, c) = compile_array_read_exp tenv tmpnum tmps c;
-  (tmpnum, tmps, l) = compile_array_read tenv tmpnum tmps l;
-  (tmpnum, tmps, r) = compile_array_read tenv tmpnum tmps r in
-   (tmpnum, tmps, compile_array_read_newvars tenv newvars (IfElse c l r))) ∧
- (compile_array_read tenv tmpnum tmps (Case t m cs d) = let
-  (tmpnum, tmps, newvars1, m) = compile_array_read_exp tenv tmpnum tmps m;
-  (tmpnum, tmps, newvars2, cs) = compile_array_read_case_list tenv tmpnum tmps cs;
-  (tmpnum, tmps, d) = compile_array_read_opt tenv tmpnum tmps d in
-   (tmpnum, tmps, compile_array_read_newvars tenv newvars2
-                   (compile_array_read_newvars tenv newvars1
+ (compile_array_read tenv tfext tmpnum tmps (IfElse c l r) = let
+  (tmpnum, tmps, newvars, c) = compile_array_read_exp tenv tfext tmpnum tmps c;
+  (tmpnum, tmps, l) = compile_array_read tenv tfext tmpnum tmps l;
+  (tmpnum, tmps, r) = compile_array_read tenv tfext tmpnum tmps r in
+   (tmpnum, tmps, compile_array_read_newvars newvars (IfElse c l r))) ∧
+ (compile_array_read tenv tfext tmpnum tmps (Case t m cs d) = let
+  (tmpnum, tmps, newvars1, m) = compile_array_read_exp tenv tfext tmpnum tmps m;
+  (tmpnum, tmps, newvars2, cs) = compile_array_read_case_list tenv tfext tmpnum tmps cs;
+  (tmpnum, tmps, d) = compile_array_read_opt tenv tfext tmpnum tmps d in
+   (tmpnum, tmps, compile_array_read_newvars newvars2
+                   (compile_array_read_newvars newvars1
                     (Case t m cs d)))) ∧
- (compile_array_read tenv tmpnum tmps (BlockingAssign wc rhs) = let
-  (tmpnum, tmps, newvars, rhs) = compile_array_read_exp_opt tenv tmpnum tmps rhs in
-   (tmpnum, tmps, compile_array_read_newvars tenv newvars (BlockingAssign wc rhs))) ∧
- (compile_array_read tenv tmpnum tmps (NonBlockingAssign wc rhs) = let
-  (tmpnum, tmps, newvars, rhs) = compile_array_read_exp_opt tenv tmpnum tmps rhs in
-   (tmpnum, tmps, compile_array_read_newvars tenv newvars (NonBlockingAssign wc rhs))) ∧
+ (compile_array_read tenv tfext tmpnum tmps (BlockingAssign wc rhs) = let
+  (tmpnum, tmps, newvars, rhs) = compile_array_read_exp_opt tenv tfext tmpnum tmps rhs in
+   (tmpnum, tmps, compile_array_read_newvars newvars (BlockingAssign wc rhs))) ∧
+ (compile_array_read tenv tfext tmpnum tmps (NonBlockingAssign wc rhs) = let
+  (tmpnum, tmps, newvars, rhs) = compile_array_read_exp_opt tenv tfext tmpnum tmps rhs in
+   (tmpnum, tmps, compile_array_read_newvars newvars (NonBlockingAssign wc rhs))) ∧
 
- (compile_array_read_opt tenv tmpnum tmps NONE = (tmpnum, tmps, NONE)) ∧
- (compile_array_read_opt tenv tmpnum tmps (SOME p) = let
-  (tmpnum, tmps, p) = compile_array_read tenv tmpnum tmps p in
+ (compile_array_read_opt tenv tfext tmpnum tmps NONE = (tmpnum, tmps, NONE)) ∧
+ (compile_array_read_opt tenv tfext tmpnum tmps (SOME p) = let
+  (tmpnum, tmps, p) = compile_array_read tenv tfext tmpnum tmps p in
    (tmpnum, tmps, SOME p)) ∧
 
- (compile_array_read_case_list tenv tmpnum tmps [] = (tmpnum, tmps, [], [])) ∧
- (compile_array_read_case_list tenv tmpnum tmps ((e,p)::ps) = let
-  (tmpnum, tmps, newvars1, e) = compile_array_read_exp tenv tmpnum tmps e;
-  (tmpnum, tmps, p) = compile_array_read tenv tmpnum tmps p;
-  (tmpnum, tmps, newvars2, ps) = compile_array_read_case_list tenv tmpnum tmps ps in
+ (compile_array_read_case_list tenv tfext tmpnum tmps [] = (tmpnum, tmps, [], [])) ∧
+ (compile_array_read_case_list tenv tfext tmpnum tmps ((e,p)::ps) = let
+  (tmpnum, tmps, newvars1, e) = compile_array_read_exp tenv tfext tmpnum tmps e;
+  (tmpnum, tmps, p) = compile_array_read tenv tfext tmpnum tmps p;
+  (tmpnum, tmps, newvars2, ps) = compile_array_read_case_list tenv tfext tmpnum tmps ps in
    (tmpnum, tmps, newvars1 ++ newvars2, (e, p) :: ps))
 Termination
  WF_REL_TAC `measure compile_array_read_size` \\ rw [compile_array_read_size_def, vprog_size_def]
 End
 
 Definition compile_array_read_list_def:
- (compile_array_read_list tenv tmpnum tmps [] = (tmpnum, tmps, [])) ∧
- (compile_array_read_list tenv tmpnum tmps (p::ps) = let
-  (tmpnum, tmps, p) = compile_array_read tenv tmpnum tmps p;
-  (tmpnum, tmps, ps) = compile_array_read_list tenv tmpnum tmps ps in
+ (compile_array_read_list tenv tfext tmpnum tmps [] = (tmpnum, tmps, [])) ∧
+ (compile_array_read_list tenv tfext tmpnum tmps (p::ps) = let
+  (tmpnum, tmps, p) = compile_array_read tenv tfext tmpnum tmps p;
+  (tmpnum, tmps, ps) = compile_array_read_list tenv tfext tmpnum tmps ps in
    (tmpnum, tmps, p::ps))
 End
 
 Definition compile_array_read_module_def:
  compile_array_read_module tmpnum m =
-  let (tmpnum, ffs_tmps, ffs) = compile_array_read_list m.decls tmpnum [] m.ffs;
-      (tmpnum, combs_tmps, combs) = compile_array_read_list m.decls tmpnum [] m.combs in
+  let (tmpnum, ffs_tmps, ffs) = compile_array_read_list m.decls m.fextty tmpnum [] m.ffs;
+      (tmpnum, combs_tmps, combs) = compile_array_read_list m.decls m.fextty tmpnum [] m.combs in
   (tmpnum, m with <| decls := m.decls ++ tmpvardecls ffs_tmps ++ tmpvardecls combs_tmps; ffs := ffs; combs := combs |>)
 End
 
+Definition get_var_type_def:
+ (get_var_type tenv tfext (Var var) = tenv_type tenv var) ∧
+ (get_var_type tenv tfext (InputVar var) = sum_alookup tfext var) ∧
+ (get_var_type tenv tfext _ = INL Impossible)
+End
+
 Definition no_array_read_dyn_exp_def:
- (no_array_read_dyn_exp tenv (Const _) <=> T) /\
- (no_array_read_dyn_exp tenv (Var _) <=> T) /\
- (no_array_read_dyn_exp tenv (InputVar _) <=> T) /\
- (no_array_read_dyn_exp tenv (ArrayIndex (Var var) ilen i) <=>
-  case (do i <- get_const i; i <- ver2n i; t <- tenv_type tenv var; return (i, t) od) of
+ (no_array_read_dyn_exp tenv tfext (Const _) <=> T) /\
+ (no_array_read_dyn_exp tenv tfext (Var _) <=> T) /\
+ (no_array_read_dyn_exp tenv tfext (InputVar _) <=> T) /\
+ (no_array_read_dyn_exp tenv tfext (ArrayIndex var ilen i) <=>
+  case (do i <- get_const i; i <- ver2n i; t <- get_var_type tenv tfext var; return (i, t) od) of
     INR (i, VArray_t len) => i < len
   | _ => F) /\
- (no_array_read_dyn_exp tenv (ArraySlice _ _ _) ⇔ T) ∧
- (no_array_read_dyn_exp tenv (BUOp _ e1) <=>
-  no_array_read_dyn_exp tenv e1) /\
- (no_array_read_dyn_exp tenv (BBOp e1 _ e2) <=>
-  no_array_read_dyn_exp tenv e1 /\ no_array_read_dyn_exp tenv e2) /\
- (no_array_read_dyn_exp tenv (Arith e1 _ e2) <=>
-  no_array_read_dyn_exp tenv e1 /\ no_array_read_dyn_exp tenv e2) /\
- (no_array_read_dyn_exp tenv (Cmp e1 _ e2) <=>
-  no_array_read_dyn_exp tenv e1 /\ no_array_read_dyn_exp tenv e2) /\
- (no_array_read_dyn_exp tenv _ <=> F)
+ (no_array_read_dyn_exp tenv tfext (ArraySlice _ _ _) ⇔ T) ∧
+ (no_array_read_dyn_exp tenv tfext (BUOp _ e1) <=>
+  no_array_read_dyn_exp tenv tfext e1) /\
+ (no_array_read_dyn_exp tenv tfext (BBOp e1 _ e2) <=>
+  no_array_read_dyn_exp tenv tfext e1 /\ no_array_read_dyn_exp tenv tfext e2) /\
+ (no_array_read_dyn_exp tenv tfext (Arith e1 _ e2) <=>
+  no_array_read_dyn_exp tenv tfext e1 /\ no_array_read_dyn_exp tenv tfext e2) /\
+ (no_array_read_dyn_exp tenv tfext (Cmp e1 _ e2) <=>
+  no_array_read_dyn_exp tenv tfext e1 /\ no_array_read_dyn_exp tenv tfext e2) /\
+ (no_array_read_dyn_exp tenv tfext _ <=> F)
 End
 
 Definition no_array_read_dyn_def:
- (no_array_read_dyn tenv Skip <=> T) /\
- (no_array_read_dyn tenv (Seq p1 p2) <=> no_array_read_dyn tenv p1 /\ no_array_read_dyn tenv p2) /\
- (no_array_read_dyn tenv (IfElse c tb fb) <=>
-  no_array_read_dyn_exp tenv c /\ no_array_read_dyn tenv tb /\ no_array_read_dyn tenv fb) /\
- (no_array_read_dyn tenv (Case _ c cases def) <=>
-  no_array_read_dyn_exp tenv c /\
-  EVERY (λ(c, e). no_array_read_dyn_exp tenv c /\ no_array_read_dyn tenv e) cases /\
-  OPTION_ALL (no_array_read_dyn tenv) def) /\
- (no_array_read_dyn tenv (BlockingAssign _ e) <=> OPTION_ALL (no_array_read_dyn_exp tenv) e) /\
- (no_array_read_dyn tenv (NonBlockingAssign _ e) <=> OPTION_ALL (no_array_read_dyn_exp tenv) e)
+ (no_array_read_dyn tenv tfext Skip <=> T) /\
+ (no_array_read_dyn tenv tfext (Seq p1 p2) <=> no_array_read_dyn tenv tfext p1 /\ no_array_read_dyn tenv tfext p2) /\
+ (no_array_read_dyn tenv tfext (IfElse c tb fb) <=>
+  no_array_read_dyn_exp tenv tfext c /\ no_array_read_dyn tenv tfext tb /\ no_array_read_dyn tenv tfext fb) /\
+ (no_array_read_dyn tenv tfext (Case _ c cases def) <=>
+  no_array_read_dyn_exp tenv tfext c /\
+  EVERY (λ(c, e). no_array_read_dyn_exp tenv tfext c /\ no_array_read_dyn tenv tfext e) cases /\
+  OPTION_ALL (no_array_read_dyn tenv tfext) def) /\
+ (no_array_read_dyn tenv tfext (BlockingAssign _ e) <=> OPTION_ALL (no_array_read_dyn_exp tenv tfext) e) /\
+ (no_array_read_dyn tenv tfext (NonBlockingAssign _ e) <=> OPTION_ALL (no_array_read_dyn_exp tenv tfext) e)
 Termination
- WF_REL_TAC `measure (vprog_size o SND)` \\ rw [MEM_MAP] \\
+ WF_REL_TAC `measure (vprog_size o SND o SND)` \\ rw [MEM_MAP] \\
  drule_strip MEM_IMP_vprog_size \\ DECIDE_TAC
 End
  
@@ -251,6 +256,12 @@ Definition compile_array_write_prog_assn_def:
                                    (i, assn (Indexing lhsvar ilen i) (SOME $ Var newvar))) caselen) 
                     NONE) in
   (SUC tmpnum, (tmpnum, VBool_t) :: tmps, p)
+End
+
+Definition compile_array_write_size_def:
+ (compile_array_write_size (INL (_, _, _, p)) = vprog_size p) ∧
+ (compile_array_write_size (INR (INL (_, _, _, p))) = vprog3_size p) ∧
+ (compile_array_write_size (INR (INR (_, _, _, ps))) = vprog1_size ps)
 End
    
 Definition compile_array_write_def:
@@ -299,7 +310,7 @@ Definition compile_array_write_def:
   (tmpnum, tmps, ps) = compile_array_write_case_list tenv tmpnum tmps ps in
    (tmpnum, tmps, (e, p) :: ps))
 Termination
- WF_REL_TAC `measure compile_array_read_size` \\ rw [compile_array_read_size_def, vprog_size_def]
+ WF_REL_TAC `measure compile_array_write_size` \\ rw [compile_array_write_size_def, vprog_size_def]
 End
 
 Definition compile_array_write_list_def:
@@ -424,20 +435,20 @@ Definition preprocess_def:
 End
 
 Definition preprocessed_def:
- preprocessed tenv p <=> no_array_read_dyn tenv p /\ no_array_write_dyn tenv p /\ no_Case p
+ preprocessed tenv tfext p <=> no_array_read_dyn tenv tfext p /\ no_array_write_dyn tenv p /\ no_Case p
 End
 
 Theorem EVERY_preprocessed:
- !tenv ps.
- EVERY (preprocessed tenv) ps <=> EVERY (no_array_read_dyn tenv) ps /\
-                                  EVERY (no_array_write_dyn tenv) ps /\
-                                  EVERY no_Case ps
+ !tenv tfext ps.
+ EVERY (preprocessed tenv tfext) ps <=> EVERY (no_array_read_dyn tenv tfext) ps /\
+                                        EVERY (no_array_write_dyn tenv) ps /\
+                                        EVERY no_Case ps
 Proof
  simp [EVERY_MEM, preprocessed_def] \\ metis_tac []
 QED
 
 Definition preprocessed_module_def:
- preprocessed_module tenv m <=> EVERY (preprocessed tenv) m.ffs ∧ EVERY (preprocessed tenv) m.combs
+ preprocessed_module tenv m <=> EVERY (preprocessed tenv m.fextty) m.ffs ∧ EVERY (preprocessed tenv m.fextty) m.combs
 End
 
 val _ = export_theory ();

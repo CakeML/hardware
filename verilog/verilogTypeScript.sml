@@ -86,8 +86,14 @@ Inductive vertype_exp:
  (env var = SOME (VArray_t l1) /\ vertype_exp extenv env i (VArray_t ilen) ==>
   vertype_exp extenv env (ArrayIndex (Var var) ilen i) VBool_t) /\
 
+ (ALOOKUP extenv var = SOME (VArray_t l1) /\ vertype_exp extenv env i (VArray_t ilen) ==>
+  vertype_exp extenv env (ArrayIndex (InputVar var) ilen i) VBool_t) /\
+
  (env var = SOME (VArray_t l) /\ i1 < l ∧ i2 ≤ i1 ∧ i3 = i1 - i2 + 1 ==>
   vertype_exp extenv env (ArraySlice (Var var) i1 i2) (VArray_t i3)) ∧
+
+ (ALOOKUP extenv var = SOME (VArray_t l) /\ i1 < l ∧ i2 ≤ i1 ∧ i3 = i1 - i2 + 1 ==>
+  vertype_exp extenv env (ArraySlice (InputVar var) i1 i2) (VArray_t i3)) ∧
 
  (vertype_exp extenv env e VBool_t ==>
   vertype_exp extenv env (BUOp Not e) VBool_t) ∧
@@ -403,6 +409,8 @@ Theorem vertype_exp_deterministic:
 Proof
  ntac 3 gen_tac \\ ho_match_mp_tac vertype_exp_ind \\ rpt conj_tac \\ rpt strip_tac'
  >- (fs [Once vertype_exp_cases] \\ metis_tac [vertype_v_deterministic])
+ >- fs [Once vertype_exp_cases]
+ >- fs [Once vertype_exp_cases]
  >- fs [Once vertype_exp_cases]
  >- fs [Once vertype_exp_cases]
  >- fs [Once vertype_exp_cases]

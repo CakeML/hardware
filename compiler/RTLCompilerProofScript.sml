@@ -11,6 +11,8 @@ open RTLLib;
 
 val _ = new_theory "RTLCompilerProof";
 
+infix THEN2;
+
 val _ = type_abbrev ("extenvt", “:(string, vertype) alist”);
 
 (** Phase 1 **)
@@ -1089,7 +1091,7 @@ Theorem compile_exp_correct:
  !e EEv Ev cenv t cs cs' nl inp ps fext fextv.
   compile_exp cs e = INR (cs', nl, inp) /\
   vertype_exp EEv Ev e t /\
-  no_array_read_dyn_exp Ev e /\ (* <-- merge with other pre-processing maybe *)
+  no_array_read_dyn_exp Ev EEv e /\ (* <-- merge with other pre-processing maybe *)
 
   same_fext_n fextv fext /\
   vertype_fext_n EEv fextv /\
@@ -1142,22 +1144,36 @@ Proof
   drule_strip (GSYM same_value_rtltype_v_vertype_v) \\ fs [] \\ asm_exists_tac \\ simp [compile_type_correct] \\
   simp [erun_def, erun_get_var_def])
 
- >- (* ArrayIndex *)
+ THEN2 (* ArrayIndex *)
  (ntac 2 (last_x_assum kall_tac) \\
- fs [no_array_read_dyn_exp_def] \\ every_case_tac \\ fs [sum_bind_INR, get_const_INR, tenv_type_INR] \\
+ fs [no_array_read_dyn_exp_def] \\ every_case_tac \\ fs [sum_bind_INR, get_const_INR, get_var_type_def, tenv_type_INR] \\
  Cases_on ‘i’ \\ fs [ver2n_def, ver2v_def, sum_map_def] \\ rveq \\
  qpat_x_assum `vertype_exp _ _ _ _`
   (strip_assume_tac o SIMP_RULE (srw_ss()) [Once vertype_exp_cases, vertype_v_cases]) \\ rveq \\
  fs [compile_exp_def, sum_bind_INR, sum_map_def, ver2n_def, ver2v_def] \\ rveq \\
  simp [cstate_progress_def, netlist_ok_def, netlist_sorted_def] \\ rpt conj_tac
- >- (fs [cstate_ok_def] \\
+ >- (simp [cell_input_lt_def] \\
+     fs [cstate_ok_def] \\
      match_mp_tac cell_input_idx_cell_input_lt \\ asm_exists_tac \\
      match_mp_tac si_lt_cell_input_lt_cget_net \\ asm_exists_tac)
- >- (fs [cstate_ok_def] \\
-    match_mp_tac cell_input_idx_cell_input_covered_by_extenv \\ asm_exists_tac \\
-    match_mp_tac si_sound_cell_input_covered_by_extenv_cget_net \\ asm_exists_tac) \\
+ >- (simp [cell_input_covered_by_extenv_def] \\
+     fs [cstate_ok_def] \\
+     match_mp_tac cell_input_idx_cell_input_covered_by_extenv \\ asm_exists_tac \\
+     match_mp_tac si_sound_cell_input_covered_by_extenv_cget_net \\ asm_exists_tac) \\
  simp [sum_foldM_def] \\ fs [cstate_ok_def] \\
 
+ (* InputVar case *)
+ TRY (
+  fs [vertype_fext_n_def, sum_alookup_INR] \\ drule_first \\
+  drule_strip same_fext_n_ver_INR \\
+  gvs [vertype_v_cases, same_value_cases] \\
+  simp [cell_inp_run_def, sum_bind_def, cget_fext_var_def, sum_map_INR, sum_revEL_INR] \\
+  simp [rtltype_v_cases, same_type_cases] \\ rpt strip_tac' \\
+  gvs [erun_def, sum_bind_INR, erun_get_var_def, get_array_index_INR, ver2n_INR] \\
+  simp [same_value_cases] \\
+  NO_TAC) \\
+
+ (* Var case *)
  fs [si_complete_def] \\ rpt drule_first \\ fs [same_type_cases] \\ rveq \\ fs [rtltype_v_CArray_t] \\ rveq \\
  simp [erun_def, erun_get_var_def] \\
  fs [alist_to_map_alookup, GSYM sum_alookup_INR] \\ rveq \\
@@ -1166,7 +1182,7 @@ Proof
  fs [same_state_sis_def, same_state_bsi_def, GSYM get_var_sum_alookup] \\
  drule_first \\ fs [get_array_index_INR] \\ rveq \\ fs [same_value_def])
 
- >- (* ArraySlice *)
+ >- (* ArraySlice - Var *)
  (last_x_assum kall_tac \\
   fs [compile_exp_def, sum_bind_INR] \\ rveq \\
   fs [netlist_ok_def, netlist_sorted_def, sum_foldM_def, cstate_progress_def, cstate_ok_def] \\
@@ -1175,6 +1191,7 @@ Proof
       match_mp_tac si_lt_cell_input_lt_cget_net \\ asm_exists_tac)
   >- (match_mp_tac cell_input_slice_cell_input_covered_by_extenv \\ asm_exists_tac \\
       match_mp_tac si_sound_cell_input_covered_by_extenv_cget_net \\ asm_exists_tac) \\
+
   qpat_x_assum ‘si_complete _ _ _ cs.nbsi’ kall_tac \\  
   fs [si_complete_def] \\ drule_first \\
   fs [same_type_cases] \\ rveq \\ fs [rtltype_v_CArray_t] \\ rveq \\
@@ -1183,6 +1200,22 @@ Proof
   fs [erun_def, erun_get_var_def, sum_bind_INR,
       same_state_sis_def, same_state_bsi_def, GSYM get_var_sum_alookup] \\
   drule_first \\ fs [get_array_slice_INR] \\ rveq \\ fs [same_value_def, rev_slice_def])
+
+ >- (* ArraySlice - InputVar *)
+ (last_x_assum kall_tac \\
+  fs [compile_exp_def, sum_bind_INR] \\ rveq \\
+  fs [netlist_ok_def, netlist_sorted_def, sum_foldM_def, cstate_progress_def, cstate_ok_def] \\
+  rpt conj_tac
+  >- simp [cell_input_lt_def]
+  >- simp [cell_input_covered_by_extenv_def] \\
+
+  fs [vertype_fext_n_def, sum_alookup_INR] \\ drule_first \\
+  drule_strip same_fext_n_ver_INR \\
+  gvs [vertype_v_cases, same_value_cases] \\
+  simp [cell_inp_run_def, sum_bind_def, cget_fext_var_def, sum_map_INR] \\
+  simp [rtltype_v_cases, same_type_cases] \\ rpt strip_tac' \\
+  gvs [erun_def, sum_bind_INR, erun_get_var_def, get_array_slice_INR] \\
+  simp [same_value_cases])
 
  >- (* BUOp *)
  (fs [compile_exp_def, sum_bind_INR, compile_new_name_def, no_array_read_dyn_exp_def] \\
@@ -2234,7 +2267,7 @@ Theorem compile_stmt_correct:
   vertype_stmt EEv Ev p /\
   vertype_fext_n EEv vfext /\
   no_array_write_dyn Ev p /\
-  no_array_read_dyn Ev p /\
+  no_array_read_dyn Ev EEv p /\
   no_Case p /\
 
   same_fext_n vfext rtlfext /\
@@ -2545,7 +2578,7 @@ Theorem compile_stmts_correct_cells_run:
 
  memsublist ps psall /\
  writes_ok psall /\
- EVERY (preprocessed Ev) ps /\
+ EVERY (preprocessed Ev EEv) ps /\
  EVERY (vertype_stmt EEv Ev) ps /\
 
  same_fext_n vfext rtlfext /\
@@ -2965,10 +2998,10 @@ Theorem compile_stmts_correct_step:
  same_fext_n vfext rtlfext /\
  vertype_fext_n EEv vfext /\
 
- EVERY (preprocessed (Ev_from_decls decls)) ffs ∧
+ EVERY (preprocessed (Ev_from_decls decls) EEv) ffs ∧
  EVERY (vertype_stmt EEv (Ev_from_decls decls)) ffs /\
 
- EVERY (preprocessed (Ev_from_decls decls)) combs ∧
+ EVERY (preprocessed (Ev_from_decls decls) EEv) combs ∧
  EVERY (vertype_stmt EEv (Ev_from_decls decls)) combs /\
  
  (!fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ∧
@@ -3108,10 +3141,10 @@ Theorem compile_stmts_correct_run:
 
  (!fext. si_complete fext (Ev_from_decls decls) cenv [empty]) ∧
 
- EVERY (preprocessed (Ev_from_decls decls)) ffs ∧
+ EVERY (preprocessed (Ev_from_decls decls) EEv) ffs ∧
  EVERY (vertype_stmt EEv (Ev_from_decls decls)) ffs /\
 
- EVERY (preprocessed (Ev_from_decls decls)) combs ∧
+ EVERY (preprocessed (Ev_from_decls decls) EEv) combs ∧
  EVERY (vertype_stmt EEv (Ev_from_decls decls)) combs ==>
  s_combs.tmpnum ≤ s.tmpnum ∧
  netlist_ok EEv 0 s_combs.tmpnum nl_combs ∧
@@ -3440,8 +3473,8 @@ Theorem rtl_compile_correct:
  (∀var. MEM var (FLAT (MAP vwrites m.combs)) ⇒ member string_cmp var pseudos) ∧
  writes_overlap_ok_pseudos pseudos m.ffs ∧
 
- EVERY (preprocessed (Ev_from_decls m.decls)) m.ffs ∧
- EVERY (preprocessed (Ev_from_decls m.decls)) m.combs ⇒
+ EVERY (preprocessed (Ev_from_decls m.decls) m.fextty) m.ffs ∧
+ EVERY (preprocessed (Ev_from_decls m.decls) m.fextty) m.combs ⇒
  (rtltype_extenv (circuit_extenv cir) rtlfext ⇔ vertype_fext m.fextty vfext) ∧
  (∀var rdata. member string_cmp var pseudos ∧ ALOOKUP (circuit_regs cir) (var, 0) = SOME rdata ⇒
               rdata.reg_type = PseudoReg) ∧

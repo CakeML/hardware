@@ -6,6 +6,8 @@ open verilogTheory verilogMetaTheory verilogTypeTheory sumExtraTheory;
 
 val _ = new_theory "verilogTypeChecker";
 
+infix THEN2;
+
 (** Type utils **)
 
 val assert_type_def = Define `
@@ -63,7 +65,13 @@ QED*)
 
 (** Expressions **)
 
-val infer_exp_def = Define `
+Definition infer_var_def:
+ (infer_var extenv env (Var var) = sum_alookup env var) ∧
+ (infer_var extenv env (InputVar var) = sum_alookup extenv var) ∧
+ (infer_var extenv env _ = INL $ TypeErrorMsg "infer_var: expected variable, found non-variable")
+End
+
+Definition infer_exp_def:
  (infer_exp extenv env (Const v) = do
   t <- infer_val v;
   return (Const v, t)
@@ -79,20 +87,20 @@ val infer_exp_def = Define `
   return (InputVar var, t)
  od) /\
 
- (infer_exp extenv env (ArrayIndex (Var var) _ i) = do
-  var_t <- sum_alookup env var;
+ (infer_exp extenv env (ArrayIndex var _ i) = do
+  var_t <- infer_var extenv env var;
   assert_array_type var_t;
   (i, i_t) <- infer_exp extenv env i;
   i_t_len <- array_type_length i_t;
-  return (ArrayIndex (Var var) i_t_len i, VBool_t)
+  return (ArrayIndex var i_t_len i, VBool_t)
  od) /\
 
- (infer_exp extenv env (ArraySlice (Var var) i1 i2) = do
-  var_t <- sum_alookup env var;
+ (infer_exp extenv env (ArraySlice var i1 i2) = do
+  var_t <- infer_var extenv env var;
   var_t_len <- array_type_length var_t;
   sum_check (i1 < var_t_len) TypeError;
   sum_check (i2 ≤ i1) TypeError;
-  return (ArraySlice (Var var) i1 i2, VArray_t (i1 - i2 + 1))
+  return (ArraySlice var i1 i2, VArray_t (i1 - i2 + 1))
  od) /\
 
  (infer_exp extenv env (BUOp Not e) = do
@@ -127,7 +135,8 @@ val infer_exp_def = Define `
   return (Cmp e1 ArrayEqual e2, VBool_t)
  od) /\
 
- (infer_exp extenv env _ = INL $ TypeErrorMsg "infer_exp: Non-supported operator")`;
+ (infer_exp extenv env _ = INL $ TypeErrorMsg "infer_exp: Non-supported operator")
+End
 
 Theorem infer_exp_sound:
  !extenv env e e' t.
@@ -140,9 +149,11 @@ Proof
  >- fs [Once vertype_exp_cases, infer_val_INR]
  >- fs [Once vertype_exp_cases, alist_to_map_alookup, sum_alookup_INR]
  >- fs [Once vertype_exp_cases, sum_alookup_INR]
- >- (pairarg_tac \\ fs [sum_bind_INR] \\ rveq \\ simp [Once vertype_exp_cases] \\
-    fs [assert_array_type_INR, array_type_length_INR, alist_to_map_alookup, sum_alookup_INR, erun_def])
- >- (fs [sum_alookup_INR, array_type_length_INR, sum_check_INR] \\
+ >- (Cases_on ‘var’ \\ fs [infer_var_def] \\
+     pairarg_tac \\ fs [sum_bind_INR] \\ rveq \\ simp [Once vertype_exp_cases] \\
+     fs [assert_array_type_INR, array_type_length_INR, alist_to_map_alookup, sum_alookup_INR, erun_def])
+ >- (Cases_on ‘var’ \\ fs [infer_var_def] \\
+     fs [sum_alookup_INR, array_type_length_INR, sum_check_INR] \\
      rw [Once vertype_exp_cases, alist_to_map_alookup])
  >- (rpt (pairarg_tac \\ fs [sum_bind_INR]) \\ rveq \\ simp [Once vertype_exp_cases] \\
      fs [assert_type_def, erun_def] \\ rpt asm_exists_tac)
@@ -162,12 +173,10 @@ Proof
  >- simp [infer_val_INR]
  >- fs [alist_to_map_alookup, sum_alookup_INR]
  >- fs [sum_alookup_INR]
- >- fs [alist_to_map_alookup, sum_alookup_INR, assert_array_type_def, array_type_length_def]
- >- fs [alist_to_map_alookup, sum_alookup_INR, array_type_length_def, sum_check_def]
- >- simp [assert_type_def]
- >- simp [assert_type_def]
- >- simp [array_type_length_def, sum_check_def]
- >- simp [array_type_length_def, sum_check_def]
+ THEN2 fs [alist_to_map_alookup, sum_alookup_INR, assert_array_type_def, array_type_length_def, infer_var_def]
+ THEN2 fs [alist_to_map_alookup, sum_alookup_INR, array_type_length_def, sum_check_def, infer_var_def]
+ THEN2 simp [assert_type_def]
+ THEN2 simp [array_type_length_def, sum_check_def]
 QED
 
 val check_exp_def = Define `

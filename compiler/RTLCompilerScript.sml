@@ -148,6 +148,9 @@ Definition compile_exp_def:
   inp <- cell_input_slice (cget_net s.bsi var) i1 i2;
   INR (s, [], inp)
  od) /\
+ (compile_exp s (ArraySlice (InputVar var) i1 i2) = do
+  INR (s, [], ExtInp var (SliceIndexing i1 i2))
+ od) /\
 
  (compile_exp s (BUOp Not e) = do
   (s, nl, inp) <- compile_exp s e;
