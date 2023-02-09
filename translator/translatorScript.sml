@@ -338,6 +338,28 @@ Proof
  fs [w2v_v2w, BOOL_def, sum_bind_def, sum_map_def, EL_MAP, bit_v2w, testbit, sum_EL_EL]
 QED
 
+Theorem Eval_word_extract_help:
+ ∀v h l. h >= l /\ h < LENGTH v ==> TAKE (h − l + 1) (DROP (LENGTH v − (h + 1)) v) = DROP (LENGTH v − SUC h) (TAKE (LENGTH v − l) v)
+Proof
+ Induct \\ rw [] \\ Cases_on `LENGTH v = h'` \\ fs [arithmeticTheory.ADD1, DROP_def, TAKE_def]
+QED
+
+Theorem Eval_exp_word_extract:
+ ∀fext_rel rel s s' h l (w:'a word) varexp.
+ Eval_exp fext_rel rel fext s s' env (WORD w) varexp ==>
+ is_vervar varexp /\ h >= l /\ h < dimindex (:'a) /\ h - l + 1 = dimindex (:'b) /\
+ dimindex (:'a) >= dimindex (:'b) ==>
+ Eval_exp fext_rel rel fext s s' env (WORD (((h >< l) w):'b word)) (ArraySlice varexp h l)
+Proof
+ Cases_on ‘varexp’ \\ rw [is_vervar_def, Eval_exp_def, erun_def, WORD_def, sum_bind_def] \\
+ ntac 2 (pop_assum kall_tac) (* <-- just cleanup *) \\
+
+ rw [w2ver_def, get_array_slice_def] \\ rewrite_tac [GSYM MAP_DROP, GSYM MAP_TAKE] \\
+ bitstringLib.Cases_on_v2w `w` \\
+ fs [word_extract_v2w, word_bits_v2w, w2v_v2w, w2w_v2w, field_def, shiftr_def] \\
+ fs [fixwidth_def, zero_extend_def, PAD_LEFT] \\ metis_tac [Eval_word_extract_help]
+QED
+
 (** Statements **)
 
 Definition Eval_def:

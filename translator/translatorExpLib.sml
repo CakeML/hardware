@@ -263,6 +263,17 @@ fun hol2hardware_exp (tstate:tstate) s s' tm =
   MATCH_MP Eval_exp_neg th
  end
 
+ else if is_word_extract tm then let
+  val (high, low, arg, size) = dest_word_extract tm
+  val precond = hol2hardware_exp tstate s s' arg
+  val ret = MATCH_MP Eval_exp_word_extract precond
+  val ret = ret |> ISPECL [high, low] |> INST_TYPE [ beta |-> size ]
+  val precond = ret |> concl |> dest_imp |> fst |> EVAL_PROVE
+  val ret = MP ret precond
+ in
+  ret
+ end
+
  (* Other compound expression, must be state projection *)
  else if is_comb tm then let
   val (f, arg) = dest_comb tm
