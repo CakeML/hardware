@@ -3254,7 +3254,7 @@ Definition same_state_outs_def:
  same_state_outs cenv cenv' ⇔ ∀var. sum_alookup cenv' var = sum_alookup cenv var
 End
 
-Theorem blast_out_correct:
+Theorem blast_out_correct_lemma:
  blast_out blast_s (var, out) = INR varout' ∧
  out_ok (var, out) ∧
  blast_reg_rel_fext fext blast_s.si s bs ∧
@@ -3287,7 +3287,7 @@ Theorem blast_out_correct:
 Proof
  Induct >- simp [blast_outs_def, sum_mapM_def, same_state_outs_def] \\
  PairCases \\ fs [blast_outs_def, sum_mapM_INR] \\ rpt strip_tac \\ rveq \\ simp [sum_mapM_INR] \\
- drule_strip blast_out_correct \\ drule_first \\ simp [same_state_outs_cons]
+ drule_strip blast_out_correct_lemma \\ drule_first \\ simp [same_state_outs_cons]
 QED
 
 (** Top level thm **)
