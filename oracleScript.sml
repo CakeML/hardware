@@ -92,7 +92,7 @@ Theorem oracle_bit_cong:
  init_seq_eq f g 1 /\ oracle_bit f = (b, f') /\ oracle_bit g = (b', g') ==>
  b' = b
 Proof
- rw [init_seq_eq_def, oracle_bit_def] \\ first_x_assum (qspec_then ‘0’ mp_tac) \\ simp []
+ rw [init_seq_eq_def, oracle_bit_def] \\ simp []
 QED
 
 Theorem oracle_bits_cong:

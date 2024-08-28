@@ -280,7 +280,7 @@ Proof
  simp [lookup_thm, member_thm, comparisonTheory.string_cmp_good, finite_mapTheory.FLOOKUP_DEF]
 QED
 
-Theorem sort_by_deps_correct:
+Theorem sort_by_deps_correct_lemma:
  ∀ps ps'.
  sort_by_deps ps = INR ps' ⇒
  PERM ps ps' ∧
@@ -333,7 +333,7 @@ Theorem sort_by_deps_module_ok:
  ∀m combs. sort_by_deps m.combs = INR combs ∧ module_ok m ⇒ module_ok (m with combs := combs)
 Proof
  rw [module_ok_def, writes_ok_def, writes_overlap_ok_def] \\
- metis_tac [sort_by_deps_correct, PERM_vwrites, PERM_vnwrites]
+ metis_tac [sort_by_deps_correct_lemma, PERM_vwrites, PERM_vnwrites]
 QED
 
 (** Verilog semantics that sorts by deps **)
@@ -351,7 +351,7 @@ Theorem sort_by_deps_correct:
  sort_run fext fbits m n = run fext fbits (m with combs := combs) n ∧
  ∀var. MEM var (FLAT (MAP vwrites combs)) ⇔ MEM var (FLAT (MAP vwrites m.combs))
 Proof
- rw [sort_run_def, sum_bind_def] \\ metis_tac [sort_by_deps_correct, PERM_vwrites]
+ rw [sort_run_def, sum_bind_def] \\ metis_tac [sort_by_deps_correct_lemma, PERM_vwrites]
 QED
 
 Theorem already_sorted_sort_run:
