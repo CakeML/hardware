@@ -57,7 +57,7 @@ fun compile module_def = let
  val _ = timer |> Timer.checkRealTimer |> Time.toString |> (fn time => print ("DONE (" ^ time ^ ")\n"));
 
  val tech_nl_def = new_circuit_definition "tech_nl" tech_nl
- val tech_circuit_def = new_circuit_definition "tech_circuit" circuit'
+ (*val tech_circuit_def = new_circuit_definition "tech_circuit" circuit'*)
 
  (** LEC **)
  val _ = print "LECing..."
