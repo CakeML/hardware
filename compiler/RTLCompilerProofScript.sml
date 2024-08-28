@@ -1055,17 +1055,6 @@ Theorem cell_input_idx_cell_input_covered_by_extenv:
  cell_input_idx inp idx = INR inp' /\ cell_input_covered_by_extenv EE inp ==>
  cell_input_covered_by_extenv EE inp'
 Proof
- Cases
- >- (Cases_on ‘v’ \\ fs [cell_input_idx_def, cell_input_covered_by_extenv_def])
- >- (rename1 ‘ExtInp _ idx’ \\ Cases_on ‘idx’ \\ fs [cell_input_idx_def, cell_input_covered_by_extenv_def])
- \\ rename1 ‘VarInp _ idx’ \\ Cases_on ‘idx’ \\ fs [cell_input_idx_def, cell_input_covered_by_extenv_def]
-QED
-
-Theorem cell_input_idx_cell_input_covered_by_extenv:
- !inp inp' idx EE.
- cell_input_idx inp idx = INR inp' /\ cell_input_covered_by_extenv EE inp ==>
- cell_input_covered_by_extenv EE inp'
-Proof
  rpt strip_tac \\ drule_strip cell_input_idx_INR \\ fs [cell_input_idx_def] \\ rveq \\
  fs [cell_input_covered_by_extenv_def]
 QED
