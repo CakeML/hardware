@@ -205,6 +205,13 @@ fun init_translator module_def abstract_fields comms = let
  |> inst [ alpha |-> ``:error`` ]
  |> (fn tm => Define `fextv_rel fextv fext = ^tm`);
 
+(*
+ val fext_rel = fextv_rel_def;
+ val rel = state_rel_def;
+ val is_rel_var = is_state_rel_var_def;
+ val module_rel = module_state_rel_def;
+*)
+ 
  val tstate = build_tstate fextv_rel_def state_rel_def is_state_rel_var_def module_state_rel_def abstract_fields comms fext_ty state_ty
 in
  tstate

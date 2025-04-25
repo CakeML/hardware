@@ -192,10 +192,11 @@ fun build_update_stmts_2d comms fext_rel_const rel_const field fupd facc ty = le
  val fieldHOL = fromMLstring field
  val state_ty = facc |> type_of |> dom_rng |> fst
  val pred = predicate_for_type ty
- val (prev_s, assn) = if mem field comms then
-                       (mk_var ("s", state_ty), NonBlockingAssign_tm)
-                      else
-                       (mk_var ("s'", state_ty), BlockingAssign_tm)
+ val prev_s = mk_var ("s'", state_ty)
+ val assn = if mem field comms then
+             NonBlockingAssign_tm
+            else
+             BlockingAssign_tm
 
  val el_size = facc |> type_of |> dom_rng |> snd |> dom_rng |> snd |> dest_word_type
 in
@@ -231,11 +232,12 @@ end;
 fun update_base_2d_tac rel field =
  rw [Eval_def, Eval_exp_def, prun_def] \\
  drule_first \\ drule_first \\ drule_strip (state_rel_field rel field) \\
- fs [state_rel_var_def, WORD_def, WORD_ARRAY_cases] \\ fs [sum_revEL_INR] \\
- simp [prun_assn_rhs_def, prun_bassn_def, assn_def, prun_set_var_index_ok_idx,
+ fs [state_rel_var_def, state_rel_cvar_def, WORD_def, WORD_ARRAY_cases] \\ fs [sum_revEL_INR] \\
+ simp [prun_assn_rhs_def, prun_bassn_def, prun_nbassn_def, assn_def, GSYM get_cvar_rel_get_use_nbq_var,
+       prun_set_var_index_ok_idx,
        ver2n_w2ver, get_use_nbq_var_def, get_VArray_data_def,
        sum_for_def, sum_map_def, sum_bind_def] \\
- fs [rel, state_rel_var_def, state_rel_cvar_def, get_cvar_rel_set_var_neq, get_var_cleanup] \\
+ fs [rel, state_rel_var_def, state_rel_cvar_def, get_cvar_rel_set_var_neq, get_var_cleanup, get_cvar_rel_set_nbq_var] \\
  fs [WORD_ARRAY_def, WORD_def, combinTheory.UPDATE_def] \\ gen_tac \\
  dep_rewrite.DEP_REWRITE_TAC [sum_revEL_revEL] \\
  dep_rewrite.DEP_REWRITE_TAC [revEL_revLUPDATE_valid_idxes] \\
@@ -245,9 +247,10 @@ fun update_base_2d_tac rel field =
 fun update_base_slice_2d_tac rel field =
  rw [Eval_def, Eval_exp_def, prun_def] \\
  drule_first \\ drule_first \\ drule_strip (state_rel_field rel field) \\
- fs [state_rel_var_def, WORD_def] \\
+ fs [state_rel_var_def, state_rel_cvar_def, WORD_def] \\
  fs [WORD_ARRAY_cases(*, sum_revEL_INR*)] \\ rveq \\
- simp [prun_assn_rhs_def, prun_bassn_def, assn_def, sum_revEL_revEL,
+ simp [prun_assn_rhs_def, prun_bassn_def, prun_nbassn_def, assn_def, GSYM get_cvar_rel_get_use_nbq_var,
+       sum_revEL_revEL,
        ver2n_w2ver, get_use_nbq_var_def, get_VArray_data_def,
        sum_for_def, sum_map_def, sum_bind_def] \\
  first_x_assum (qspec_then ‘i’ strip_assume_tac) \\
@@ -264,7 +267,7 @@ fun update_base_slice_2d_tac rel field =
  conj_tac >- (qspec_then ‘i’ mp_tac w2n_lt \\ simp []) \\
  simp [sum_map_def] \\
 
- fs [rel, state_rel_var_def, state_rel_cvar_def, get_cvar_rel_set_var_neq, get_var_cleanup] \\
+ fs [rel, state_rel_var_def, state_rel_cvar_def, get_cvar_rel_set_var_neq, get_cvar_rel_set_nbq_var, get_var_cleanup] \\
  fs [WORD_ARRAY_def, WORD_def, combinTheory.UPDATE_def] \\ gen_tac \\
  dep_rewrite.DEP_REWRITE_TAC [sum_revEL_revEL] \\
  dep_rewrite.DEP_REWRITE_TAC [revEL_revLUPDATE_valid_idxes] \\

@@ -361,10 +361,14 @@ and hol2hardware'_impl (tstate:tstate) s s' tm =
 (* Main entry-point *)
 
 (* Expected format: step_def fext s s' = ... *)
-fun step2hardware tstate step_def = let
+fun step2hardware tstate step_def = let 
  val (elhs, erhs) = step_def |> concl |> strip_forall |> snd |> dest_eq
  val (elhs, s') = dest_comb elhs
  val (elhs, s) = dest_comb elhs
+
+ (* simple sanity-checking of input types: *)
+ (*val () = if polymorphic (type_of s') failwith ("abort: ") else ()*)
+                           
  val th = hol2hardware tstate s s' erhs
  val th = PURE_REWRITE_RULE [GSYM step_def] th (* <-- overkill *)
  val th = th |> Q.GEN ‘env’ |> GENL [s, s']

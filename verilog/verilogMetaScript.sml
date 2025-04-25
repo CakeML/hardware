@@ -692,7 +692,7 @@ Proof
  rw [assn_def, sum_bind_INR]
  >- (drule_strip get_use_nbq_var_cong_INR \\ drule_strip erun_cong_INR \\ simp [])
  >- (drule_strip get_use_nbq_var_cong_INR \\ fs [sum_for_INR])
- >- (drule_strip erun_cong_INR \\ drule_first \\ simp [])
+ >- (drule_strip get_use_nbq_var_cong_INR \\ drule_strip erun_cong_INR \\ simp [])
 QED
 
 (*

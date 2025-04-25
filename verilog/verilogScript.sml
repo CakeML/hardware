@@ -798,7 +798,7 @@ val assn_def = Define ‘
  (assn fext s use_nbq (SliceIndexing vname [i] ih il) rhs =
   sum_bind (erun fext s i) (\i.
   sum_bind (ver2n i) (\i.
-  sum_bind (get_var s vname) (\v.
+  sum_bind (get_use_nbq_var s use_nbq vname) (\v.
   sum_bind (get_VArray_data v) (\olddata.
   sum_bind (sum_revEL i olddata) (\oldinner.
   sum_bind (get_VArray_data oldinner) (\olddatainner.
